@@ -8,7 +8,7 @@ size = comm.Get_size()
 rank = comm.Get_rank()
 
 if __name__ == '__main__':
-    PhysiCell_key, Mode, NumReplicates, Samples, Replicates = args_run_simulations(sys.argv[1:])
+    PhysiCell_Model, Samples, Replicates = args_run_simulations(sys.argv[1:])
     NumSimulations = len(Samples)
     NumSimulationsPerRank  = int(NumSimulations/size)
     mod = NumSimulations%size
@@ -28,4 +28,4 @@ if __name__ == '__main__':
         sampleID = Samples[int(ind_sim)]
         replicateID = Replicates[int(ind_sim)]
         print('Rank: ',rank, ', Simulation: ', ind_sim, ', Sample: ', sampleID,', Replicate: ', replicateID)
-        model(sampleID, replicateID, PhysiCell_key)
+        model(PhysiCell_Model.get_configFilePath(sampleID, replicateID), PhysiCell_Model.executable)
