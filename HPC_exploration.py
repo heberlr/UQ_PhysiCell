@@ -7,9 +7,10 @@ import configparser # read config *.ini file
 def model(ConfigFile, Executable):
     # Write input for simulation & execute
     callingModel = [Executable, ConfigFile]
-    cache = subprocess.run( callingModel,universal_newlines=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    cache = subprocess.run( callingModel,universal_newlines=True, capture_output=True) # stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if ( cache.returncode != 0):
         print(f"Error: model output error! Executable: {Executable} ConfigFile {ConfigFile}. returned: \n{str(cache.returncode)}")
+        print(cache.stdout[-200])
         os._exit(1)
 
 # Check if the arguments are compatible with PhysiCell simulations structure
