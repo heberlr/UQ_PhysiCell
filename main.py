@@ -14,7 +14,7 @@ if __name__ == '__main__':
     PhysiCellModel1.info()
     
     # Generate XML files
-    # PhysiCellModel1.createXMLs() # Generate XML files for each simulation
+    PhysiCellModel1.createXMLs() # Generate XML files for each simulation
     
     # Create bash script to run on cluster
     create_JOB(key_HPC_params, ID_Job = 0, args = [fileName,  key_model, "sequential", '0', '2'])

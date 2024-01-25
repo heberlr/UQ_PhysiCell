@@ -19,7 +19,7 @@
 	
 		<dt_diffusion units="min">0.01</dt_diffusion>
 		<dt_mechanics units="min">0.1</dt_mechanics>
-		<dt_phenotype units="min">1</dt_phenotype>	
+		<dt_phenotype units="min">6</dt_phenotype>	
 	</overall>
 	
 	<parallel>
@@ -336,7 +336,7 @@
 	</initial_conditions>	
 	
 	<user_parameters>
-		<random_seed type="int" units="dimensionless" hidden="true">3597029591</random_seed> 
+		<random_seed type="int" units="dimensionless" hidden="true">3205077544</random_seed> 
 		<number_of_infected_cells type="int" units="none" description="initial number of infected cells">10</number_of_infected_cells>
 		<number_of_uninfected_cells type="int" units="none" description="initial number of uninfected cells">1000</number_of_uninfected_cells>
 		<fraction_released_at_death type="double" units="dimensionless" description="fraction of virions released at cell lysis">1.0</fraction_released_at_death>
