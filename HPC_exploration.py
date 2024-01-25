@@ -9,7 +9,7 @@ def model(ConfigFile, Executable):
     callingModel = [Executable, ConfigFile]
     cache = subprocess.run( callingModel,universal_newlines=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if ( cache.returncode != 0):
-        print(f"Error: model output error! Sample: {Sample} Replicate {Replicate}. returned: \n{str(cache.returncode)}")
+        print(f"Error: model output error! Executable: {Executable} ConfigFile {ConfigFile}. returned: \n{str(cache.returncode)}")
         os._exit(1)
 
 # Check if the arguments are compatible with PhysiCell simulations structure
