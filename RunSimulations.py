@@ -12,10 +12,12 @@ if __name__ == '__main__':
     NumSimulations = len(Samples)
     NumSimulationsPerRank  = int(NumSimulations/size)
     mod = NumSimulations%size
+    
     if ( mod != 0): NumSimulationsPerRank = NumSimulationsPerRank + 1 # if there is no equal split on the nodes, add a ghost simulation
     data = None
 
     if rank == 0:
+        print(f"Total number of simulations: {NumSimulations} Simulations per rank: {NumSimulationsPerRank}")
         data = np.arange(NumSimulations) # [0,1,...,NumSimulations-1]
         if ( mod != 0):
           add = -1*np.ones((size-mod),dtype='d') # Add -1 in the ghost simulations
