@@ -30,4 +30,4 @@ if __name__ == '__main__':
         sampleID = Samples[int(ind_sim)]
         replicateID = Replicates[int(ind_sim)]
         print('Rank: ',rank, ', Simulation: ', ind_sim, ', Sample: ', sampleID,', Replicate: ', replicateID)
-        model(PhysiCell_Model.get_configFilePath(sampleID, replicateID), PhysiCell_Model.executable)
+        # model(PhysiCell_Model.get_configFilePath(sampleID, replicateID), PhysiCell_Model.executable)
