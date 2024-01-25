@@ -82,7 +82,7 @@ def create_JOB(key_params, ID_Job, args):
     configFile = configparser.ConfigParser()
     with open(configFile_name) as fd:
         configFile.read_file(fd)
-
+    path_run_script = configFile[key_params]['path_run_script'] # the path of RunSimulations script
     email = configFile[key_params].get("email", fallback=None) # receive email if the job fail
     slurm_account_name = configFile[key_params]["slurm_account_name"] # account name for cluster simulation
     numNodes = configFile[key_params]['numNodes'] # number of nodes
@@ -112,7 +112,7 @@ def create_JOB(key_params, ID_Job, args):
         print ("#SBATCH --mem="+memory)
     print ("\nmodule load python/3.9.8")
     print ("export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK\n")
-    run = 'python hpc/RunSimulations.py'
+    run = 'python '+ path_run_script +'/RunSimulations.py'
     for arg in args:
         run += ' '+arg
     print ("srun --cpu-bind=sockets "+run)
