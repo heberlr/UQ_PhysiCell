@@ -11,7 +11,7 @@ def model(ConfigFile, Executable):
     if ( cache.returncode != 0):
         print(f"Error: model output error! Executable: {Executable} ConfigFile {ConfigFile}. returned: \n{str(cache.returncode)}")
         print(cache.stdout[-200])
-        os._exit(1)
+        # os._exit(1)
 
 # Check if the arguments are compatible with PhysiCell simulations structure
 def args_run_simulations(args):
