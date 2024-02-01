@@ -27,7 +27,7 @@
 	</parallel> 
 	
 	<save>
-		<folder>output/output_000000_00/</folder>  
+		<folder>output/output_000000_01/</folder>  
 
 		<full_data>
 			<interval units="min">60</interval>
@@ -192,12 +192,12 @@
 				<molecular />
 			</phenotype>
 			<custom_data>
-				<viral_replication_rate units="viral particles/min">1</viral_replication_rate>  
+				<viral_replication_rate units="viral particles/min">3.4673050720593817</viral_replication_rate>  
 				
-				<min_virion_count units="none">2</min_virion_count>
-				<burst_virion_count units="none">3</burst_virion_count>
+				<min_virion_count units="none">3.3428403087877627</min_virion_count>
+				<burst_virion_count units="none">100</burst_virion_count>
 				
-				<virion_threshold_for_interferon units="virions">4</virion_threshold_for_interferon>
+				<virion_threshold_for_interferon units="virions">10</virion_threshold_for_interferon>
 				<max_interferon_secretion_rate units="1/min">1</max_interferon_secretion_rate>
 
 				<min_virion_detection_threshold units="none">1</min_virion_detection_threshold>
@@ -321,7 +321,7 @@
 				<virion_threshold_for_interferon units="virions">10</virion_threshold_for_interferon>
 				<max_interferon_secretion_rate units="1/min">1</max_interferon_secretion_rate>
 
-				<min_virion_detection_threshold units="none">5</min_virion_detection_threshold>
+				<min_virion_detection_threshold units="none">1</min_virion_detection_threshold>
 				<virus_digestion_rate units="1/min">0.01</virus_digestion_rate> 
 			</custom_data>
 		</cell_definition>
@@ -336,7 +336,7 @@
 	</initial_conditions>	
 	
 	<user_parameters>
-		<random_seed type="int" units="dimensionless" hidden="true">1325136030</random_seed> 
+		<random_seed type="int" units="dimensionless" hidden="true">2901719085</random_seed> 
 		<number_of_infected_cells type="int" units="none" description="initial number of infected cells">10</number_of_infected_cells>
 		<number_of_uninfected_cells type="int" units="none" description="initial number of uninfected cells">1000</number_of_uninfected_cells>
 		<fraction_released_at_death type="double" units="dimensionless" description="fraction of virions released at cell lysis">1.0</fraction_released_at_death>

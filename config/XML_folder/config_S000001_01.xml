@@ -27,7 +27,7 @@
 	</parallel> 
 	
 	<save>
-		<folder>output/output_000001_00/</folder>  
+		<folder>output/output_000001_01/</folder>  
 
 		<full_data>
 			<interval units="min">60</interval>
@@ -336,7 +336,7 @@
 	</initial_conditions>	
 	
 	<user_parameters>
-		<random_seed type="int" units="dimensionless" hidden="true">947712730</random_seed> 
+		<random_seed type="int" units="dimensionless" hidden="true">2020122384</random_seed> 
 		<number_of_infected_cells type="int" units="none" description="initial number of infected cells">10</number_of_infected_cells>
 		<number_of_uninfected_cells type="int" units="none" description="initial number of uninfected cells">1000</number_of_uninfected_cells>
 		<fraction_released_at_death type="double" units="dimensionless" description="fraction of virions released at cell lysis">1.0</fraction_released_at_death>

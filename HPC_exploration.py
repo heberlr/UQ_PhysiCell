@@ -27,7 +27,7 @@ def args_run_simulations(args):
             initial_sample = int(args[3])
             final_sample = int(args[4])
             num_samples = final_sample - initial_sample
-            if ( (initial_sample >= PhysiCellModel.parameterSamples.shape[0]) or (final_sample > PhysiCellModel.parameterSamples.shape[0]) or ( initial_sample >= final_sample) or  (initial_sample < 0) ):
+            if ( (initial_sample >= PhysiCellModel._parameterSamples_.shape[0]) or (final_sample > PhysiCellModel._parameterSamples_.shape[0]) or ( initial_sample >= final_sample) or  (initial_sample < 0) ):
                 print(f"Error: Sample range unexpected! Interval [{initial_sample} , {final_sample}) doesn't match with samples in [{pc_key}] from {configFile_name} .")
                 sys.exit(1)
             Samples = np.arange(initial_sample,final_sample)# initial_sample, initial_sample+1, ..., final_sample-1
@@ -40,8 +40,8 @@ def args_run_simulations(args):
             Replicates = np.arange(num_replicates) # 0,1,...,num_replicates-1
             for sample_index in range(len(Samples)):
                 sample_id = int(args[sample_index+3])
-                if ( (sample_id >= PhysiCellModel.parameterSamples.shape[0]) or  (sample_id < 0) ):
-                    print(f"Error: Sample {sample_id} unexpected! It doesn't match with samples size = {PhysiCellModel.parameterSamples.shape[0]} in [{pc_key}] from {configFile_name}.")
+                if ( (sample_id >= PhysiCellModel._parameterSamples_.shape[0]) or  (sample_id < 0) ):
+                    print(f"Error: Sample {sample_id} unexpected! It doesn't match with samples size = {PhysiCellModel._parameterSamples_.shape[0]} in [{pc_key}] from {configFile_name}.")
                     sys.exit(1)
                 Samples[sample_index] = sample_id # samples starts in args[3]
             Samples = np.repeat(Samples, num_replicates)
@@ -57,7 +57,7 @@ def args_run_simulations(args):
             for sample_index in range(len(Samples)):
                 sample_id = int(args[2*sample_index+3]) # args[3], args[5], args[7] ...
                 replicate_id = int(args[2*sample_index+4]) # args[4], args[6], args[8] ..
-                if ( (sample_id >= PhysiCellModel.parameterSamples.shape[0]) or (sample_id < 0) or (replicate_id < 0) or (replicate_id >= num_replicates) ):
+                if ( (sample_id >= PhysiCellModel._parameterSamples_.shape[0]) or (sample_id < 0) or (replicate_id < 0) or (replicate_id >= num_replicates) ):
                     print(f"Error: Sample: {sample_id} and replicate: {replicate_id} unexpected! It doesn't match with PhysiCell in [{pc_key}] from {configFile_name}].")
                     sys.exit(1)
                 Samples[sample_index] =  sample_id
