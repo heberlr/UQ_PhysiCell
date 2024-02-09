@@ -31,7 +31,7 @@ class PhysiCell_Model:
         parametersSamplesFile = configFile[keyModel].get("parametersSamplesFile", fallback=None)
         if (parametersSamplesFile): 
             parameters = np.load(configFile[keyModel]['parametersSamplesFile']) # parameters samples numpy array 2D [sample_idx, parameter_idx]
-            self.set_parameters(parameters, np.arange(parameters.shape[1]))
+            self.set_parameters(parameters, np.arange(parameters.shape[0]))
         else:
             self._parameterSamples_ = None
     
