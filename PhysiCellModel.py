@@ -31,15 +31,16 @@ class PhysiCell_Model:
         parametersSamplesFile = configFile[keyModel].get("parametersSamplesFile", fallback=None)
         if (parametersSamplesFile): 
             parameters = np.load(configFile[keyModel]['parametersSamplesFile']) # parameters samples numpy array 2D [sample_idx, parameter_idx]
-            self.set_parameters(parameters)
+            self.set_parameters(parameters, np.arange(parameters.shape[1]))
         else:
             self._parameterSamples_ = None
     
-    def set_parameters(self, parameters):
+    def set_parameters(self, parameters, samplesID):
         if( len(self.keys_variable_params) != parameters.shape[1]):
             sys.exit(f"Error: number of parameters defined 'None' in {self.ModelfileName} = {len(self.keys_variable_params)} is different of samples from parameters = {parameters.shape[1]}.")
         else:
             self._parameterSamples_ = parameters
+            self._samplesID = samplesID
     def get_configFilePath(self,sampleID, replicateID):
         if (self.configFile_folder): 
             os.makedirs(os.path.dirname(self.configFile_folder), exist_ok=True)
@@ -67,14 +68,14 @@ class PhysiCell_Model:
         Parameters: {self.keys_variable_params}
         """)
     def createXMLs(self): # Give a array with parameters samples generate the xml files for each simulation
-        for sampleID in range(self._parameterSamples_.shape[0]):
+        for sampleIndex, sampleID in enumerate(self._samplesID):
             for replicateID in range(self.numReplicates):
                 ConfigFile = self.get_configFilePath(sampleID,replicateID)
                 if (self.outputs_folder): self.parameters['.//save/folder'] = self.get_outputPath(sampleID, replicateID) # else save in folder of reference config file (util if there is a custom type of output)
                 self.parameters['.//omp_num_threads'] = self.omp_num_threads # number of threads omp for PhysiCell simulation
                 self.parameters['.//random_seed'] = random.randint(0,4294967295) # random seed for each simulation
                 # update the values of parameter from None to the sampled
-                for idx, param_key in enumerate(self.keys_variable_params): self.parameters[param_key] = self._parameterSamples_[sampleID, idx]
+                for idx, param_key in enumerate(self.keys_variable_params): self.parameters[param_key] = self._parameterSamples_[sampleIndex, idx]
                 generate_xml_file(pathlib.Path(self.configFile_ref), pathlib.Path(ConfigFile), self.parameters)
 
 # Give a xml input create xml file output with parameters changes (verify this function for multiple cell types)
