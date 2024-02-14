@@ -13,12 +13,12 @@ key_model = "physicell_model_2"
 key_HPC_params = "hpc_parameters"
 # Create the structure of model exploration
 PhysiCellModel1 = PhysiCell_Model(fileName, key_model)
-NumCoresPYMC = 2 # If NumCoresPYMC = 1 is serial, else in parallel
+NumCoresPYMC = 3 # If NumCoresPYMC = 1 is serial, else in parallel
 
 def sum_stat(output_folders):
     dic_output = {'liveCells': [], 'deadCells': []}
     for outputFolder in output_folders:
-        mcds = pcdl.TimeStep('output00000048.xml',outputFolder, microenv=False, graph=False, settingxml=None)
+        mcds = pcdl.TimeStep('output00000004.xml',outputFolder, microenv=False, graph=False, settingxml=None)
         df_cell = mcds.get_cell_df()
         dic_output['liveCells'].append(len(df_cell[ (df_cell['dead'] == False) ] ))
         dic_output['deadCells'].append(len(df_cell[ (df_cell['dead'] == True) ] ))
@@ -53,14 +53,14 @@ def Run_CalibrationSMC(observedData, FileNameInfData):
 
         sim = pm.Simulator("sim", PhysiCell_model, params=[par1, par2], epsilon=100, observed=observedData)
 
-        idata_lv = pm.sample_smc(draws=100, chains=10, cores=NumCoresPYMC, return_inferencedata = False, idata_kwargs={'log_likelihood':True} ) # return inference data (return_inferencedata=True is default pymc3 > 4.0)
+        idata_lv = pm.sample_smc(draws=10, chains=3, cores=NumCoresPYMC, idata_kwargs={'log_likelihood':True} ) # return inference data (return_inferencedata=True is default pymc3 > 4.0)
         idata_lv.to_netcdf(FileNameInfData) # save the inferencedata
 
 def Plot_Calibration(FileNameInfData):
     idata_lv = az.from_netcdf(FileNameInfData)
     # print(idata_lv['posterior'], idata_lv['sample_stats'], idata_lv['observed_data'])
-    print( f"""Chain: {idata_lv['sample_stats']['log_marginal_likelihood']['chain']})
-          Draw: {idata_lv['sample_stats']['log_marginal_likelihood']['draw']}""")
+    # print( f"""Chain: {idata_lv['sample_stats']['log_marginal_likelihood']['chain']})
+    #       Draw: {idata_lv['sample_stats']['log_marginal_likelihood']['draw']}""")
     # print( idata_lv['sample_stats']['beta'])
     # print( idata_lv['sample_stats']['accept_rate'])
     az.plot_trace(idata_lv, kind="rank_vlines")
