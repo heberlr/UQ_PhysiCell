@@ -74,10 +74,10 @@
 
 <PhysiCell_settings version="devel-version">
 	<domain>
-		<x_min>-500</x_min>
-		<x_max>500</x_max>
-		<y_min>-500</y_min>
-		<y_max>500</y_max>
+		<x_min>-200</x_min>
+		<x_max>200</x_max>
+		<y_min>-200</y_min>
+		<y_max>200</y_max>
 		<z_min>-10</z_min>
 		<z_max>10</z_max>
 		<dx>20</dx>
@@ -104,13 +104,13 @@
 		<folder>output</folder>  
 
 		<full_data>
-			<interval units="min">60</interval>
+			<interval units="min">720</interval>
 			<enable>true</enable>
 		</full_data>
 		
 		<SVG>
-			<interval units="min">10</interval>
-			<enable>true</enable>
+			<interval units="min">720</interval>
+			<enable>false</enable>
 		</SVG>
 		
 		<legacy_data>
