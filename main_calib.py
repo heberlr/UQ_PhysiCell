@@ -18,7 +18,7 @@ NumCoresPYMC = 3 # If NumCoresPYMC = 1 is serial, else in parallel
 def sum_stat(output_folders):
     dic_output = {'liveCells': [], 'deadCells': []}
     for outputFolder in output_folders:
-        mcds = pcdl.TimeStep('output00000004.xml',outputFolder, microenv=False, graph=False, settingxml=None)
+        mcds = pcdl.TimeStep('output00000004.xml',outputFolder, microenv=False, graph=False, settingxml=None, verbose=False)
         df_cell = mcds.get_cell_df()
         dic_output['liveCells'].append(len(df_cell[ (df_cell['dead'] == False) ] ))
         dic_output['deadCells'].append(len(df_cell[ (df_cell['dead'] == True) ] ))
