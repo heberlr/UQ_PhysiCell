@@ -16,11 +16,18 @@ key_model = "pancreatic_model"
 # key_HPC_params = "hpc_parameters"
 # Create the structure of model exploration
 PhysiCellModel1 = PhysiCell_Model(fileName, key_model)
+NumCoresPYMC = 3 # If NumCoresPYMC = 1 is serial, else in parallel
 
-def sum_stat(args):
-    fx =  args[0] + args[1]*2
-    # print(args[0], args[1], fx)
-    return fx
+def sum_stat(output_folders):
+    dic_output = {'liveCells': [], 'deadCells': []}
+    for outputFolder in output_folders:
+        mcds = pcdl.TimeStep('output00000004.xml',outputFolder, microenv=False, graph=False, settingxml=None)
+        df_cell = mcds.get_cell_df()
+        dic_output['liveCells'].append(len(df_cell[ (df_cell['dead'] == False) ] ))
+        dic_output['deadCells'].append(len(df_cell[ (df_cell['dead'] == True) ] ))
+        shutil.rmtree( outputFolder ) # remove output folder
+    # print(dic_output)
+    return np.array([ np.average(dic_output['liveCells']), np.average(dic_output['deadCells'])]) # average of replicates
 
 
 def PhysiCell_model(rng, *args, size=None):
