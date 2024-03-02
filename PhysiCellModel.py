@@ -67,13 +67,14 @@ class PhysiCell_Model:
         Number of replicates for each parameter set: {self.numReplicates} 
         Parameters: {self.keys_variable_params}
         """)
-    def createXMLs(self, parameters=None, SampleID=None): # Give a array with parameters samples generate the xml files for each simulation
+    def createXMLs(self, parameters=None, SampleID=None, ReplicateID=None): # Give a array with parameters samples generate the xml files for each simulation
         if (self._parameterSamples_): # If the parameters is defined use the parameters from class, else use the argument values
             parameters = self._parameterSamples_ # parameter defined in the class
             SampleID = self._samplesID # list of samples ID
+            ReplicateID = range(self.numReplicates) # list of 0 to NumReplicates-1
         dic_parameters = self.parameters.copy() # copy of dictionary of parameters
         for sampleIndex, sampleID in enumerate(SampleID):
-            for replicateID in range(self.numReplicates):
+            for replicateID in ReplicateID:
                 ConfigFile = self.get_configFilePath(sampleID,replicateID)
                 if (self.outputs_folder): dic_parameters['.//save/folder'] = self.get_outputPath(sampleID, replicateID) # else save in folder of reference config file (util if there is a custom type of output)
                 dic_parameters['.//omp_num_threads'] = self.omp_num_threads # number of threads omp for PhysiCell simulation
