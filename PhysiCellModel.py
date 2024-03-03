@@ -36,7 +36,7 @@ class PhysiCell_Model:
             self._parameterSamples_ = None
     
     def set_parameters(self, parameters, samplesID):
-        if( len(self.keys_variable_params) != parameters.shape[1]):
+        if( len(self.keys_variable_params) != parameters.shape[1]):  # Check if parameter matrix numpy array 2D [sample_idx, parameter_idx] is compatible with .ini file
             sys.exit(f"Error: number of parameters defined 'None' in {self.ModelfileName} = {len(self.keys_variable_params)} is different of samples from parameters = {parameters.shape[1]}.")
         else:
             self._parameterSamples_ = parameters
@@ -62,16 +62,18 @@ class PhysiCell_Model:
         Folder to save output folders: {self.outputs_folder}
         Name of output folders: {self.outputs_folder_name}
         Number of omp threads for each simulation: {self.omp_num_threads}
-        Number of parameters for sampling: {self._parameterSamples_.shape[1]} 
-        Number of samples: {self._parameterSamples_.shape[0]} 
-        Number of replicates for each parameter set: {self.numReplicates} 
+        Number of parameters for sampling: {len(self.keys_variable_params)}
         Parameters: {self.keys_variable_params}
+        Number of replicates for each parameter set: {self.numReplicates} 
         """)
     def createXMLs(self, parameters=None, SampleID=None, ReplicateID=None): # Give a array with parameters samples generate the xml files for each simulation
         if (self._parameterSamples_): # If the parameters is defined use the parameters from class, else use the argument values
             parameters = self._parameterSamples_ # parameter defined in the class
             SampleID = self._samplesID # list of samples ID
             ReplicateID = range(self.numReplicates) # list of 0 to NumReplicates-1
+        else:
+            if( len(self.keys_variable_params) != parameters.shape[1]): # Check if parameter matrix numpy array 2D [sample_idx, parameter_idx] is compatible with .ini file
+                sys.exit(f"Error: number of parameters defined 'None' in {self.ModelfileName} = {len(self.keys_variable_params)} is different of samples from parameters = {parameters.shape[1]}.")
         dic_parameters = self.parameters.copy() # copy of dictionary of parameters
         for sampleIndex, sampleID in enumerate(SampleID):
             for replicateID in ReplicateID:
