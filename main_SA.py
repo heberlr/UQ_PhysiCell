@@ -1,6 +1,5 @@
 from PhysiCellModel import PhysiCell_Model
 from HPC_exploration import create_JOB
-import numpy as np
 
 if __name__ == '__main__':
     fileName = "SampleModel.ini"
