@@ -15,7 +15,9 @@ class PhysiCell_Model:
             configFile.read_file(fd)
         self.projName = configFile[keyModel]['projName']
         self.executable = configFile[keyModel]['executable']
-        
+        if (os.name == 'nt'): self.executable = self.executable.replace(os.altsep, os.sep)+'.exe' # change path according to windows
+
+
         self.configFile_ref = configFile[keyModel]['configFile_ref']
         self.configFile_name = configFile[keyModel]['configFile_name'] # config files structure
         self.configFile_folder = configFile[keyModel].get("configFile_folder", fallback=None) # folder to storage the config files (.xmls) - if it is none then uses outputs_folder
