@@ -56,9 +56,9 @@ class PhysiCell_Model:
         print(f"""
         Project name: {self.projName} 
         Executable: {self.executable}
-        Config. file of reference: {self.configFile_ref} 
+        Config. file of reference: {self.configFile_ref}
         Config. file names: {self.configFile_name}
-        Folder to save config. files: {self.configFile_ref} 
+        Folder to save config. files: {self.configFile_folder} 
         Folder to save output folders: {self.outputs_folder}
         Name of output folders: {self.outputs_folder_name}
         Number of omp threads for each simulation: {self.omp_num_threads}

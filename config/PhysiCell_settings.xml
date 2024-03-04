@@ -84,7 +84,7 @@
 		<dy>20</dy>
 		<dz>20</dz>
 		<use_2D>true</use_2D>
-	</domain>
+	</domain>=
 	
 	<overall>
 		<max_time units="min">2880</max_time> 
