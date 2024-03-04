@@ -1,23 +1,31 @@
 from mpi4py import MPI 
 import numpy as np
-import sys
-from HPC_exploration import model, args_run_simulations
+from uq_physicell.uq_physicell import PhysiCell_Model, summ_func
 
 comm = MPI.COMM_WORLD
 size = comm.Get_size()
 rank = comm.Get_rank()
 
 if __name__ == '__main__':
-    PhysiCell_Model, Samples, Replicates = args_run_simulations(sys.argv[1:])
-    NumSimulations = len(Samples)
+    PhysiCellModel = PhysiCell_Model("test/PhysiCell_Model.ini", 'physicell_model_2')
+    
+    # Sample parameters 
+    Parameters_dic = {1: np.array([0.75,0.5]), 2: np.array([0.80,0.55])}
+    NumSimulations = len(Parameters_dic)*PhysiCellModel.numReplicates
     NumSimulationsPerRank  = int(NumSimulations/size)
+    
+    # Generate a three list with size NumSimulations
+    Parameters = []; Samples = []; Replicates = []
+    for sampleID, par_value in Parameters.items():
+        for replicateID in np.arange(PhysiCellModel.numReplicates):
+            Parameters.append(par_value)
+            Samples.append(sampleID)
+            Replicates.append(replicateID)
+    
+    SplitIndexes = np.array_split(np.arange(NumSimulations),size, axis=0) # split [0,1,...,NumSimulations-1] in size arrays equally (or +1 in some ranks)
     
     print(f"Total number of simulations: {NumSimulations} Simulations per rank: {NumSimulationsPerRank}")
 
-    data = np.array_split(np.arange(NumSimulations),size, axis=0) # split [0,1,...,NumSimulations-1] in size arrays equally (or +1 in some ranks)
-
-    for ind_sim in data[rank]:
-        sampleID = Samples[ind_sim]
-        replicateID = Replicates[ind_sim]
-        print('Rank: ',rank, ', Simulation: ', ind_sim, ', Sample: ', sampleID,', Replicate: ', replicateID)
-        model(PhysiCell_Model.get_configFilePath(sampleID, replicateID), PhysiCell_Model.executable)
+    for ind_sim in SplitIndexes[rank]:
+        print('Rank: ',rank, ', Simulation: ', ind_sim, ', Sample: ', Samples[ind_sim],', Replicate: ', Replicates[ind_sim])
+        PhysiCellModel.RunModel(Samples[ind_sim], Replicates[ind_sim],Parameters[ind_sim],SummaryFunction=summ_func)
