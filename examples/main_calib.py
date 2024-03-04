@@ -1,19 +1,17 @@
-from PhysiCellModel import PhysiCell_Model
-from HPC_exploration import create_JOB
-from HPC_exploration import model
+from uq_physicell.uq_physicell import PhysiCell_Model
 import numpy as np
 import arviz as az
 import matplotlib.pyplot as plt
 import pymc as pm
-import pathlib, os, shutil
+import os, shutil
 import pcdl
 
 fileName = "SampleModel.ini"
 key_model = "physicell_model_2"
-key_HPC_params = "hpc_parameters"
+
 # Create the structure of model exploration
-PhysiCellModel1 = PhysiCell_Model(fileName, key_model)
-NumCoresPYMC = 3 # If NumCoresPYMC = 1 is serial, else in parallel
+PhysiCellModel = PhysiCell_Model(fileName, key_model)
+NumCoresPYMC = 4 # If NumCoresPYMC = 1 is serial, else in parallel
 
 def sum_stat(output_folders):
     dic_output = {'liveCells': [], 'deadCells': []}
@@ -27,21 +25,16 @@ def sum_stat(output_folders):
     return np.array([ np.average(dic_output['liveCells']), np.average(dic_output['deadCells'])]) # average of replicates
 
 
-def PhysiCell_model(rng, *args, size=None):
+def RunPhysiCellModel(rng, *args, size=None):
     # Set the parameters in PhysiCell class
     SampleID = os.getpid() # process number
-    # print(f" Parameters: {np.array([args[:-1]])}, Process ID: {SampleID}") 
-    PhysiCellModel1.set_parameters( np.array([args[:-1]]), [SampleID] ) # Exclude the last arg that is size - SampleID needs to be a list
-    # Generate XML files for this simulation (all replicates)
-    PhysiCellModel1.createXMLs()
-
+    Parameters =  [args[:-1]] # Exclude the last arg that is size
+    # print(f" Parameters: {Parameters}, Process ID: {SampleID}") 
     # Run the replicates
     output_folders = []
-    for replicateID in range(PhysiCellModel1.numReplicates):
-        model(PhysiCellModel1.get_configFilePath(SampleID, replicateID), PhysiCellModel1.executable)
-        os.remove( pathlib.Path(PhysiCellModel1.get_configFilePath(SampleID, replicateID)) ) # remove config file XML
-        output_folders.append(PhysiCellModel1.get_outputPath(SampleID, replicateID))
-
+    for replicateID in range(PhysiCellModel.numReplicates):
+        PhysiCellModel.RunModel(SampleID, replicateID, Parameters, RemoveConfigFile=True)
+        output_folders.append(PhysiCellModel.get_outputPath(SampleID, replicateID))
     # Return the sum stats of replicates
     # print(f"... running PhysiCell")
     return sum_stat(output_folders)
@@ -51,7 +44,7 @@ def Run_CalibrationSMC(observedData, FileNameInfData):
         par1 = pm.HalfNormal("viral_replication_rate", 0.15) # Positive values
         par2 = pm.Uniform("min_virion_count", lower = 0, upper = 100) # Positive values
 
-        sim = pm.Simulator("sim", PhysiCell_model, params=[par1, par2], epsilon=100, observed=observedData)
+        sim = pm.Simulator("sim", RunPhysiCellModel, params=[par1, par2], epsilon=100, observed=observedData)
 
         idata_lv = pm.sample_smc(draws=10, chains=3, cores=NumCoresPYMC, idata_kwargs={'log_likelihood':True} ) # return inference data (return_inferencedata=True is default pymc3 > 4.0)
         idata_lv.to_netcdf(FileNameInfData) # save the inferencedata
