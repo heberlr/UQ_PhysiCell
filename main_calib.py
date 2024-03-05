@@ -15,7 +15,7 @@ key_model = "pancreatic_drug_1_model"
 key_HPC_params = "hpc_parameters"
 # Create the structure of model exploration
 PhysiCellModel1 = PhysiCell_Model(fileName, key_model)
-NumCoresPYMC = 6 # If NumCoresPYMC = 1 is serial, else in parallel
+NumCoresPYMC = 4 # If NumCoresPYMC = 1 is serial, else in parallel
 
 def sum_stat(output_set):
     for output_config_pair in output_set:
@@ -24,10 +24,11 @@ def sum_stat(output_set):
     # print(np.average(dic_output['live_cells']))
     # print([np.average(dic_output['live_cells']) / np.std(dic_output['live_cells'])])
 
-    return [np.average(dic_output['population'])]
+    return [np.average(dic_output)]
 
 
 def PhysiCell_model(rng, *args, size=None):
+    return np.random.normal(290, 1, size = 1)
     # print('called PhysiCell model')
     # Set the parameters in PhysiCell class
     SampleID = os.getpid() # process number
@@ -58,16 +59,16 @@ if __name__ == '__main__':
     # # print( idata_lv['sample_stats']['beta'])
     # # print( idata_lv['sample_stats']['accept_rate'])
     # # exit(0)
-    obs = np.array([159.1]) # observational data
+    obs = np.array([290]) # observational data
     # # call the rng number + parameters
     # PhysiCell_model(0, 1.2, 0.0001, 1) # Test of function
     with pm.Model() as model_lv:
         factor_max_apoptosis_drug1 = pm.Uniform("factor_max_apoptosis_drug1", lower = 0, upper = 200) # Positive values
         dna_damage_apop_half_max = pm.Uniform("dna_damage_apop_half_max", lower = 0, upper = 10)
-        sim = pm.Simulator("sim", PhysiCell_model, params=[factor_max_apoptosis_drug1, dna_damage_apop_half_max], epsilon=1, observed=obs)
+        sim = pm.Simulator("sim", PhysiCell_model, params=[factor_max_apoptosis_drug1, dna_damage_apop_half_max], epsilon=100, observed=obs)
 
-        idata_lv = pm.sample_smc(draws=1000, chains=2, cores=NumCoresPYMC, idata_kwargs={'log_likelihood':True} ) # return inference data (return_inferencedata=True is default pymc3 > 4.0)
-        idata_lv.to_netcdf("InfData_.nc") # save the inferencedata
+        idata_lv = pm.sample_smc(draws=1000, chains=4, cores=NumCoresPYMC, idata_kwargs={'log_likelihood':True} ) # return inference data (return_inferencedata=True is default pymc3 > 4.0)
+        idata_lv.to_netcdf("InfData_Fig2_.nc") # save the inferencedata
 
         az.plot_trace(idata_lv, kind="rank_vlines")
         az.plot_posterior(idata_lv)
