@@ -15,4 +15,4 @@
 module load python/3.9.8
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
-srun --cpu-bind=sockets python ./RunSimulations.py SampleModel.ini physicell_model sequential 0 2
+srun --cpu-bind=sockets python ./RunSimulations.py
