@@ -104,12 +104,12 @@
 		<folder>output</folder>  
 
 		<full_data>
-			<interval units="min">720</interval>
+			<interval units="min">60</interval>
 			<enable>true</enable>
 		</full_data>
 		
 		<SVG>
-			<interval units="min">720</interval>
+			<interval units="min">60</interval>
 			<enable>false</enable>
 		</SVG>
 		

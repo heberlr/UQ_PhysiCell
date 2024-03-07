@@ -4,3 +4,4 @@ uq_physicell/__pycache__/*
 output/*
 *.log
 *.nc
+*.pyc
