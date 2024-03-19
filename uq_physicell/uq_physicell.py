@@ -84,7 +84,7 @@ class PhysiCell_Model:
         callingModel = [self.executable, ConfigFile]
         cache = subprocess.run( callingModel,universal_newlines=True, capture_output=True)
         if ( cache.returncode != 0):
-            print(f"Error: model output error! Executable: {PhysiCellModel.executable} ConfigFile {ConfigFile}. returned: \n{str(cache.returncode)}")
+            print(f"Error: model output error! Executable: {self.executable} ConfigFile {ConfigFile}. returned: \n{str(cache.returncode)}")
             print(cache.stdout[-200])
             # os._exit(1)
         else:
