@@ -93,7 +93,7 @@ class PhysiCell_Model:
             # write the stats in a file and remove the folder
             if (SummaryFunction):
                 OutputFolder = self.get_outputPath(SampleID, ReplicateID)
-                SummaryFile = self.outputs_folder+'SummaryFile_%06d_%02d.dat'%(SampleID,ReplicateID)
+                SummaryFile = self.outputs_folder+'SummaryFile_%06d_%02d.csv'%(SampleID,ReplicateID)
                 ParamNames = [self.parameters[param_key][1] for param_key in self.keys_variable_params]
                 dic_params = {ParamNames[i]: Parameters[i] for i in range(len(Parameters))}
                 SummaryFunction(OutputFolder,SummaryFile, dic_params,  SampleID, ReplicateID)
