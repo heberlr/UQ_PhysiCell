@@ -1,4 +1,4 @@
-Install the package with option to edit:
+Install the package with option to edit (from the root folder):
 ```
-pip install -e uq_physicell
+pip install -e .
 ```
