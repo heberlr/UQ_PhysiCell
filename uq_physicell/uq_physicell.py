@@ -86,7 +86,7 @@ class PhysiCell_Model:
         if ( cache.returncode != 0):
             print(f"Error: model output error! Executable: {self.executable} ConfigFile {ConfigFile}. returned: \n{str(cache.returncode)}")
             print(cache.stdout[-200])
-            # os._exit(1)
+            return -1
         else:
             # remove config file XML
             if (RemoveConfigFile): os.remove( pathlib.Path(ConfigFile) )
@@ -96,7 +96,11 @@ class PhysiCell_Model:
                 SummaryFile = self.outputs_folder+'SummaryFile_%06d_%02d.csv'%(SampleID,ReplicateID)
                 ParamNames = [self.parameters[param_key][1] for param_key in self.keys_variable_params]
                 dic_params = {ParamNames[i]: Parameters[i] for i in range(len(Parameters))}
-                SummaryFunction(OutputFolder,SummaryFile, dic_params,  SampleID, ReplicateID)
+                try: result_summary = SummaryFunction(OutputFolder,SummaryFile, dic_params,  SampleID, ReplicateID)
+                except: 
+                    print(f"\tError in SummaryFunction! (Sample: {SampleID} and Replicate: {ReplicateID}).")
+                    return -1
+            return 0
 
 # Give a xml input create xml file output with parameters changes (verify this function for multiple cell types)
 def generate_xml_file(xml_file_in, xml_file_out, parameters):
