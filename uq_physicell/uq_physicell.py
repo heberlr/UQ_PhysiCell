@@ -25,7 +25,7 @@ class PhysiCell_Model:
         # Parameters for XML files
         self.outputs_folder = configFile[keyModel]['outputs_folder'] # folder to storage the output folders
         self.outputs_folder_name = configFile[keyModel]['outputs_folder_name'] # prefix of output folders
-        self.omp_num_threads = configFile[keyModel]['omp_num_threads'] # number of threads omp for PhysiCell simulation
+        self.omp_num_threads = int(configFile[keyModel]['omp_num_threads']) # number of threads omp for PhysiCell simulation
         self.numReplicates = int(configFile[keyModel]['numReplicates']) # number of replicates for each simualtion
 
         # dictionary with parameters to change in the xml, parameters == None will be replace accordingly.
