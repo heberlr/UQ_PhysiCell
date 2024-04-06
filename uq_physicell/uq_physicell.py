@@ -97,9 +97,8 @@ class PhysiCell_Model:
                 ParamNames = [self.parameters[param_key][1] for param_key in self.keys_variable_params]
                 dic_params = {ParamNames[i]: Parameters[i] for i in range(len(Parameters))}
                 try: result_summary = SummaryFunction(OutputFolder,SummaryFile, dic_params,  SampleID, ReplicateID)
-                except: 
-                    print(f"\tError in SummaryFunction! (Sample: {SampleID} and Replicate: {ReplicateID}).")
-                    return -1
+                except OSError as error: print(f"\t{error}\n\tError in SummaryFunction! (Sample: {SampleID} and Replicate: {ReplicateID}).")
+                except SystemError as error: print(f"\t{error}\n\tError in SummaryFunction! (Sample: {SampleID} and Replicate: {ReplicateID}).")
             return 0
 
 # Give a xml input create xml file output with parameters changes (verify this function for multiple cell types)
