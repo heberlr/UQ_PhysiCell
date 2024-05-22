@@ -29,3 +29,5 @@ if __name__ == '__main__':
     for ind_sim in SplitIndexes[rank]:
         print('Rank: ',rank, ', Simulation: ', ind_sim, ', Sample: ', Samples[ind_sim],', Replicate: ', Replicates[ind_sim])
         PhysiCellModel.RunModel(Samples[ind_sim], Replicates[ind_sim],Parameters[ind_sim],SummaryFunction=summ_func)
+
+    MPI.Finalize()
