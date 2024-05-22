@@ -98,7 +98,9 @@ class PhysiCell_Model:
             if( len(self.keys_variable_params_rules) != parameters_rules_input.shape[0]): # Check if parameter rule matrix numpy array 1D is compatible with .ini file
                 sys.exit(f"Error: number of parameters rules defined 'None' in {self.ModelfileName} = {len(self.keys_variable_params_rules)} is different of samples from parameters_rules = {parameters_rules_input.shape[0]}.")
             dic_parameters_rules = {}
-            for idx, param_key in enumerate(self.keys_variable_params_rules): dic_parameters_rules[idx] = [ parameters_rules_input[idx], param_key, self.parameters_rules[param_key][1] ] # preserve the order id_rule:[value, rule key, parameter key]                                
+            for idx, param_key in enumerate(self.keys_variable_params_rules): 
+                single_param_rule = param_key.split(",")[-1] # last item is the parameter of rule
+                dic_parameters_rules[idx] = [ parameters_rules_input[idx], param_key, single_param_rule ] # preserve the order id_rule:[value, rule key, parameter key]                                
             csvFile_out = dic_parameters['.//cell_rules/rulesets/ruleset/folder']+dic_parameters['.//cell_rules/rulesets/ruleset/filename']           
             generate_csv_file(self.rules, csvFile_out, dic_parameters_rules)
         # Output folder (.mat, .xml, .svg)
@@ -125,14 +127,18 @@ class PhysiCell_Model:
             # remove config file XML and rule file CSV
             if (RemoveConfigFile): 
                 os.remove( pathlib.Path(ConfigFile) )
-                folderRule, filenameRule = self.get_rulesFilePath(SampleID, ReplicateID)
-                if (ParametersRules): os.remove( pathlib.Path(folderRule+filenameRule) )
+                if (self.parameters_rules):
+                    folderRule, filenameRule = self.get_rulesFilePath(SampleID, ReplicateID)
+                    os.remove( pathlib.Path(folderRule+filenameRule) )
             # write the stats in a file and remove the folder
             if (SummaryFunction):
                 OutputFolder = self.get_outputPath(SampleID, ReplicateID)
                 SummaryFile = self.outputs_folder+'SummaryFile_%06d_%02d.csv'%(SampleID,ReplicateID)
                 ParamNames = [self.parameters[param_key][1] for param_key in self.keys_variable_params]
-                dic_params = {ParamNames[i]: Parameters[i] for i in range(len(Parameters))}
+                if (self.parameters_rules):
+                    ParamNamesRules = [self.parameters_rules[param_key][1] for param_key in self.keys_variable_params_rules]
+                    dic_params = {ParamNames[i]: Parameters[i] for i in range(len(Parameters))}
+                for i in range(len(ParametersRules)): dic_params[ParamNamesRules[i]] = ParametersRules[i]
                 try: result_summary = SummaryFunction(OutputFolder,SummaryFile, dic_params,  SampleID, ReplicateID)
                 except OSError as error: print(f"\t{error}\n\tError in SummaryFunction! (Sample: {SampleID} and Replicate: {ReplicateID}).")
                 except SystemError as error: print(f"\t{error}\n\tError in SummaryFunction! (Sample: {SampleID} and Replicate: {ReplicateID}).")
