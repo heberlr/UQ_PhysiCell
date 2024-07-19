@@ -1,4 +1,5 @@
-from uq_physicell.uq_physicell import PhysiCell_Model, summ_func
+from uq_physicell.uq_physicell import PhysiCell_Model
+from uq_physicell.sumstats import summ_func
 import numpy as np
 
 if __name__ == '__main__':

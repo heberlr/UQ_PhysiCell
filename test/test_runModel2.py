@@ -1,4 +1,4 @@
-from uq_physicell.uq_physicell import PhysiCell_Model, summ_func
+from uq_physicell.uq_physicell import PhysiCell_Model
 import numpy as np
 import pandas as pd
 from shutil import rmtree
