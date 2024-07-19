@@ -1,4 +1,3 @@
-from uq_physicell.uq_physicell import PhysiCell_Model
 import configparser # read config *.ini file
 import sys
 

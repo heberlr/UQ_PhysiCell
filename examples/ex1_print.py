@@ -1,7 +1,7 @@
 from uq_physicell.uq_physicell import PhysiCell_Model
 
 if __name__ == '__main__':
-    fileName = "test/SampleModel.ini"
+    fileName = "examples/SampleModel.ini"
     key_model = "physicell_model"
     key_model2 = "physicell_model_2"
     

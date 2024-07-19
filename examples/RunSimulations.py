@@ -1,13 +1,14 @@
 from mpi4py import MPI 
 import numpy as np
-from uq_physicell.uq_physicell import PhysiCell_Model, summ_func
+from uq_physicell.uq_physicell import PhysiCell_Model
+from uq_physicell.sumstats import summ_func
 
 comm = MPI.COMM_WORLD
 size = comm.Get_size()
 rank = comm.Get_rank()
 
 if __name__ == '__main__':
-    PhysiCellModel = PhysiCell_Model("test/PhysiCell_Model.ini", 'physicell_model_2')
+    PhysiCellModel = PhysiCell_Model("SampleModel.ini", 'physicell_model_2')
     
     # Sample parameters 
     Parameters_dic = {1: np.array([0.75,0.5]), 2: np.array([0.80,0.55])}
