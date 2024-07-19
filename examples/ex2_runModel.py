@@ -3,7 +3,7 @@ from uq_physicell.sumstats import summ_func
 import numpy as np
 
 if __name__ == '__main__':
-    fileName = "SampleModel.ini"
+    fileName = "examples/SampleModel.ini"
     key_model = "physicell_model_2"
     
     # Create the structure of model exploration

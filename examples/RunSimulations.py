@@ -8,7 +8,7 @@ size = comm.Get_size()
 rank = comm.Get_rank()
 
 if __name__ == '__main__':
-    PhysiCellModel = PhysiCell_Model("SampleModel.ini", 'physicell_model_2')
+    PhysiCellModel = PhysiCell_Model("examples/SampleModel.ini", 'physicell_model_2')
     
     # Sample parameters 
     Parameters_dic = {1: np.array([0.75,0.5]), 2: np.array([0.80,0.55])}

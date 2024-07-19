@@ -19,7 +19,7 @@ def summary_func(OutputFolder,SummaryFile, dic_params, SampleID, ReplicateID):
     df.to_csv(SummaryFile, sep='\t', encoding='utf-8')
     
 if __name__ == '__main__':
-    fileName = "SampleModel.ini"
+    fileName = "examples/SampleModel.ini"
     key_model = "physicell_model_2"
     
     # Create the structure of model exploration
