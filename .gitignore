@@ -1,8 +1,5 @@
 
 __pycache__/*
-uq_physicell/__pycache__/*
-output/*
-*.log
-*.nc
-*.pyc
 .DS_Store
+/uq_physicell.egg-info
+/uq_physicell/__pycache__

@@ -61,11 +61,17 @@ def Plot_Calibration(FileNameInfData):
     plt.show()
 
 if __name__ == '__main__':
-    # print(f"Running on PyMC v{pm.__version__}")
-    FileNameInfData = "InfData_.nc"
-    data_avg_live_dead = np.array([50, 0]) # observational data
-    Run_CalibrationSMC(data_avg_live_dead, FileNameInfData)
-    # Plot_Calibration(FileNameInfData)
+    print(f"Running on PyMC v{pm.__version__}")
+    # call the rng number + parameters
+    # PhysiCell_model(0, 10, 100 ) # Test of function
 
+    with pm.Model() as model_lv:
+        par1 = pm.HalfNormal("par1", 1.0)
 
+        sim = pm.Simulator("sim", PhysiCell_model, params=[par1], epsilon=0.1, observed=10)
+
+        idata_lv = pm.sample_smc(draws=1000, chains=4, cores=4)
         
+        az.plot_trace(idata_lv, kind="rank_vlines")
+        az.plot_posterior(idata_lv)
+        plt.show()
