@@ -5,8 +5,7 @@ import csv
 import random
 import configparser # read config *.ini file
 import ast # string to literal
-from shutil import copyfile, rmtree
-import pcdl
+from shutil import copyfile
     
 class PhysiCell_Model:
     def __init__(self, fileName, keyModel):
@@ -72,6 +71,8 @@ class PhysiCell_Model:
             return folder, self.rulesFile_name%(sampleID,replicateID)
     
     def info(self):
+        if (self.parameters_rules): ParRules = True
+        else: ParRules = False
         print(f"""
         Project name: {self.projName} 
         Executable: {self.executable}
@@ -81,8 +82,9 @@ class PhysiCell_Model:
         Folder to save output folders: {self.outputs_folder}
         Name of output folders: {self.outputs_folder_name}
         Number of omp threads for each simulation: {self.omp_num_threads}
-        Number of parameters for sampling: {len(self.keys_variable_params)}
-        Parameters: { [self.parameters[param_key][1] for param_key in self.keys_variable_params] }
+        Number of parameters for sampling in XML: {len(self.keys_variable_params)}
+        Parameters in XML: { [self.parameters[param_key][1] for param_key in self.keys_variable_params] }
+        Change Parameter in rules file: {ParRules}
         Number of replicates for each parameter set: {self.numReplicates} 
         """)
 
@@ -135,15 +137,14 @@ class PhysiCell_Model:
                 OutputFolder = self.get_outputPath(SampleID, ReplicateID)
                 SummaryFile = self.outputs_folder+'SummaryFile_%06d_%02d.csv'%(SampleID,ReplicateID)
                 ParamNames = [self.parameters[param_key][1] for param_key in self.keys_variable_params]
+                dic_params = {ParamNames[i]: Parameters[i] for i in range(len(Parameters))}
                 if (self.parameters_rules):
                     ParamNamesRules = [self.parameters_rules[param_key][1] for param_key in self.keys_variable_params_rules]
-                    dic_params = {ParamNames[i]: Parameters[i] for i in range(len(Parameters))}
-                for i in range(len(ParametersRules)): dic_params[ParamNamesRules[i]] = ParametersRules[i]
+                    for i in range(len(ParametersRules)): dic_params[ParamNamesRules[i]] = ParametersRules[i]
                 try: result_summary = SummaryFunction(OutputFolder,SummaryFile, dic_params,  SampleID, ReplicateID)
                 except OSError as error: print(f"\t{error}\n\tError in SummaryFunction! (Sample: {SampleID} and Replicate: {ReplicateID}).")
                 except SystemError as error: print(f"\t{error}\n\tError in SummaryFunction! (Sample: {SampleID} and Replicate: {ReplicateID}).")
             return 0
-
 def get_xml_element_value(xml_root, key):
     elem = xml_root.findall(key)
     if (len(elem) != 1):
@@ -233,15 +234,3 @@ def generate_csv_file(rules, csv_file_out, dic_parameters_rules):
     except:
         print(f"Error generating csv file.")
         sys.exit(1)
-
-def summ_func(OutputFolder,SummaryFile, dic_params, SampleID, ReplicateID):
-    mcds = pcdl.TimeStep('final.xml',OutputFolder, microenv=False, graph=False, settingxml=None, verbose=False)
-    df_cell = mcds.get_cell_df() 
-    live_cells = len(df_cell[ (df_cell['dead'] == False) ] )
-    dead_cells = len(df_cell[ (df_cell['dead'] == True) ] )
-    data = {'time': mcds.get_time(), 'sampleID': SampleID, 'replicateID': ReplicateID, 'live_cells': live_cells, 'dead_cells': dead_cells, 'run_time_sec': mcds.get_runtime()}
-    data_conc = {**data,**dic_params} # concatenate output data and parameters
-    df = pd.DataFrame([data_conc])
-    # remove replicate output folder
-    rmtree( OutputFolder )
-    df.to_csv(SummaryFile, sep='\t', encoding='utf-8')
