@@ -1,4 +1,5 @@
-from uq_physicell.uq_physicell import PhysiCell_Model, summ_func
+from uq_physicell.uq_physicell import PhysiCell_Model
+from uq_physicell.sumstats import summ_func_FinalPopLiveDead
 import numpy as np
 
 if __name__ == '__main__':
@@ -15,4 +16,4 @@ if __name__ == '__main__':
     for sampleID, par_value in Parameters_dic.items():
         for replicateID in np.arange(PhysiCellModel.numReplicates):
             print(', Sample: ', sampleID,', Replicate: ', replicateID)
-            PhysiCellModel.RunModel(SampleID=sampleID, ReplicateID=replicateID,Parameters=par_value,SummaryFunction=summ_func)
+            PhysiCellModel.RunModel(SampleID=sampleID, ReplicateID=replicateID,Parameters=par_value,SummaryFunction=summ_func_FinalPopLiveDead)
