@@ -17,7 +17,7 @@
 # 8. twine upload dist/* --verbose # publising python package
 # 9. git push origin
 # 10. git push --tag
-#####
+##### do not use conda env #######
 
 [build-system]
 requires = ["hatchling"]
