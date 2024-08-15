@@ -45,6 +45,8 @@ keywords = [
 
 urls = { "Homepage" = "https://github.com/heberlr/UQ_PhysiCell" }
 
+[tool.hatch.version]
+path = "uq_physicell/VERSION.py"
 
 [tool.setuptools.packages.find]
 where = ["uq_physicell"]
