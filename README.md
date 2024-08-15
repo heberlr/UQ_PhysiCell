@@ -1,10 +1,8 @@
 # Installation
 Install the package from the root folder:
 ```
-pip install .
+pip install uq_physicell
 ```
-with option to edit: ```pip install -e .```
-
 
 # Examples
 Here are some examples to help you get started with using the package:
