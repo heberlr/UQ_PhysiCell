@@ -54,3 +54,8 @@ include = [
     "/uq_physicell",
     "/examples",
 ]
+
+[tool.hatch.build.targets.wheel]
+include = [
+    "/uq_physicell",
+]
