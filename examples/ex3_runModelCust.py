@@ -4,7 +4,7 @@ import pandas as pd
 from shutil import rmtree
 import pcdl
 
-def summary_func(OutputFolder,SummaryFile, dic_params, SampleID, ReplicateID):
+def custom_summary_func(OutputFolder,SummaryFile, dic_params, SampleID, ReplicateID):
     mcds_ts = pcdl.TimeSeries(OutputFolder, microenv=False, graph=False, settingxml=None, verbose=False)
     for mcds in mcds_ts.get_mcds_list():
         df_cell = mcds.get_cell_df() 
@@ -25,6 +25,6 @@ if __name__ == '__main__':
     # Create the structure of model exploration
     PhysiCellModel = PhysiCell_Model(fileName, key_model)
     # Print information of exploration
-    PhysiCellModel.RunModel(SampleID=0, ReplicateID=0,Parameters=np.array([0.75,0.5]), SummaryFunction=summary_func)
-    PhysiCellModel.RunModel(SampleID=1, ReplicateID=0,Parameters=np.array([0.80,0.55]), SummaryFunction=summary_func)
+    PhysiCellModel.RunModel(SampleID=0, ReplicateID=0,Parameters=np.array([0.75,0.5]), SummaryFunction=custom_summary_func)
+    PhysiCellModel.RunModel(SampleID=1, ReplicateID=0,Parameters=np.array([0.80,0.55]), SummaryFunction=custom_summary_func)
 

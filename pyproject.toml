@@ -1,0 +1,61 @@
+# A hatchling based setup module.
+#
+# See:
+# https://packaging.python.org/en/latest/
+# https://packaging.python.org/en/latest/tutorials/packaging-projects/
+# https://hatch.pypa.io/latest/
+#
+# releasing a next version on pypi:
+# 0. change uq_physicell/VERSION.py  # increase version number in file
+# 1. git add uq_physicell/VERSION.py
+# 2. git status
+# 3. git commit -m'@ uq_physicell : next release.'
+# 4. git tag -a v0.0.0 -m'version 0.0.0'
+# 5. rm -r dist # clean previous distribution
+# 6. python -m build --sdist  # make source distribution
+# 7. python -m build --wheel  # make binary distribution python wheel
+# 8. twine upload dist/* --verbose # publising python package
+# 9. git push origin
+# 10. git push --tag
+##### do not use conda env #######
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "uq_physicell"
+dynamic = ["version"]
+
+description = "Project to perform uncertainty quantification of PhysiCell models"
+readme = "README.md"
+
+requires-python = ">=3.8"
+
+license = {text = "MIT"}
+
+authors = [
+    {name = "Heber L. Rocha", email = "heberonly@gmail.com"}
+]
+
+keywords = [
+    "uncertainty quantification", 
+    "PhysiCell",
+]
+
+urls = { "Homepage" = "https://github.com/heberlr/UQ_PhysiCell" }
+
+[tool.hatch.version]
+path = "uq_physicell/VERSION.py"
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/man",
+    "/uq_physicell",
+    "/examples",
+]
+
+[tool.hatch.build.targets.wheel]
+include = [
+    "/uq_physicell",
+]
