@@ -2,6 +2,6 @@
 __pycache__/*
 .DS_Store
 /uq_physicell/__pycache__
-uq_physicell/uq_physicell.egg-info/*
+/uq_physicell.egg-info
 uq_physicell/uq_physicell.egg-*
 /dist
