@@ -1,7 +1,7 @@
 from mpi4py import MPI 
 import numpy as np
 from uq_physicell.uq_physicell import PhysiCell_Model
-from uq_physicell.sumstats import summ_func
+from uq_physicell.sumstats import summ_func_FinalPopLiveDead
 
 comm = MPI.COMM_WORLD
 size = comm.Get_size()
@@ -29,6 +29,6 @@ if __name__ == '__main__':
 
     for ind_sim in SplitIndexes[rank]:
         print('Rank: ',rank, ', Simulation: ', ind_sim, ', Sample: ', Samples[ind_sim],', Replicate: ', Replicates[ind_sim])
-        PhysiCellModel.RunModel(Samples[ind_sim], Replicates[ind_sim],Parameters[ind_sim],SummaryFunction=summ_func)
+        PhysiCellModel.RunModel(Samples[ind_sim], Replicates[ind_sim],Parameters[ind_sim],SummaryFunction=summ_func_FinalPopLiveDead)
 
     MPI.Finalize()
