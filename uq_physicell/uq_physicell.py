@@ -114,37 +114,52 @@ class PhysiCell_Model:
         generate_xml_file(pathlib.Path(self.configFile_ref), pathlib.Path(ConfigFile), dic_parameters)
 
     def RunModel(self, SampleID, ReplicateID, Parameters, ParametersRules = None, RemoveConfigFile = True, SummaryFunction=None):
-        # Generate XML file for this simulation
-        self.createXMLs(Parameters, SampleID, ReplicateID, parameters_rules_input=ParametersRules)
-        # XML path
-        ConfigFile = self.get_configFilePath(SampleID, ReplicateID)
-        # Write input for simulation & execute
-        callingModel = [self.executable, ConfigFile]
-        cache = subprocess.run( callingModel,universal_newlines=True, capture_output=True)
-        if ( cache.returncode != 0):
-            print(f"Error: model output error! Executable: {self.executable} ConfigFile {ConfigFile}. returned: \n{str(cache.returncode)}")
-            print(cache.stdout[-200])
-            return -1
-        else:
-            # remove config file XML and rule file CSV
-            if (RemoveConfigFile): 
-                os.remove( pathlib.Path(ConfigFile) )
-                if (self.parameters_rules):
-                    folderRule, filenameRule = self.get_rulesFilePath(SampleID, ReplicateID)
-                    os.remove( pathlib.Path(folderRule+filenameRule) )
-            # write the stats in a file and remove the folder
+        try:
+            # Generate XML file for this simulation
+            self.createXMLs(Parameters, SampleID, ReplicateID, parameters_rules_input=ParametersRules)
+            
+            # XML path
+            ConfigFile = self.get_configFilePath(SampleID, ReplicateID)
+            
+            # Write input for simulation & execute
+            callingModel = [self.executable, ConfigFile]
+            cache = subprocess.run( callingModel,universal_newlines=True, capture_output=True)
+            
+            if ( cache.returncode != 0):
+                print(f"Error: model output error! Executable: {self.executable} ConfigFile {ConfigFile}. returned: \n{str(cache.returncode)}")
+                print(cache.stdout[-200])
+                return -1
+           
+            # Remove config file XML and rule file CSV
+            if (RemoveConfigFile):
+                try:
+                    os.remove( pathlib.Path(ConfigFile) )
+                    if (self.parameters_rules):
+                        folderRule, filenameRule = self.get_rulesFilePath(SampleID, ReplicateID)
+                        os.remove( pathlib.Path(folderRule+filenameRule) )
+                except OSError as e:
+                    print(f"Error removing files: {e}")
+            
+            # Write the stats in a file and remove the folder
             if (SummaryFunction):
                 OutputFolder = self.get_outputPath(SampleID, ReplicateID)
                 SummaryFile = self.outputs_folder+'SummaryFile_%06d_%02d.csv'%(SampleID,ReplicateID)
                 ParamNames = [self.parameters[param_key][1] for param_key in self.keys_variable_params]
                 dic_params = {ParamNames[i]: Parameters[i] for i in range(len(Parameters))}
+                
                 if (self.parameters_rules):
                     ParamNamesRules = [self.parameters_rules[param_key][1] for param_key in self.keys_variable_params_rules]
                     for i in range(len(ParametersRules)): dic_params[ParamNamesRules[i]] = ParametersRules[i]
-                try: result_summary = SummaryFunction(OutputFolder,SummaryFile, dic_params,  SampleID, ReplicateID)
-                except OSError as error: print(f"\t{error}\n\tError in SummaryFunction! (Sample: {SampleID} and Replicate: {ReplicateID}).")
-                except SystemError as error: print(f"\t{error}\n\tError in SummaryFunction! (Sample: {SampleID} and Replicate: {ReplicateID}).")
+                try: 
+                    result_summary = SummaryFunction(OutputFolder,SummaryFile, dic_params,  SampleID, ReplicateID)
+                except (OSError, SystemError) as error: 
+                    print(f"\t{error}\n\tError in SummaryFunction! (Sample: {SampleID} and Replicate: {ReplicateID}).")
+               
             return 0
+        except Exception as e:
+            print(f"An unexpected error occurred: {e}")
+            return -1
+
 def get_xml_element_value(xml_root, key):
     elem = xml_root.findall(key)
     if (len(elem) != 1):
