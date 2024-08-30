@@ -108,7 +108,7 @@ class PhysiCell_Model:
         # Output folder (.mat, .xml, .svg)
         if (self.outputs_folder): dic_parameters['.//save/folder'] = self.get_outputPath(SampleID, ReplicateID) # else save in folder of reference config file (util if there is a custom type of output)
         dic_parameters['.//omp_num_threads'] = self.omp_num_threads # number of threads omp for PhysiCell simulation
-        dic_parameters['.//random_seed'] = random.randint(0,4294967295) # random seed for each simulation
+        dic_parameters['.//user_parameters/random_seed'] = random.randint(0,4294967295) # random seed for each simulation
         # update the values of parameter from None to the sampled
         for idx, param_key in enumerate(self.keys_variable_params): dic_parameters[param_key] = parameters_input[idx] # preserve the order
         generate_xml_file(pathlib.Path(self.configFile_ref), pathlib.Path(ConfigFile), dic_parameters)
