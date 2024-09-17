@@ -90,7 +90,11 @@ class PhysiCell_Model:
 
     def createXMLs(self, parameters_input, SampleID, ReplicateID, parameters_rules_input = None ): # Give a array with parameters samples generate the xml file associated
         if( len(self.keys_variable_params) != parameters_input.shape[0]): # Check if parameter matrix numpy array 1D is compatible with .ini file
-            sys.exit(f"Error: number of parameters defined 'None' in {self.ModelfileName} = {len(self.keys_variable_params)} is different of samples from parameters = {parameters_input.shape[0]}.")
+            if (self.parameters_rules):
+                if ((len(self.keys_variable_params_rules) + len(self.keys_variable_params)) != parameters_input.shape[0]):
+                    sys.exit(f"Error: number of parameters defined 'None' in {self.ModelfileName} = {len(self.keys_variable_params)+len(self.keys_variable_params_rules)} is different of samples from parameters = {parameters_input.shape[0]}.")
+            else:
+                sys.exit(f"Error: number of parameters defined 'None' in {self.ModelfileName} = {len(self.keys_variable_params)} is different of samples from parameters = {parameters_input.shape[0]}.")
         dic_parameters = self.parameters.copy() # copy of dictionary of parameters
         # Config file (.xml)
         ConfigFile = self.get_configFilePath(SampleID,ReplicateID)
