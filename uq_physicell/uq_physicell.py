@@ -90,10 +90,10 @@ class PhysiCell_Model:
 
     def createXMLs(self, parameters_input, SampleID, ReplicateID, parameters_rules_input = None ): # Give a array with parameters samples generate the xml file associated
         if( len(self.keys_variable_params) != parameters_input.shape[0]): # Check if parameter matrix numpy array 1D is compatible with .ini file
-            if (self.parameters_rules):
+            if (self.parameters_rules): # sum of parameters in rules and parameters in xml
                 if ((len(self.keys_variable_params_rules) + len(self.keys_variable_params)) != parameters_input.shape[0]):
-                    sys.exit(f"Error: number of parameters defined 'None' in {self.ModelfileName} = {len(self.keys_variable_params)+len(self.keys_variable_params_rules)} is different of samples from parameters = {parameters_input.shape[0]}.")
-            else:
+                    sys.exit(f"Error: number of parameters defined 'None' in {self.ModelfileName} = {len(self.keys_variable_params)} is different of samples from parameters = {parameters_input.shape[0]-len(self.keys_variable_params_rules)}.")
+            else: # only parameters in xml
                 sys.exit(f"Error: number of parameters defined 'None' in {self.ModelfileName} = {len(self.keys_variable_params)} is different of samples from parameters = {parameters_input.shape[0]}.")
         dic_parameters = self.parameters.copy() # copy of dictionary of parameters
         # Config file (.xml)
@@ -101,8 +101,8 @@ class PhysiCell_Model:
         # Rule file (.csv)
         if (self.parameters_rules): # If there is changes in parameter of rules
             dic_parameters['.//cell_rules/rulesets/ruleset/folder'], dic_parameters['.//cell_rules/rulesets/ruleset/filename'] = self.get_rulesFilePath(SampleID, ReplicateID)
-            if( len(self.keys_variable_params_rules) != parameters_rules_input.shape[0]): # Check if parameter rule matrix numpy array 1D is compatible with .ini file
-                sys.exit(f"Error: number of parameters rules defined 'None' in {self.ModelfileName} = {len(self.keys_variable_params_rules)} is different of samples from parameters_rules = {parameters_rules_input.shape[0]}.")
+            if( len(self.keys_variable_params_rules)-len(self.keys_variable_params) != parameters_rules_input.shape[0]): # Check if parameter rule matrix numpy array 1D is compatible with .ini file
+                sys.exit(f"Error: number of parameters rules defined 'None' in {self.ModelfileName} = {len(self.keys_variable_params_rules)} is different of samples from parameters_rules = {parameters_rules_input.shape[0]-len(self.keys_variable_params)}.")
             dic_parameters_rules = {}
             for idx, param_key in enumerate(self.keys_variable_params_rules): 
                 single_param_rule = param_key.split(",")[-1] # last item is the parameter of rule
