@@ -1,5 +1,5 @@
 # Installation
-Install the package from the root folder:
+Install the package using pip:
 ```
 pip install uq_physicell
 ```
@@ -38,5 +38,23 @@ Here are some examples to help you get started with using the package:
       ```
       python examples/ex3_runModelCust.py
       ```
+
+4. Example 4: Sensitivity Analysis as an unique task
+    - Requirements: install SALib 
+    - Description: Run simulations to perfom sensitivity analysis (Sobol method)  [physicell_model_2](examples/SampleModel.ini#l18)
+    - Code:
+      ```
+      python examples/ex4_runSA_singleTask.py
+      ```
+    - After simulate all samples you can perform the analysis: ``python example/SA_ex4_ex5.py``
+
+5. Example 5: Sensitivity Analysis as parallel tasks using MPI
+    - Requirements: install SALib and mpi4py
+    - Description: Run simulations to perfom sensitivity analysis (Sobol method) of [physicell_model_2](examples/SampleModel.ini#l18)
+    - Code:
+      ```
+      mpiexec -n 2 python -m mpi4py examples/ex5_runSA_MPI.py
+      ```
+    - After simulate all samples you can perform the analysis: ``python example/SA_ex4_ex5.py``
 
 Feel free to explore these examples to understand the capabilities of the package and how to use it effectively.
