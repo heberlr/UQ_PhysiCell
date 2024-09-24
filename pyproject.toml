@@ -14,7 +14,7 @@
 # 5. rm -r dist # clean previous distribution
 # 6. python -m build --sdist  # make source distribution
 # 7. python -m build --wheel  # make binary distribution python wheel
-# 8. twine upload dist/* --verbose # publising python package
+# 8. python -m twine upload dist/* --verbose # publising python package
 # 9. git push origin
 # 10. git push --tag
 ##### do not use conda env #######
