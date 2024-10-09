@@ -16,7 +16,7 @@
 # 7. python -m build --wheel  # make binary distribution python wheel
 # 8. python -m twine upload dist/* --verbose # publising python package
 # 9. git push origin
-# 10. git push --tag
+# 10. Pull request from dev to main
 ##### do not use conda env #######
 
 [build-system]
