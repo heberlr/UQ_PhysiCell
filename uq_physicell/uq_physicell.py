@@ -133,8 +133,8 @@ class PhysiCell_Model:
             cache = subprocess.run( callingModel,universal_newlines=True, capture_output=True)
             
             if ( cache.returncode != 0):
-                print(f"Error: model output error! Executable: {self.executable} ConfigFile {ConfigFile}. returned: \n{str(cache.returncode)}")
-                print(cache.stdout[-200])
+                print(f"Error: model output error! Executable: {self.executable} ConfigFile: {ConfigFile}. returned: {str(cache.returncode)}")
+                print("Last 1000 characters of the output:\n", cache.stdout[-1000:])
                 return -1
            
             # Remove config file XML and rule file CSV
