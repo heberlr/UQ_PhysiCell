@@ -9,31 +9,31 @@ from shutil import copyfile
     
 class PhysiCell_Model:
     def __init__(self, fileName, keyModel):
-        self.ModelfileName = fileName
+        self.model_file_name = fileName
         configFile = configparser.ConfigParser()
         with open(fileName) as fd:
             configFile.read_file(fd)
         self.projName = configFile[keyModel]['projName']
         self.executable = configFile[keyModel]['executable']
-        if (os.name == 'nt'): self.executable = self.executable.replace(os.altsep, os.sep)+'.exe' # change path according to windows
+        # Check if the executable is in the correct format for the OS
+        if (os.name == 'nt'): 
+            self.executable = self.executable.replace(os.altsep, os.sep)+'.exe'
 
-
+        # Settings for XML files
         self.configFile_ref = configFile[keyModel]['configFile_ref']
         self.configFile_name = configFile[keyModel]['configFile_name'] # config files structure
-        self.configFile_folder = configFile[keyModel].get("configFile_folder", fallback=None) # folder to storage the config files (.xmls) - if it is none then uses outputs_folder
-
+        self.configFile_folder = configFile[keyModel].get("configFile_folder", fallback=None) # folder to store the config files (.xmls) - if it is none then uses outputs_folder
         # Parameters for XML files
-        self.outputs_folder = configFile[keyModel]['outputs_folder'] # folder to storage the output folders
+        self.outputs_folder = configFile[keyModel]['outputs_folder'] # folder to store the output folders
         self.outputs_folder_name = configFile[keyModel]['outputs_folder_name'] # prefix of output folders
         self.omp_num_threads = int(configFile[keyModel]['omp_num_threads']) # number of threads omp for PhysiCell simulation
-        self.numReplicates = int(configFile[keyModel]['numReplicates']) # number of replicates for each simualtion
-
+        self.numReplicates = int(configFile[keyModel]['numReplicates']) # number of replicates for each simulation
         # dictionary with parameters to change in the xml, parameters == None will be replace accordingly.
         self.parameters = ast.literal_eval(configFile[keyModel]['parameters']) # read dictionary of parameters, parameters that will change is defined as a list [None, Name] it will preserves the order of parameters to change. 
-        self.keys_variable_params = [k for k, v in self.parameters.items() if (type(v) == list) ] # list with the order of parameters to change. The parameters that will change is a list [None, Name].
+        self.keys_variable_params = [k for k, v in self.parameters.items() if (type(v) == list) ] # list with the order of parameters to change. The parameters that will change are a list [None, Name].
         for param_key in self.keys_variable_params: 
             if ( (self.parameters[param_key][0]) or (type(self.parameters[param_key][1]) != str) ):
-                sys.exit(f"Error parameters format: Parameters to be explored needs to be a list of [None, Name] and not {self.parameters[param_key]}! Check the file: {self.ModelfileName} and key {keyModel}.")
+                raise ValueError(f"Error parameters format: Parameters to be explored needs to be a list of [None, Name] and not {self.parameters[param_key]}! Check the file: {self.model_file_name} and key {keyModel}.")
             check_parameter_in_xml(self.configFile_ref, param_key)
         
         # dictionary with parameters of RULES to change the rules, parameters == None will be replace accordingly.
@@ -46,14 +46,14 @@ class PhysiCell_Model:
             self.keys_variable_params_rules = [k for k, v in self.parameters_rules.items() if (type(v) == list) ] # list with the order of parameters to change. The parameters that will change is a list [None, Name].
             for param_key in self.keys_variable_params_rules: 
                 if ( (self.parameters_rules[param_key][0]) or (type(self.parameters_rules[param_key][1]) != str) ):
-                    sys.exit(f"Error rules parameter format: Rules parameters to be explored needs to be a list of [None, Name] and not {self.parameters_rules[param_key]}! Check the file: {self.ModelfileName} and key {keyModel}.")
+                    raise ValueError(f"Error rules parameter format: Rules parameters to be explored needs to be a list of [None, Name] and not {self.parameters_rules[param_key]}! Check the file: {self.ModelfileName} and key {keyModel}.")
                 index_rule = get_rule_index_in_csv(self.rules, param_key)
     
     def get_configFilePath(self,sampleID, replicateID):
-        if (self.configFile_folder): # Storage the new files in confidFile_folder
+        if (self.configFile_folder): # Store the new files in configFile_folder
             os.makedirs(os.path.dirname(self.configFile_folder), exist_ok=True)
             return self.configFile_folder+self.configFile_name%(sampleID,replicateID)
-        else: # If there is no confidFile_folder storage in output folder
+        else: # If there is no configFile_folder, store in output folder
             folder = self.get_outputPath(sampleID, replicateID)
             return folder+self.configFile_name%(sampleID,replicateID)
         
@@ -63,10 +63,10 @@ class PhysiCell_Model:
         return folder
     
     def get_rulesFilePath(self,sampleID, replicateID):
-        if (self.configFile_folder): # Storage the new files in confidFile_folder
+        if (self.configFile_folder): # Store the new files in configFile_folder
             os.makedirs(os.path.dirname(self.configFile_folder), exist_ok=True)
             return self.configFile_folder, self.rulesFile_name%(sampleID,replicateID)
-        else: # If there is no confidFile_folder storage in output folder
+        else: # If there is no configFile_folder, store in output folder
             folder = self.get_outputPath(sampleID, replicateID)
             return folder, self.rulesFile_name%(sampleID,replicateID)
     
@@ -95,9 +95,9 @@ class PhysiCell_Model:
         if( len(self.keys_variable_params) != parameters_input.shape[0]): # Check if parameter matrix numpy array 1D is compatible with .ini file
             if (self.parameters_rules): # sum of parameters in rules and parameters in xml
                 if ((len(self.keys_variable_params_rules) + len(self.keys_variable_params)) != parameters_input.shape[0]):
-                    sys.exit(f"Error: number of parameters defined 'None' in {self.ModelfileName} = {len(self.keys_variable_params)} is different of samples from parameters = {parameters_input.shape[0]-len(self.keys_variable_params_rules)}.")
+                    raise ValueError(f"Error: number of parameters defined 'None' in {self.model_file_name} = {len(self.keys_variable_params)} is different of samples from parameters = {parameters_input.shape[0]-len(self.keys_variable_params_rules)}.")
             else: # only parameters in xml
-                sys.exit(f"Error: number of parameters defined 'None' in {self.ModelfileName} = {len(self.keys_variable_params)} is different of samples from parameters = {parameters_input.shape[0]}.")
+                raise ValueError(f"Error: number of parameters defined 'None' in {self.model_file_name} = {len(self.keys_variable_params)} is different of samples from parameters = {parameters_input.shape[0]}.")
         dic_parameters = self.parameters.copy() # copy of dictionary of parameters
         # Config file (.xml)
         ConfigFile = self.get_configFilePath(SampleID,ReplicateID)
@@ -105,7 +105,7 @@ class PhysiCell_Model:
         if (self.parameters_rules): # If there is changes in parameter of rules
             dic_parameters['.//cell_rules/rulesets/ruleset/folder'], dic_parameters['.//cell_rules/rulesets/ruleset/filename'] = self.get_rulesFilePath(SampleID, ReplicateID)
             if( len(self.keys_variable_params_rules)+len(self.keys_variable_params) != parameters_rules_input.shape[0]+parameters_input.shape[0]): # Check if parameter rule matrix numpy array 1D is compatible with .ini file
-                sys.exit(f"Error: number of parameters rules defined 'None' in {self.ModelfileName} = {len(self.keys_variable_params_rules)} is different of samples from parameters_rules = {parameters_rules_input.shape[0]}.")
+                raise ValueError(f"Error: number of parameters rules defined 'None' in {self.model_file_name} = {len(self.keys_variable_params_rules)} is different of samples from parameters_rules = {parameters_rules_input.shape[0]}.")
             dic_parameters_rules = {}
             for idx, param_key in enumerate(self.keys_variable_params_rules): 
                 single_param_rule = param_key.split(",")[-1] # last item is the parameter of rule
@@ -113,17 +113,18 @@ class PhysiCell_Model:
             csvFile_out = dic_parameters['.//cell_rules/rulesets/ruleset/folder']+dic_parameters['.//cell_rules/rulesets/ruleset/filename']           
             generate_csv_file(self.rules, csvFile_out, dic_parameters_rules)
         # Output folder (.mat, .xml, .svg)
-        if (self.outputs_folder): dic_parameters['.//save/folder'] = self.get_outputPath(SampleID, ReplicateID) # else save in folder of reference config file (util if there is a custom type of output)
+        if (self.outputs_folder): dic_parameters['.//save/folder'] = self.get_outputPath(SampleID, ReplicateID) # else save in folder of reference config file (useful if there is a custom type of output)
         dic_parameters['.//omp_num_threads'] = self.omp_num_threads # number of threads omp for PhysiCell simulation
+        # NEXT RELEASE: USE THE NEW CAPABILITY OF PHYSICELL TO CHANGE THE RANDOM SEED IN THE XML FILE - ACCORDING CLOCK TIME
         dic_parameters['.//user_parameters/random_seed'] = random.randint(0,4294967295) # random seed for each simulation
         # update the values of parameter from None to the sampled
         for idx, param_key in enumerate(self.keys_variable_params): dic_parameters[param_key] = parameters_input[idx] # preserve the order
         generate_xml_file(pathlib.Path(self.configFile_ref), pathlib.Path(ConfigFile), dic_parameters)
 
-    def RunModel(self, SampleID, ReplicateID, Parameters, ParametersRules = None, RemoveConfigFile = True, SummaryFunction=None):
+    def RunModel(self, SampleID, ReplicateID, ParametersXML, ParametersRules = None, RemoveConfigFile = True, SummaryFunction=None):
         try:
             # Generate XML file for this simulation
-            self.createXMLs(Parameters, SampleID, ReplicateID, parameters_rules_input=ParametersRules)
+            self.createXMLs(ParametersXML, SampleID, ReplicateID, parameters_rules_input=ParametersRules)
             
             # XML path
             ConfigFile = self.get_configFilePath(SampleID, ReplicateID)
@@ -150,9 +151,9 @@ class PhysiCell_Model:
             # Write the stats in a file and remove the folder
             if (SummaryFunction):
                 OutputFolder = self.get_outputPath(SampleID, ReplicateID)
-                SummaryFile = self.outputs_folder+'SummaryFile_%06d_%02d.csv'%(SampleID,ReplicateID)
+                SummaryFile = self.outputs_folder+'SummaryFile_%06d_%02d.csv'%(SampleID,ReplicateID) # NEXT RELEASE: CHANGE THE SUMMARY FUNCTION SIGNATURE, HANDLE IF GENERATE A FILE OR NOT HERE!
                 ParamNames = [self.parameters[param_key][1] for param_key in self.keys_variable_params]
-                dic_params = {ParamNames[i]: Parameters[i] for i in range(len(Parameters))}
+                dic_params = {ParamNames[i]: ParametersXML[i] for i in range(len(ParametersXML))}
                 
                 if (self.parameters_rules):
                     ParamNamesRules = [self.parameters_rules[param_key][1] for param_key in self.keys_variable_params_rules]
@@ -201,8 +202,7 @@ def generate_xml_file(xml_file_in, xml_file_out, dic_parameters):
         val = dic_parameters[key]
         try: set_xml_element_value(xml_root, key, val)
         except ValueError as e:
-            print(f"Error in Parameters definition: {e}")
-            sys.exit(1)
+            raise ValueError(f"Error in Parameters definition: {e}")
         # print(key,val)
     tree.write(xml_file_out)
 
@@ -211,8 +211,7 @@ def check_parameter_in_xml(xml_file_in, key_parameter):
     xml_root = tree.getroot()
     try: text_elem = get_xml_element_value(xml_root, key_parameter)
     except ValueError as e:
-        print(f"Error in Parameters definition: {e}")
-        sys.exit(1)
+        raise ValueError(f"Error in Parameters definition: {e}")
 
 def get_rules(filename):
     default_rules = []
@@ -224,23 +223,22 @@ def get_rules(filename):
                 default_rules.append(row)
         return default_rules
     except FileNotFoundError:
-        print(f"Error! File {filename} not found!")
-        sys.exit(1)
+        raise ValueError(f"Error! File {filename} not found!")
 
 def get_rule_index_in_csv(rules, key_rules):
     # rule: cell_type, signal, direction, behavior
     # parameters: saturation, half_max, hill_power, dead
     try: cell_type, signal, direction, behavior, parameter = key_rules.split(",")
     except ValueError:
-        print("Error in rule format: Provide 'cell_type,signal,direction,behavior,parameter' where parameter can be 'saturation', 'half_max', 'hill_power', or 'dead'.")
-        sys.exit(1)
-    for idx, rule in enumerate(rules):
-        if ( (cell_type == rule['cell_type']) and (signal == rule['signal']) and 
-            (direction == rule['direction']) and (behavior == rule['behavior']) and
-            (parameter in ['saturation', 'half_max', 'hill_power', 'dead']) ):
-            return idx
-    print(f"Error! Rule {cell_type},{signal},{direction},{behavior} not found or parameter {parameter} does not exist!")
-    sys.exit(1)
+        raise ValueError("Error in rule format: Provide 'cell_type,signal,direction,behavior,parameter' where parameter can be 'saturation', 'half_max', 'hill_power', or 'dead'.")
+    try:
+        for idx, rule in enumerate(rules):
+            if ( (cell_type == rule['cell_type']) and (signal == rule['signal']) and 
+                (direction == rule['direction']) and (behavior == rule['behavior']) and
+                (parameter in ['saturation', 'half_max', 'hill_power', 'dead']) ):
+                return idx
+    except ValueError:
+        raise ValueError(f"Error! Rule {cell_type},{signal},{direction},{behavior} not found or parameter {parameter} does not exist!")
 
 def generate_csv_file(rules, csv_file_out, dic_parameters_rules):
     try:
@@ -254,5 +252,4 @@ def generate_csv_file(rules, csv_file_out, dic_parameters_rules):
                 rules_temp[index_rule][param_name] = value
             for rule in rules_temp: writer.writerow(rule)
     except:
-        print(f"Error generating csv file.")
-        sys.exit(1)
+        raise ValueError(f"Error generating csv file.")
