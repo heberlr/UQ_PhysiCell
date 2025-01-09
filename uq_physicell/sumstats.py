@@ -1,6 +1,7 @@
 import pcdl
 import pandas as pd
 from shutil import rmtree
+from typing import Union
 
 '''
 A library of summary statistics to be applied to PhysiCell simulation output files.
@@ -15,7 +16,7 @@ Each method takes arguments
 Each method will return the appropriate data frame summary.
 '''
 # Final population of live and dead cells
-def summ_func_FinalPopLiveDead(outputPath,summaryFile, dic_params, SampleID, ReplicateID):
+def summ_func_FinalPopLiveDead(outputPath:str,summaryFile:Union[str,None], dic_params:dict, SampleID:int, ReplicateID:int) -> Union[pd.DataFrame,None]:
     # read the last file
     mcds = pcdl.TimeStep('final.xml',outputPath, microenv=False, graph=False, settingxml=None, verbose=False)
     # dataframe of cells
@@ -29,10 +30,13 @@ def summ_func_FinalPopLiveDead(outputPath,summaryFile, dic_params, SampleID, Rep
     df = pd.DataFrame([data_conc])
     # remove replicate output folder
     rmtree( outputPath )
-    df.to_csv(summaryFile, sep='\t', encoding='utf-8')
+    if (summaryFile): 
+        df.to_csv(summaryFile, sep='\t', encoding='utf-8')
+        return None
+    else: return df
 
 # Population over time of live and dead cells
-def summ_func_TimeSeriesPopLiveDead(outputPath,summaryFile, dic_params, SampleID, ReplicateID):
+def summ_func_TimeSeriesPopLiveDead(outputPath:str,summaryFile:Union[str,None], dic_params:dict, SampleID:int, ReplicateID:int) -> Union[pd.DataFrame,None]:
     mcds_ts = pcdl.TimeSeries(outputPath, microenv=False, graph=False, settingxml=None, verbose=False)
     for mcds in mcds_ts.get_mcds_list():
         df_cell = mcds.get_cell_df() 
@@ -44,4 +48,7 @@ def summ_func_TimeSeriesPopLiveDead(outputPath,summaryFile, dic_params, SampleID
         else: df.loc[len(df)] = data_conc # append the dictionary to the dataframe
     # remove replicate output folder
     rmtree( outputPath )
-    df.to_csv(summaryFile, sep='\t', encoding='utf-8')
+    if (summaryFile): 
+        df.to_csv(summaryFile, sep='\t', encoding='utf-8')
+        return None
+    else: return df
