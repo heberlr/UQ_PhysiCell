@@ -10,6 +10,7 @@ import random
 import configparser # read config *.ini file
 import ast # string to literal
 from shutil import copyfile
+import time
     
 class PhysiCell_Model:
     def __init__(self, configFilePath:str, keyModel:str, verbose:bool = False) -> None:
@@ -306,7 +307,14 @@ def set_xml_element_value(xml_root:ET.Element, key:str, val:Union[str,int,float]
 
 # Give a xml input create xml file output with parameters changes
 def generate_xml_file(xml_file_in:str, xml_file_out:str, dic_parameters:dict) -> None:
-    copyfile(xml_file_in,xml_file_out)
+    copyfile(xml_file_in, xml_file_out)
+    # Wait until the file is fully written (avoid rare errors of reading the file before it is fully written)
+    max_wait_time = 10  # maximum wait time in seconds
+    start_time = time.time()
+    while not os.path.exists(xml_file_out) or os.path.getsize(xml_file_out) != os.path.getsize(xml_file_in):
+        if time.time() - start_time > max_wait_time:
+            raise TimeoutError(f"Timeout: Waiting for {xml_file_out} to be fully written exceeded {max_wait_time} seconds.")
+        time.sleep(0.1)
     tree = ET.parse(xml_file_out)
     xml_root = tree.getroot()
     # Loop in all parameters
