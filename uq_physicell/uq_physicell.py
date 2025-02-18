@@ -11,6 +11,7 @@ import configparser # read config *.ini file
 import ast # string to literal
 from shutil import copyfile
 import time
+import copy
     
 class PhysiCell_Model:
     def __init__(self, configFilePath:str, keyModel:str, verbose:bool = False) -> None:
@@ -211,75 +212,80 @@ class PhysiCell_Model:
         except ValueError as e:
             raise ValueError(f"Error in generating XML file! {e}")
 
+    def copy(self):
+        return copy.deepcopy(self)
+    
+    def RunModel(self, SampleID:int, ReplicateID:int, Parameters:Union[np.ndarray,dict]=dict(), ParametersRules:Union[np.ndarray,dict]=dict(), RemoveConfigFile:bool=True, SummaryFunction:Union[None,str]=None) -> Union[None,pd.DataFrame]:
+        return RunModel(self, SampleID, ReplicateID, Parameters, ParametersRules, RemoveConfigFile, SummaryFunction)
 
-    def RunModel(self, SampleID:int, ReplicateID:int, Parameters:Union[np.ndarray, dict] = dict(), ParametersRules:Union[np.ndarray, dict] = dict(), RemoveConfigFile:bool = True, SummaryFunction:Union[None,str] = None) -> Union[None, pd.DataFrame]:
-        if self.verbose: print(f"\t> RunModel - Sample:{SampleID}, Replicate: {ReplicateID}, Parameters XML: {Parameters}, Parameters rules: {ParametersRules}...")
+def RunModel(model: PhysiCell_Model, SampleID: int, ReplicateID: int, Parameters: Union[np.ndarray, dict] = dict(), ParametersRules: Union[np.ndarray, dict] = dict(), RemoveConfigFile: bool = True, SummaryFunction: Union[None, str] = None) -> Union[None, pd.DataFrame]:
+    if model.verbose: print(f"\t> RunModel - Sample:{SampleID}, Replicate: {ReplicateID}, Parameters XML: {Parameters}, Parameters rules: {ParametersRules}...")
+    try:
+        # Setup input files for this simulation
         try:
-            # Setup input files for this simulation
-            try: 
-                if self.verbose: print(f"\t\t>> Setting up model input ...")
-                self.setup_model_input(SampleID, ReplicateID, Parameters, parameters_rules_input=ParametersRules)
-            except ValueError as e:
-                raise ValueError(f"Error in setup_model_input! (Sample: {SampleID} and Replicate: {ReplicateID}).\n{e}")
+            if model.verbose: print(f"\t\t>> Setting up model input ...")
+            model.setup_model_input(SampleID, ReplicateID, Parameters, parameters_rules_input=ParametersRules)
+        except ValueError as e:
+            raise ValueError(f"Error in setup_model_input! (Sample: {SampleID} and Replicate: {ReplicateID}).\n{e}")
+        
+        # XML path
+        XMLFile = model.get_XML_Path(SampleID, ReplicateID)
+        
+        # Execute the simulations
+        if model.verbose: print(f"\t\t>> Running model ...")
+        callingModel = [model.PC_executable, XMLFile]
+        cache = subprocess.run(callingModel, universal_newlines=True, capture_output=True)
+        if cache.returncode != 0:
+            raise ValueError(f"""Error: model output error! 
+            Executable: {model.PC_executable} XML File: {XMLFile}. returned: {str(cache.returncode)}
+            Last 1000 characters of the PhysiCell output:
+            {cache.stdout[-1000:]}""")
+        
+        # Remove config file XML and rule file CSV
+        if RemoveConfigFile:
+            if model.verbose: print(f"\t\t>> Removing config files ...")
+            try:
+                os.remove(pathlib.Path(XMLFile))
+                if model.parameters_rules:
+                    filenameRule = model.get_RULES_FileName(SampleID, ReplicateID)
+                    os.remove(pathlib.Path(model.input_folder + filenameRule))
+            except OSError as e:
+                print(f"Error removing files: {e}")
+        
+        # Write the stats in a file and remove the folder
+        if SummaryFunction:
+            if model.verbose: print(f"\t\t>> Running summary function: {SummaryFunction} ...")
+            OutputFolder = model.get_output_Path(SampleID, ReplicateID)
+            # Create a dictionary with the parameters
+            dic_params = {}
+            # Check if the input is a dictionary or a numpy array
+            if type(Parameters) == dict:
+                dic_params = {param_name: Parameters[param_name] for param_name in model.XML_parameters_variable.values()}
+            else:
+                dic_params = {param_name: Parameters[i] for i, param_name in enumerate(model.XML_parameters_variable.values())}
             
-            # XML path
-            XMLFile = self.get_XML_Path(SampleID, ReplicateID)
-            
-            # Execute the simulations
-            if self.verbose: print(f"\t\t>> Running model ...")
-            callingModel = [self.PC_executable, XMLFile]
-            cache = subprocess.run( callingModel,universal_newlines=True, capture_output=True)
-            if ( cache.returncode != 0):
-                raise ValueError(f"""Error: model output error! 
-                Executable: {self.PC_executable} XML File: {XMLFile}. returned: {str(cache.returncode)}
-                Last 1000 characters of the PhysiCell output:
-                {cache.stdout[-1000:]}""")
-           
-            # Remove config file XML and rule file CSV
-            if (RemoveConfigFile):
-                if self.verbose: print(f"\t\t>> Removing config files ...")
-                try:
-                    os.remove( pathlib.Path(XMLFile) )
-                    if (self.parameters_rules):
-                        filenameRule = self.get_RULES_FileName(SampleID, ReplicateID)
-                        os.remove( pathlib.Path(self.input_folder+filenameRule) )
-                except OSError as e:
-                    print(f"Error removing files: {e}")
-            
-            # Write the stats in a file and remove the folder
-            if (SummaryFunction):
-                if self.verbose: print(f"\t\t>> Running summary function: {SummaryFunction} ...")
-                OutputFolder = self.get_output_Path(SampleID, ReplicateID)
-                # Create a dictionary with the parameters
-                dic_params = {}
+            if model.parameters_rules:
+                # Add the rules parameters in the dictionary of parameters
                 # Check if the input is a dictionary or a numpy array
-                if ( type(Parameters) == dict): 
-                    dic_params = {param_name: Parameters[param_name] for param_name in self.XML_parameters_variable.values()}
-                else: 
-                    dic_params = {param_name: Parameters[i] for i, param_name in enumerate(self.XML_parameters_variable.values())}
-                
-                if (self.parameters_rules):
-                    # Add the rules parameters in the dictionary of parameters
-                    # Check if the input is a dictionary or a numpy array
-                    if ( type(ParametersRules) == dict): 
-                        for param_key in self.parameters_rules_variable.values(): 
-                            dic_params[param_key] = ParametersRules[param_key]
-                    else:
-                        for i, param_key in enumerate(self.parameters_rules_variable.values()):
-                            dic_params[param_key] = ParametersRules[i]
-                # Create the summary file
-                try:
-                    if (self.output_summary_Path): 
-                        SummaryFile = self.output_summary_Path%(SampleID,ReplicateID) # if defined, generate a file
-                        if self.verbose: print(f"\t\t\t>>> Generating summary file {SummaryFile}...")
-                    else: 
-                        if self.verbose: print(f"\t\t\t>>> Returning summary data ...")
-                        SummaryFile = None # if not defined, return the dataframe
-                    return SummaryFunction(OutputFolder,SummaryFile, dic_params, SampleID, ReplicateID)
-                except (OSError, SystemError) as e: 
-                    raise ValueError(f"Error in SummaryFunction! (Sample: {SampleID} and Replicate: {ReplicateID}).\n\t{e}")
-        except Exception as e:
-            raise ValueError(f"An unexpected error occurred in RunModel: {e}")
+                if type(ParametersRules) == dict:
+                    for param_key in model.parameters_rules_variable.values():
+                        dic_params[param_key] = ParametersRules[param_key]
+                else:
+                    for i, param_key in enumerate(model.parameters_rules_variable.values()):
+                        dic_params[param_key] = ParametersRules[i]
+            # Create the summary file
+            try:
+                if model.output_summary_Path:
+                    SummaryFile = model.output_summary_Path % (SampleID, ReplicateID)  # if defined, generate a file
+                    if model.verbose: print(f"\t\t\t>>> Generating summary file {SummaryFile}...")
+                else:
+                    if model.verbose: print(f"\t\t\t>>> Returning summary data ...")
+                    SummaryFile = None  # if not defined, return the dataframe
+                return SummaryFunction(OutputFolder, SummaryFile, dic_params, SampleID, ReplicateID)
+            except (OSError, SystemError) as e:
+                raise ValueError(f"Error in SummaryFunction! (Sample: {SampleID} and Replicate: {ReplicateID}).\n\t{e}")
+    except Exception as e:
+        raise ValueError(f"An unexpected error occurred in RunModel: {e}")
 
 def get_xml_element_value(xml_root:ET.Element, key:str) -> str:
     elem = xml_root.findall(key)
@@ -366,4 +372,3 @@ def generate_csv_file(rules:list, csv_file_out:str, dic_parameters_rules:dict) -
             for rule in rules_temp: writer.writerow(rule)
     except:
         raise ValueError(f"Error generating csv file.")
-    
