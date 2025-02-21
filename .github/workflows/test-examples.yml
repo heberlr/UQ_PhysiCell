@@ -26,12 +26,12 @@ jobs:
 
     - name: Run Example 1
       run: |
-        python examples/run_example1.py
+        python examples/ex1_print.py
 
     - name: Run Example 2
       run: |
-        python examples/run_example2.py
+        python examples/ex2_runModel.py
 
     - name: Run Example 3
       run: |
-        python examples/run_example3.py
+        python examples/ex3_runModelCust.py
