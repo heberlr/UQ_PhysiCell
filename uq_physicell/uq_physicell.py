@@ -45,10 +45,6 @@ class PhysiCell_Model:
         self.RULES_RefPath = configFile[keyModel].get('rulesFile_ref', fallback=None)
         self.RULES_name = configFile[keyModel].get('rulesFile_name', fallback="rules_S%06d_R%03d.csv")
         self.omp_num_threads = configFile[keyModel].get('omp_num_threads', fallback=None)
-        if self.omp_num_threads:
-            self.omp_num_threads = int(self.omp_num_threads)
-        else:
-            self.omp_num_threads = get_xml_element_value(self.xml_ref_root, './/parallel/omp_num_threads')
         self.XML_parameters = configFile[keyModel].get('parameters', fallback=dict())
         if self.XML_parameters:
             self.XML_parameters = ast.literal_eval(self.XML_parameters)
@@ -69,6 +65,7 @@ class PhysiCell_Model:
         self.xml_ref_root = tree.getroot()
         if self.verbose:
             print(f"\t\t>> Checking parameters in XML file ...")
+        if not self.omp_num_threads: self.omp_num_threads = get_xml_element_value(self.xml_ref_root, './/parallel/omp_num_threads')
         for param_key in self.XML_parameters.keys():
             try:
                 get_xml_element_value(self.xml_ref_root, param_key)
