@@ -19,21 +19,19 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -r .github/workflows/requirements.txt
-        bash PhysiCell.sh
+        bash examples/PhysiCell.sh
+        cd examples/PhysiCell-master
         make virus-macrophage-sample
         make
 
     - name: Run Example 1
       run: |
-        cd examples/example1
-        python run_example1.py
+        python examples/run_example1.py
 
     - name: Run Example 2
       run: |
-        cd examples/example2
-        python run_example2.py
+        python examples/run_example2.py
 
     - name: Run Example 3
       run: |
-        cd examples/example3
-        python run_example3.py
+        python examples/run_example3.py
