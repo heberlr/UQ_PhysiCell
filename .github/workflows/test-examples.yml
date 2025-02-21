@@ -19,6 +19,7 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -r .github/workflows/requirements.txt
+        pip install -e .
         bash examples/PhysiCell.sh
         cd examples/PhysiCell-master
         make virus-macrophage-sample
