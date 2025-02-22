@@ -36,7 +36,7 @@ class PhysiCell_Model:
 
         #### Optional variables
         self.projName = configFile[keyModel].get('projName', fallback=keyModel) # project name
-        self.XML_name = configFile[keyModel].get('self.configFile_name', fallback="config_S%06d_R%03d.xml") # config files structure
+        self.XML_name = configFile[keyModel].get('configFile_name', fallback="config_S%06d_R%03d.xml") # config files structure
         self.input_folder = configFile[keyModel].get("configFile_folder", fallback="UQ_PC_InputFolder/") # folder to store input files (.xmls, .csv, and .txt)
         self.output_folder = configFile[keyModel].get('outputs_folder', fallback="UQ_PC_OutputFolder/") # folder to store the output folders
         self.outputs_folder_name = configFile[keyModel].get('outputs_folder_name', fallback="output_S%06d_R%03d/") # structure of output folders
