@@ -40,6 +40,7 @@ class PhysiCell_Model:
         self.input_folder = configFile[keyModel].get("configFile_folder", fallback="UQ_PC_InputFolder/") # folder to store input files (.xmls, .csv, and .txt)
         self.output_folder = configFile[keyModel].get('outputs_folder', fallback="UQ_PC_OutputFolder/") # folder to store the output folders
         self.outputs_folder_name = configFile[keyModel].get('outputs_folder_name', fallback="output_S%06d_R%03d/") # structure of output folders
+        self.timeout = configFile[keyModel].get('timeout', fallback=60) # timeout for waiting to write files
         self.output_summary_Path = self.output_folder+'SummaryFile_%06d_%02d.csv'
         # Rules files and folder
         self.RULES_RefPath = configFile[keyModel].get('rulesFile_ref', fallback=None)
@@ -204,7 +205,7 @@ def setup_model_input(model: PhysiCell_Model, SampleID: int, ReplicateID: int, p
     if model.verbose:
         print(f"\t\t\t>>> Generating XML file {XMLFile} ...")
     try:
-        generate_xml_file(pathlib.Path(model.XML_RefPath), pathlib.Path(XMLFile), dic_xml_parameters)
+        generate_xml_file(pathlib.Path(model.XML_RefPath), pathlib.Path(XMLFile), dic_xml_parameters, model.timeout)
     except ValueError as e:
         raise ValueError(f"Error in generating XML file! {e}")
 
@@ -299,9 +300,8 @@ def set_xml_element_value(xml_root: ET.Element, key: str, val: Union[str, int, f
     else:
         elem[0].text = str(val)
 
-def generate_xml_file(xml_file_in: str, xml_file_out: str, dic_parameters: dict) -> None:
+def generate_xml_file(xml_file_in: str, xml_file_out: str, dic_parameters: dict, max_wait_time: float) -> None:
     copyfile(xml_file_in, xml_file_out)
-    max_wait_time = 60
     start_time = time.time()
     while not os.path.exists(xml_file_out) or os.path.getsize(xml_file_out) != os.path.getsize(xml_file_in):
         if time.time() - start_time > max_wait_time:
