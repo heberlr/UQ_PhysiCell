@@ -39,8 +39,14 @@ authors = [
 ]
 
 keywords = [
-    "uncertainty quantification", 
+    "uncertainty quantification",
     "PhysiCell",
+]
+
+dependencies = [
+    "numpy",
+    "pandas",
+    "pcdl",
 ]
 
 urls = { "Homepage" = "https://github.com/heberlr/UQ_PhysiCell" }
