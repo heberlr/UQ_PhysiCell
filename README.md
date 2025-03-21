@@ -3,12 +3,6 @@ Install the package using pip:
 ```
 pip install uq_physicell
 ```
-## External Modules
-These modules must be installed separately. Install them using `pip`:
-```bash
-pip install pandas numpy pcdl
-```
-[pcdl](https://github.com/elmbeech/physicelldataloader) is a Python package designed to load [PhysiCell](https://physicell.org) simulations in a Pythonic way.
 
 # Examples
 Here are some examples to help you get started with the package:
@@ -21,16 +15,16 @@ Here are some examples to help you get started with the package:
 
 ## Example 2: Running PhysiCell Simulations
   - Requirements: A PhysiCell folder is required.
-  - Description: Run three PhysiCell simulations associated with the key [physicell_model_2](examples/SampleModel.ini#l18) in the config file [SampleModel.ini](examples/SampleModel.ini). This corresponds to the `virus_macrophage` example in `PhysiCell's sample projects`. See [example 2](examples/ex2_runModel.py). 
+  - Description: Run three PhysiCell simulations associated with the key [physicell_model_2](examples/SampleModel.ini#l18) in the config file [SampleModel.ini](examples/SampleModel.ini). This corresponds to the `virus_macrophage` example in `PhysiCell's sample projects`. See [example 2](examples/ex2_runModel.py).
     - **First simulation:** Demonstrates running a simulation with a predefined summary function that summarizes the final population of live and dead cells, storing results in a new folder `output2`.
     - **Second simulation:** Runs the simulation while preserving the config files and retaining the complete PhysiCell output without summarization.
     - **Third simulation:** Configures the execution to summarize the output and returns a DataFrame with the summary.
-    
+
     Run script:
     ```bash
     python examples/ex2_runModel.py
     ```
-    
+
     Alternatively, download the lastest PhysiCell version with:
     ```bash
     bash examples/PhysiCell.sh
@@ -48,7 +42,7 @@ Here are some examples to help you get started with the package:
     - Step 3: Execute the script:
       ```bash
       python examples/ex2_runModel.py
-      ```  
+      ```
 
 ## Example 3: Customizable Summary Function
   - Requirements: A PhysiCell folder is required.
