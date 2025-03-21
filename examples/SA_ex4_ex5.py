@@ -1,4 +1,4 @@
-from uq_physicell.uq_physicell import PhysiCell_Model, get_rule_index_in_csv
+from uq_physicell import PhysiCell_Model, get_rule_index_in_csv
 import glob
 import pandas as pd
 from SALib import ProblemSpec
@@ -33,8 +33,8 @@ def SA_analyze(PhysiCellModel:PhysiCell_Model, problem:dict, sa_sobol:ProblemSpe
     data_files = glob.glob(PhysiCellModel.output_folder+'SummaryFile_*.csv')
     df_all = pd.concat((pd.read_csv(file, sep='\t', encoding='utf-8') for file in data_files), ignore_index=True)
     # Take the mean of replicates in each sample and time
-    df_samples_mean = df_all.groupby(['sampleID', 'time'], as_index=False).mean() 
-    
+    df_samples_mean = df_all.groupby(['sampleID', 'time'], as_index=False).mean()
+
     dic_analyzes = {}
     # Analyze for 1 QoI: live_cells and dead_cells
     for qoi in ['live_cells', 'dead_cells']:

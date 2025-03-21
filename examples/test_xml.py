@@ -1,11 +1,11 @@
-from uq_physicell.uq_physicell import PhysiCell_Model
+from uq_physicell import PhysiCell_Model
 import numpy as np
 
 if __name__ == '__main__':
     fileName = "test/SampleModel.ini"
     key_model = "physicell_model"
     key_model2 = "physicell_model_2"
-    
+
     # Create the structure of model exploration
     PhysiCellModel = PhysiCell_Model(fileName, key_model)
     # Create a xml

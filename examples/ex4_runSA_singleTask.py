@@ -1,5 +1,5 @@
-from uq_physicell.uq_physicell import PhysiCell_Model
-from uq_physicell.sumstats import summ_func_FinalPopLiveDead
+from uq_physicell import PhysiCell_Model
+from uq_physicell import summ_func_FinalPopLiveDead
 import numpy as np
 import os
 
@@ -10,9 +10,9 @@ if __name__ == '__main__':
     PhysiCellModel.info()
     # Remove the output folder
     if os.path.exists(PhysiCellModel.output_folder): os.system('rm -rf '+PhysiCellModel.output_folder)
-    
+
     print("Sensitivity analysis - Sobol using MPI")
-    
+
     # Number of parameters expected in the XML and rules
     num_params_xml = len(PhysiCellModel.XML_parameters_variable)
     num_params_rules = len(PhysiCellModel.parameters_rules_variable)
@@ -32,7 +32,7 @@ if __name__ == '__main__':
             Parameters.append(sa_sobol.samples[sampleID])
             Samples.append(sampleID)
             Replicates.append(replicateID)
-    
+
     # Run simulations
     print("Running simulations ...")
     for ind_sim in range(len(Samples)):
@@ -42,7 +42,7 @@ if __name__ == '__main__':
         else: ParametersRules = np.array([])
         print('Simulation: ', ind_sim, ', Sample: ', Samples[ind_sim],', Replicate: ', Replicates[ind_sim], 'Parameters XML: ', ParametersXML, 'Parameters rules: ', ParametersRules)
         PhysiCellModel.RunModel(Samples[ind_sim], Replicates[ind_sim], ParametersXML, ParametersRules = ParametersRules,SummaryFunction=summ_func_FinalPopLiveDead)
-    
+
     # Analyze the results
     print("Analyzing the results ...")
     dic_analyzes = SA_analyze(PhysiCellModel, problem, sa_sobol)

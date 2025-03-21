@@ -1,6 +1,6 @@
-from mpi4py import MPI 
-from uq_physicell.uq_physicell import PhysiCell_Model
-from uq_physicell.sumstats import summ_func_FinalPopLiveDead
+from mpi4py import MPI
+from uq_physicell import PhysiCell_Model
+from uq_physicell import summ_func_FinalPopLiveDead
 import numpy as np
 import os
 
@@ -12,12 +12,12 @@ rank = comm.Get_rank()
 
 if __name__ == '__main__':
     PhysiCellModel = PhysiCell_Model("examples/SampleModel.ini", 'physicell_model_2')
-    if rank == 0: 
+    if rank == 0:
         PhysiCellModel.info()
         print("Sensitivity analysis - Sobol using MPI")
         # Remove the output folder
         if os.path.exists(PhysiCellModel.output_folder): os.system('rm -rf '+PhysiCellModel.output_folder)
-    
+
     # Number of parameters expected in the XML and rules
     num_params_xml = len(PhysiCellModel.XML_parameters_variable)
     num_params_rules = len(PhysiCellModel.parameters_rules_variable)
@@ -25,7 +25,7 @@ if __name__ == '__main__':
     # Sensitivity analysis - Sobol
     problem, sa_sobol = SA_problem(PhysiCellModel)
 
-    if rank == 0: 
+    if rank == 0:
         print(f"SA problem +/- 20% of reference value: \n{sa_sobol}")
         print("Bounds parameters: ", problem['bounds'])
 
@@ -38,7 +38,7 @@ if __name__ == '__main__':
             Parameters.append(sa_sobol.samples[sampleID])
             Samples.append(sampleID)
             Replicates.append(replicateID)
-    
+
     # Split simulations into ranks
     SplitIndexes = np.array_split(np.arange(len(Samples)),size, axis=0) # split [0,1,...,NumSimulations-1] in size arrays equally (or +1 in some ranks)
     if rank==0: print(f"Total number of simulations: {len(Samples)} Simulations per rank: {int(len(Samples)/size)}")
