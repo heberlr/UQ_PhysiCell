@@ -82,3 +82,5 @@ Here are some examples to help you get started with the package:
     ```
 
 Feel free to explore these examples to understand the package's capabilities and how to use it.
+
+One example of how to create the SLURM script to execute the sensitivity analysis in a SLURM cluster can be found in [slurm_script](examples/slurm_script.sh).
