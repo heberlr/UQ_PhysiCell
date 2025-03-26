@@ -1,6 +1,6 @@
-from uq_physicell.uq_physicell import PhysiCell_Model
+from uq_physicell import PhysiCell_Model
 
-from mpi4py import MPI 
+from mpi4py import MPI
 import pcdl
 import numpy as np
 import pandas as pd
@@ -19,7 +19,7 @@ def summ_func_FinalFraction(outputPath,summaryFile, dic_params, SampleID, Replic
     # read the last file
     mcds = pcdl.TimeStep('final.xml',outputPath, microenv=False, graph=False, settingxml=None, verbose=False)
     # dataframe of cells
-    df_cell = mcds.get_cell_df() 
+    df_cell = mcds.get_cell_df()
     # population stats live and dead cells
     proj1_cells = len(df_cell[ (df_cell['cell_type'] == 'progenitor_1') ] )
     proj2_cells = len(df_cell[ (df_cell['cell_type'] == 'progenitor_2') ] )
@@ -60,8 +60,8 @@ def SA_analyze(PhysiCellModel:PhysiCell_Model, problem:dict, sa_sobol:ProblemSpe
     data_files = glob.glob(PhysiCellModel.output_folder+'SummaryFile_*.csv')
     df_all = pd.concat((pd.read_csv(file, sep='\t', encoding='utf-8') for file in data_files), ignore_index=True)
     # Take the mean of replicates in each sample and time
-    df_samples_mean = df_all.groupby(['sampleID', 'time'], as_index=False).mean() 
-    
+    df_samples_mean = df_all.groupby(['sampleID', 'time'], as_index=False).mean()
+
     dic_analyzes = {}
     # Analyze for 2 QoIs: frac_proj1_cells and frac_proj2_cells
     for qoi in ['frac_proj1_cells', 'frac_proj2_cells']:
@@ -88,24 +88,24 @@ def plot_analysis(problem:dict, dic_analyzes: dict) -> None:
     plt.show()
 
 
-                        
+
 if __name__ == '__main__':
     PhysiCellModel = PhysiCell_Model("examples/SampleModel.ini", 'asymmetric_division')
-    if rank == 0: 
+    if rank == 0:
         PhysiCellModel.info()
         print("Sensitivity analysis - Sobol using MPI")
-    
+
     # Number of parameters expected in the XML and rules
     num_params_xml = len(PhysiCellModel.XML_parameters_variable)
     num_params_rules = len(PhysiCellModel.parameters_rules_variable)
 
     # Sensitivity analysis - Sobol
     problem, sa_sobol = SA_problem(PhysiCellModel)
-    
-    if rank == 0: 
+
+    if rank == 0:
         print(f"SA problem +/- 20% of reference value: \n{sa_sobol}")
         print("Bounds parameters: ", problem['bounds'])
-    
+
     # Generate a three list with size NumSimulations
     Parameters = []; Samples = []; Replicates = []
     for sampleID in range(sa_sobol.samples.shape[0]):
@@ -115,7 +115,7 @@ if __name__ == '__main__':
             Parameters.append(sa_sobol.samples[sampleID])
             Samples.append(sampleID)
             Replicates.append(replicateID)
-    
+
     # Split simulations into ranks
     SplitIndexes = np.array_split(np.arange(len(Samples)),size, axis=0) # split [0,1,...,NumSimulations-1] in size arrays equally (or +1 in some ranks)
     if rank ==0 : print(f"Total number of simulations: {len(Samples)} Simulations per rank: {int(len(Samples)/size)}\n Running simulations ...")
@@ -131,7 +131,7 @@ if __name__ == '__main__':
         ParametersRules = np.append(ParametersRules, 1.0 - ParametersRules[0])
         print('Simulation: ', ind_sim, ', Sample: ', Samples[ind_sim],', Replicate: ', Replicates[ind_sim], 'Parameters XML: ', ParametersXML, 'Parameters rules: ', ParametersRules)
         try: PhysiCellModel.RunModel(Samples[ind_sim], Replicates[ind_sim],ParametersXML, ParametersRules = ParametersRules,SummaryFunction=summ_func_FinalFraction, RemoveConfigFile=False)
-        except Exception as e: 
+        except Exception as e:
             print("Error in rank: ", rank, " Simulation: ", ind_sim, " Error: ", e)
             # kill all processes
             comm.Abort()

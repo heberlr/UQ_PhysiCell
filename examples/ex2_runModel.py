@@ -1,11 +1,11 @@
-from uq_physicell.uq_physicell import PhysiCell_Model
-from uq_physicell.sumstats import summ_func_FinalPopLiveDead
+from uq_physicell import PhysiCell_Model
+from uq_physicell import summ_func_FinalPopLiveDead
 import numpy as np
 
 if __name__ == '__main__':
     fileName = "examples/SampleModel.ini"
     key_model = "physicell_model_2"
-    
+
     # Create the structure of model exploration
     print("Generate the model exploration structure")
     PhysiCellModel = PhysiCell_Model(fileName, key_model, verbose=True)
