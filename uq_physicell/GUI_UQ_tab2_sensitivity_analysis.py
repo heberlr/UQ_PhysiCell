@@ -431,7 +431,7 @@ def load_db_file(main_window, filePath=None):
                     for id, param in enumerate(main_window.df_input['ParamName'].unique()):
                         main_window.global_SA_parameters[param] = {"bounds": bounds_list[id], "reference": param_ref_list[id], "range_percentage": param_perturb_list[id]}
                     # Convert df_input to a NumPy array with shape (number of samples, number of parameters)
-                    main_window.global_SA_parameters["samples"] = main_window.df_input.pivot(index="SampleID", columns="ParamName", values="ParamValue").reindex(columns=main_window.global_SA_parameters.keys()).to_numpy()
+                    main_window.global_SA_parameters["samples"] = main_window.df_input.pivot(index="SampleID", columns="ParamName", values="ParamValue").reindex(columns=main_window.global_SA_parameters.keys()).to_dict()
                 elif SA_type == "Local": # Disable local fields
                     main_window.local_param_combo.setEnabled(False)
                     main_window.local_ref_value_input.setEnabled(False)
@@ -447,7 +447,7 @@ def load_db_file(main_window, filePath=None):
                         for b in bounds_str.split() if b.strip()     # Ensure non-empty entries in bounds_str
                     ]
                     # Convert df_input to a NumPy array with shape (number of samples, number of parameters)
-                    main_window.local_SA_parameters["samples"] = main_window.df_input.pivot(index="SampleID", columns="ParamName", values="ParamValue").reindex(columns=main_window.local_SA_parameters.keys()).to_numpy()
+                    main_window.local_SA_parameters["samples"] = main_window.df_input.pivot(index="SampleID", columns="ParamName", values="ParamValue").reindex(columns=main_window.local_SA_parameters.keys()).to_dict()
                     
                     # Create a dictionary for each parameter
                     for id, param in enumerate(main_window.df_input['ParamName'].unique()):
@@ -661,19 +661,21 @@ def sample_parameters(main_window):
             if 'samples' in main_window.local_SA_parameters.keys():
                 del main_window.local_SA_parameters["samples"]
             param_names = list(main_window.local_SA_parameters.keys())
-            params_ref = np.array([[main_window.local_SA_parameters[key]["reference"] for key in main_window.local_SA_parameters.keys()]])
+            params_ref = {key: main_window.local_SA_parameters[key]["reference"] for key in main_window.local_SA_parameters.keys()}
             # First sample is the reference value
-            main_window.local_SA_parameters["samples"] = params_ref
-            main_window.update_output_tab2(main_window, f"\tAdding Reference value: {main_window.local_SA_parameters['samples']}")
-            for id, key in enumerate(param_names):
-                main_window.update_output_tab2(main_window, f"\tSampling parameter: <{key}> using Perturbations: +/- {main_window.local_SA_parameters[key]['perturbations']}%")
-                perturbations = np.array(main_window.local_SA_parameters[key]["perturbations"])
-                perturbations = np.concatenate((-1.0 * perturbations, perturbations), axis=None)
-                for var in perturbations:
-                    main_window.local_SA_parameters["samples"] = np.concatenate((main_window.local_SA_parameters["samples"], params_ref.copy()), axis=0)
-                    # Perturb the parameter added to the last sample
-                    main_window.local_SA_parameters["samples"][-1, id] = params_ref[0, id] * (1 + float(var) / 100.0)
-            main_window.update_output_tab2(main_window, f"Generated {main_window.local_SA_parameters['samples'].shape[0]} samples.")
+            main_window.local_SA_parameters["samples"] = {0: params_ref}
+            main_window.update_output_tab2(main_window, f"\tAdding Reference value: {params_ref}")
+            for id, par in enumerate(param_names):
+                perturbations = np.array(main_window.local_SA_parameters[par]["perturbations"])
+                main_window.update_output_tab2(main_window, f"\tSampling parameter: <{par}> using Perturbations: +/- {perturbations}%")
+                perturbations = np.concatenate((-perturbations, perturbations))  # Combine negative and positive perturbations
+                for idx, var in enumerate(perturbations):
+                    sample_id = id * len(perturbations) + idx + 1  # Unique sample ID for each perturbation
+                    if sample_id not in (main_window.local_SA_parameters["samples"].keys()):
+                        main_window.local_SA_parameters["samples"][sample_id] = params_ref.copy()  # Start with reference values
+                    main_window.local_SA_parameters["samples"][sample_id][par] = params_ref[par] * (1 + var / 100.0)
+            main_window.update_output_tab2(main_window, f"Generated {len(main_window.local_SA_parameters['samples'])} samples.")
+            # print(main_window.local_SA_parameters["samples"])
         except ValueError:
             main_window.update_output_tab2(main_window, "Error: Invalid input for reference value or perturbations.")
     elif analysis_type == "Global":
@@ -683,10 +685,11 @@ def sample_parameters(main_window):
             main_window.update_output_tab2(main_window, f"Sampling parameters from method: {method} and sampler: {sampler}.")
             if 'samples' in main_window.global_SA_parameters.keys():
                 del main_window.global_SA_parameters["samples"]
+            param_names = list(main_window.global_SA_parameters.keys())
             # Define SA problem
             SA_problem = {
                 'num_vars': len(main_window.global_SA_parameters),
-                'names': list(main_window.global_SA_parameters.keys()),
+                'names': param_names,
                 'bounds': [main_window.global_SA_parameters[param]["bounds"] for param in main_window.global_SA_parameters]
             }
             # Samplers: "Fast", "Fractional Factorial", "Finite Difference", 
@@ -699,42 +702,49 @@ def sample_parameters(main_window):
                     main_window.update_output_tab2(main_window, "Error: The number of samples must be a positive integer greater than 4*(M**2).")
                     return
                 else: 
-                    main_window.global_SA_parameters['samples'] = fast_sampler.sample(SA_problem, N, M=M, seed=42)
+                    global_samples = fast_sampler.sample(SA_problem, N, M=M, seed=42)
             elif sampler == "Fractional Factorial":
                 # The number of samples is 2**D, where D is the number of parameters
-                main_window.global_SA_parameters['samples'] = ff.sample(SA_problem, seed=42)
+                global_samples = ff.sample(SA_problem, seed=42)
             elif sampler == "Finite Difference":
                 # The number of samples is N*D, where D is the number of parameters
                 N, ok = QInputDialog.getInt(main_window, "Number of Samples", "Enter the desired number of samples:", value=8, min=1)
                 if not ok or N < 1:
                     main_window.update_output_tab2(main_window, "Error: The number of samples must be a positive integer.")
                     return
-                main_window.global_SA_parameters['samples'] = finite_diff.sample(SA_problem, N, seed=42)
+                global_samples = finite_diff.sample(SA_problem, N, seed=42)
             elif sampler == "Latin hypercube sampling (LHS)":
                 # The number of samples is N
                 N, ok = QInputDialog.getInt(main_window, "Number of Samples", "Enter the desired number of samples:", value=8, min=1)
                 if not ok or N < 1:
                     main_window.update_output_tab2(main_window, "Error: The number of samples must be a positive integer.")
                     return
-                main_window.global_SA_parameters['samples'] = latin.sample(SA_problem, N, seed=42)
+                global_samples = latin.sample(SA_problem, N, seed=42)
             elif sampler == "Sobol":
                 # If second-order indices: N*(2D+2) sample if only first-order indices: N*(D+2) samples, where D is the number of parameters
                 N, ok = QInputDialog.getInt(main_window, "Number of Samples", "Enter the desired number of samples (must be a power of 2):", value=8, min=2)
                 if not ok or (N & (N - 1)) != 0:
                     main_window.update_output_tab2(main_window, "Error: The number of samples must be a power of 2.")
                     return
-                main_window.global_SA_parameters['samples'] = sobol.sample(SA_problem, N, calc_second_order=True, seed=42)
+                global_samples = sobol.sample(SA_problem, N, calc_second_order=True, seed=42)
             elif sampler == "Morris":
                 # The number of samples is (G/D +1)*N/T, where D is the number of parameters, G is the number of groups, and T is the number of trajectories
                 N, ok = QInputDialog.getInt(main_window, "Number of Samples", "Enter the desired number of samples:", value=8, min=1)
                 if not ok or N < 1:
                     main_window.update_output_tab2(main_window, "Error: The number of samples must be a positive integer.")
                     return
-                main_window.global_SA_parameters['samples'] = morris.sample(SA_problem, N, seed=42)
+                global_samples = morris.sample(SA_problem, N, seed=42)
             else:
                 main_window.update_output_tab2(main_window, "Error: Invalid sampler selected.")
                 return
-            main_window.update_output_tab2(main_window, f"Generated {main_window.global_SA_parameters['samples'].shape[0]} samples.")
+            main_window.update_output_tab2(main_window, f"Generated {global_samples.shape[0]} samples.")
+            # Convert the samples to a dictionary of dictionaries
+            main_window.global_SA_parameters["samples"] = {}
+            for i in range(global_samples.shape[0]):
+                sample_dict = {}
+                for j, param in enumerate(param_names):
+                    sample_dict[param] = global_samples[i][j]
+                main_window.global_SA_parameters["samples"][i] = sample_dict
         except Exception as e:
             main_window.update_output_tab2(main_window, f"Error sampling {analysis_type} SA: {e}")
             return
@@ -773,12 +783,13 @@ def plot_samples(main_window):
                 main_window.fig_est_canvas_samples.figure.tight_layout()  # Call tight_layout on the figure object
                 main_window.fig_est_canvas_samples.draw()
             elif main_window.analysis_type_dropdown.currentText() == "Global":
-                total_samples = main_window.global_SA_parameters['samples'].shape[0]
+                total_samples = len(main_window.global_SA_parameters["samples"])
                 # Plot the samples for each parameter
                 for i, key in enumerate(main_window.global_SA_parameters.keys()):
                     if key == "samples": continue
+                    global_params = np.array([sample[key] for sample in main_window.global_SA_parameters["samples"].values()])
                     # Plot the samples for each parameter
-                    main_window.ax_samples.scatter((main_window.global_SA_parameters['samples'][:, i]-main_window.global_SA_parameters[key]["bounds"][0])/(main_window.global_SA_parameters[key]["bounds"][1] - main_window.global_SA_parameters[key]["bounds"][0]), [key] * total_samples, s=10, color='k')
+                    main_window.ax_samples.scatter((global_params-main_window.global_SA_parameters[key]["bounds"][0])/(main_window.global_SA_parameters[key]["bounds"][1] - main_window.global_SA_parameters[key]["bounds"][0]), [key] * total_samples, s=10, color='k')
                 # main_window.ax_set_xlim = main_window.ax_samples.set_xlim(0, 1)
                 main_window.ax_samples.set_xlabel("Samples")
                 main_window.ax_samples.set_title(f"Global sampling - total of samples: {total_samples}")
@@ -921,11 +932,7 @@ def run_simulations(main_window):
             except KeyError:
                 main_window.update_output_tab2(main_window, "Error: No samples generated for global sensitivity analysis.")
                 return
-
-        # Debugging information
-        print(f"Running simulations with {SA_type} method: {SA_method}, sampler: {SA_sampler}, samples shape: {SA_samples.shape}")
-
-        main_window.update_output_tab2(main_window, "Running simulations...")
+ 
         # Ensure all mandatory fields are filled
         db_file_name = main_window.db_file_name_input.text().strip()
         if not db_file_name:
@@ -998,8 +1005,10 @@ def run_simulations(main_window):
     except Exception as e:
         main_window.update_output_tab2(main_window, f"Error during simulation execution: {e}")
 
+    # Update the output tab with the current status
+    main_window.update_output_tab2(main_window, f"Running simulations with {SA_type} method: {SA_method}, sampler: {SA_sampler}, number of samples: {len(SA_samples)}")
     # Debugging information
-    print(f"Running simulations with {SA_type} method: {SA_method}, sampler: {SA_sampler}, samples shape: {SA_samples.shape}")
+    print(f"Running simulations with {SA_type} method: {SA_method}, sampler: {SA_sampler}, number of samples: {len(SA_samples)}")
     print(f".ini file path: {main_window.ini_file_path} - DB file name: {db_file_name} - structure name: {main_window.struc_name_input.text().strip()} - selected QoIs: {qoi_str}")
     print(f"Parameters: {SA_param_names} - Bounds: {SA_bounds} - Reference values: {SA_ref_values} - Perturbations: {SA_perturbations}")
 
@@ -1014,7 +1023,7 @@ def run_simulations(main_window):
         ref_values=SA_ref_values,
         bounds=SA_bounds,
         perturbations=SA_perturbations,
-        samples=SA_samples,
+        dic_samples=SA_samples,
         qois_dic=main_window.qoi_funcs,
         db_file=db_file_name,
         use_futures=True,
