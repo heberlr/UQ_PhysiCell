@@ -12,7 +12,13 @@ from uq_physicell import PhysiCell_Model, generic_QoI
 def create_named_function_from_string(func_str, qoi_name):
     """
     Dynamically creates a named function from a string and assigns it to the module's global scope.
+    Parameters:
+    - func_str: The string representation of the function.
+    - qoi_name: The name of the function to be created.
+    Return:
+    - The created function.
     """
+    # Check if the function already exists in the global scope
     func_name = f"named_{qoi_name}"
     if func_name not in globals():
         exec(
@@ -25,6 +31,15 @@ def create_named_function_from_string(func_str, qoi_name):
 def summary_function(outputPath, summaryFile, dic_params, SampleID, ReplicateID, qoi_functions):
     """
     A standalone function to encapsulate the summary function logic.
+    Parameters:
+    - outputPath: Path to the output folder
+    - summaryFile: Path to the summary file
+    - dic_params: Dictionary of parameters
+    - SampleID
+    - ReplicateID
+    - qoi_functions: Dictionary of QoI functions (keys as names, values as lambda functions or strings)
+    Return:
+    - The result of the generic_QoI function.
     """
     try:
         return generic_QoI(
@@ -83,6 +98,8 @@ def create_db_structure(db_file):
     1. Metadata: Stores information about the sensitivity analysis (SA_type, SA_method, SA_sampler, etc.).
     2. Inputs: Stores sample_id, param_name, and param_value.
     3. Results: Stores sample_id, replicate_id, and result data as binary.
+    Parameters:
+    - db_file: Path to the database file.
     """
     if os.path.exists(db_file):
         os.remove(db_file)
@@ -127,6 +144,15 @@ def create_db_structure(db_file):
 def convert_to_str(param_names: list, bounds: Union[list, None], ref_values: list, pert: list, qois: Union[list, None], qois_fun: Union[list, None]) -> tuple:
     """
     Convert lists to strings for database storage.
+    Parameters:
+    - param_names: List of parameter names.
+    - bounds: List of bounds for the parameters.
+    - ref_values: List of reference values for the parameters.
+    - pert: List of perturbations for the parameters.
+    - qois: List of QoIs (keys as names, values as lambda functions or strings).
+    - qois_fun: List of QoI functions (if any).
+    Return:
+    - Tuple of strings representing the converted values.
     """
     # QoIs dictionary
     # Check if qois and qois_fun are None
@@ -154,6 +180,19 @@ def convert_to_str(param_names: list, bounds: Union[list, None], ref_values: lis
 def insert_metadata(cursor, SA_type, SA_method, SA_sampler, num_samples, param_names, bounds, ref_values, pert, qois_dic, ini_file_path, strucName):
     """
     Insert metadata information into the Metadata table.
+    Parameters:
+    - cursor: SQLite cursor object.
+    - SA_type: Sensitivity analysis type.
+    - SA_method: Sensitivity analysis method.
+    - SA_sampler: Sampling method.
+    - num_samples: Number of samples.
+    - param_names: List of parameter names.
+    - bounds: List of bounds for the parameters.
+    - ref_values: List of reference values for the parameters.
+    - pert: List of perturbations for the parameters.
+    - qois_dic: Dictionary of QoIs (keys as names, values as lambda functions or strings) - If empty store all data as a list of mcds.
+    - ini_file_path: Path to the initial file.
+    - strucName: Structure name.
     """
     # Check if qois_dic is empty
     qoi_keys = list(qois_dic.keys()) if qois_dic else None
@@ -168,34 +207,60 @@ def insert_metadata(cursor, SA_type, SA_method, SA_sampler, num_samples, param_n
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (SA_type, SA_method, SA_sampler, num_samples, param_names_str, bounds_str, ref_values_str, pert_str, qois_str, qois_fun_str, ini_file_path, strucName))
 
-def insert_inputs(cursor, samples, PhysiCellModel, sample_ids=None):
+def insert_inputs(cursor, dic_samples, sample_ids=None):
     """
     Insert input parameters into the Inputs table.
+    Parameters:
+    - cursor: SQLite cursor object.
+    - dic_samples: Dictionary of the dictionaries of samples
+    - sample_ids: List of sample IDs to insert. If None, all samples will be inserted.
     """
-    # Check if sample_ids is None
-    if sample_ids is None:
-        sample_ids = range(samples.shape[0])
-    param_names = list(PhysiCellModel.XML_parameters_variable.values()) + list(PhysiCellModel.parameters_rules_variable.values())
-    for sample_id, sample in zip(sample_ids, samples):
-        for param_name, param_value in zip(param_names, sample):
+    sample_ids = sample_ids if sample_ids is not None else dic_samples.keys() 
+    for samp_id in sample_ids:
+        for param_name, param_value in dic_samples[samp_id].items():
             cursor.execute('INSERT INTO Inputs (SampleID, ParamName, ParamValue) VALUES (?, ?, ?)',
-                           (sample_id, param_name, param_value))
+                           (samp_id, param_name, param_value))
 
 def insert_output(cursor, sample_id, replicate_id, result_data):
     """
     Insert simulation results into the Results table.
+    Parameters:
+    - cursor: SQLite cursor object.
+    - sample_id: The sample ID.
+    - replicate_id: The replicate ID.
+    - result_data: The simulation results data (as binary).
     """
     cursor.execute('INSERT INTO Results (SampleID, ReplicateID, Data) VALUES (?, ?, ?)',
                    (sample_id, int(replicate_id), sqlite3.Binary(result_data)))
 
-def check_existing_sa(PhysiCellModel, SA_type, SA_method, SA_sampler, param_names, ref_values, bounds, perturbations, samples, qois_dic, db_file):
+def check_existing_sa(PhysiCellModel, SA_type, SA_method, SA_sampler, param_names, ref_values, bounds, perturbations, dic_samples, qois_dic, db_file):
     """
     Check if the database file exists and if all simulations have been completed.
+    Parameters:
+    - PhysiCellModel: The PhysiCell model instance.
+    - SA_type: The type of sensitivity analysis.
+    - SA_method: The method of sensitivity analysis.
+    - SA_sampler: The sampler used for sensitivity analysis.
+    - param_names: List of parameter names.
+    - ref_values: List of reference values for the parameters.
+    - bounds: List of bounds for the parameters.
+    - perturbations: List of perturbations for the parameters.
+    - dic_samples: Dictionary of the dictionaries of samples
+    - qois_dic: Dictionary of QoIs (keys as names, values as lambda functions or strings) - If empty store all data as a list of mcds.
+    - db_file: Path to the database file.
+    Return:
+    - exist_db: True if the database exists and all simulations are completed, False otherwise.
+    - parameters_missing: List of dictionaries of missing parameters.
+    - samples_missing: List of missing samples.
+    - replicates_missing: List of missing replicates.
     """
+
+    parameters_missing, samples_missing, replicates_missing = [], [], []
     if not os.path.exists(db_file):
-        return False, [], [], []
+        return False, parameters_missing, samples_missing, replicates_missing
 
     try:
+       
         # Load the database structure
         df_metadata, df_inputs, df_results = load_db_structure(db_file)
 
@@ -209,7 +274,7 @@ def check_existing_sa(PhysiCellModel, SA_type, SA_method, SA_sampler, param_name
             "SA_Type": SA_type,
             "SA_Method": SA_method,
             "SA_Sampler": SA_sampler,
-            "Num_Samples": len(samples),
+            "Num_Samples": len(dic_samples),
             "Param_Names": param_names_str,
             "Bounds": bounds_str,
             "Reference_Values": ref_values_str,
@@ -218,43 +283,50 @@ def check_existing_sa(PhysiCellModel, SA_type, SA_method, SA_sampler, param_name
             "QoIs_Functions": qois_fun_str,
         }
         for key, expected in metadata_checks.items():
+            # print(f"Checking {key}: Expected: {expected}, Found: {df_metadata[key].iloc[0]}")
             if df_metadata[key].iloc[0] != expected:
                 raise ValueError(f"{key} mismatch. Expected: {expected}, Found: {df_metadata[key].iloc[0]}.")
 
         # Check for missing samples
-        samples_db = df_inputs.pivot(index="SampleID", columns="ParamName", values="ParamValue").to_numpy()
-        missing_samples = [i for i, sample in enumerate(samples) if not any(np.array_equal(sample, db_sample) for db_sample in samples_db)]
-
-        # Check for missing replicates
-        completed_replicates = df_results.groupby("SampleID")["ReplicateID"].apply(set).to_dict()
-        parameters_missing, samples_missing, replicates_missing = [], [], []
-        for sample_id in range(len(samples)):
-            missing_replicates = set(range(PhysiCellModel.numReplicates)) - completed_replicates.get(sample_id, set())
-            if missing_replicates:
-                parameters_missing.extend([samples[sample_id]] * len(missing_replicates))
-                samples_missing.append([sample_id] * len(missing_replicates))
-                replicates_missing.extend(missing_replicates)
-
+        samples_db = df_inputs.pivot(index="SampleID", columns="ParamName", values="ParamValue").reindex(columns=param_names).to_dict()
+        missing_samples = [sample_id for sample_id in dic_samples.keys() if sample_id  in set(samples_db.keys())]
+        
         # Add missing samples to the database
         if missing_samples:
             print(f"Adding {len(missing_samples)} missing samples to the database.")
             conn = sqlite3.connect(db_file)
             cursor = conn.cursor()
-            insert_inputs(cursor, samples, PhysiCellModel, missing_samples)
+            insert_inputs(cursor, dic_samples, missing_samples)
             conn.commit()
             conn.close()
 
+        # Check for missing replicates
+        completed_replicates = df_results.groupby("SampleID")["ReplicateID"].apply(set).to_dict()
+        # print(f"Completed replicates: {completed_replicates}")
+        for sample_id in dic_samples.keys():
+            missing_replicates = set(range(PhysiCellModel.numReplicates)) - completed_replicates.get(sample_id, set())
+            if missing_replicates:
+                parameters_missing.extend(dic_samples[sample_id] for _ in missing_replicates)
+                samples_missing.extend(sample_id for _ in missing_replicates)
+                replicates_missing.extend(missing_replicates)
+
         if replicates_missing:
             print(f"Missing {len(replicates_missing)} simulations.")
-
+        # print(len(parameters_missing), samples_missing, replicates_missing)
     except Exception as e:
-        ValueError(f"Error while checking the database: {e}")
+        raise ValueError(f"Error while checking the database: {e}")
 
     return True, parameters_missing, samples_missing, replicates_missing
 
 def load_db_structure(db_file):
     """
     Load the database structure and return the dataframes for metadata, inputs, and results.
+    Parameters:
+    - db_file: Path to the database file.
+    Return:
+    - df_metadata: DataFrame containing metadata information.
+    - df_inputs: DataFrame containing input parameters.
+    - df_results: DataFrame containing simulation results.
     """
     conn = sqlite3.connect(db_file)
     cursor = conn.cursor()
@@ -291,24 +363,41 @@ def load_db_structure(db_file):
                     df_results_modified.at[i, f"time_{id}"] = time_values[id]
     return df_metadata, df_inputs, df_results_modified
 
-def OAT_analyze(param_names, samples, qoi_array):
+def OAT_analyze(dic_samples, dic_qoi):
     """
     Perform OAT analysis on the results.
+    Parameters:
+    - dic_samples: dictionary of the dictionaries of samples
+    - dic_qoi_array: dictionary of QoIs
+    Return:
+    - dic_results: dictionary of the results
     """
     # Sample 0 is the reference sample
-    ref_pars = samples[0]; qoi_ref = qoi_array[0]
-    par_samples = samples[1:]; qoi_samples = qoi_array[1:]
+    ref_pars = dic_samples[0]
+    qoi_ref = dic_qoi[0]
+    # Remove unused variables ref_pars and qoi_ref
+    par_samples = np.array(list(dic_samples.values())[1:])
+    qoi_samples = np.array(list(dic_qoi.values())[1:])
     # Initialize the results dictionary
     dic_results = {}
-    for id, par in enumerate(param_names):
+    for id, par in enumerate(ref_pars.keys()):
         # Calculate the mean and std deviation of the QoIs for each parameter
-        par_var = np.abs(par_samples[:, id] - ref_pars[id])
+        par_var = np.abs(par_samples[:, id] - ref_pars[par])
         non_zero_indices = np.where(par_var != 0)[0]
         dic_results[par] = np.abs(qoi_samples[non_zero_indices] - qoi_ref) / par_var[non_zero_indices]  # Compute SI without skipping
 
     return dic_results
 
 def extract_qoi_from_db(db_file, qoi_functions):
+    """
+    Extracts the QoI values from the database and returns them as a DataFrame.
+    Parameters:
+    - db_file: Path to the database file.
+    - qoi_functions: Dictionary of QoI functions (keys as names, values as lambda functions or strings).
+    Return:
+    - df_qois: DataFrame containing the extracted QoI values.
+    """
+    # Load the database structure
     df_metadata, df_samples, df_output = load_db_structure(db_file)
     # Recreate QoI functions from their string representations
     recreated_qoi_funcs = {
