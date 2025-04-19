@@ -5,4 +5,7 @@ __pycache__/*
 /uq_physicell.egg-info
 uq_physicell/uq_physicell.egg-*
 /dist
+/examples/PhysiCell-master/*
+UQ_PC_InputFolder/*
+UQ_PC_OutputFolder/*
 ALL_CITATIONS.txt
