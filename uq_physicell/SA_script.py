@@ -7,7 +7,7 @@ from concurrent.futures import ProcessPoolExecutor
 from uq_physicell import PhysiCell_Model
 from uq_physicell.SA_utils import run_replicate, create_db_structure, insert_metadata, insert_inputs, insert_output, check_existing_sa, summary_function, create_named_function_from_string, load_db_structure
 
-def run_sa_simulations(ini_filePath, strucName, SA_type, SA_method, SA_sampler, param_names, ref_values, bounds, perturbations, samples, qois_dic, db_file, use_mpi=False, use_futures=False, num_workers=1):
+def run_sa_simulations(ini_filePath, strucName, SA_type, SA_method, SA_sampler, param_names, ref_values, bounds, perturbations, dic_samples, qois_dic, db_file, use_mpi=False, use_futures=False, num_workers=1):
     """
     Parameters:
     - ini_filePath: Path to the initialization file.
@@ -19,7 +19,7 @@ def run_sa_simulations(ini_filePath, strucName, SA_type, SA_method, SA_sampler, 
     - ref_values: List of reference values for the parameters.
     - bounds: List of bounds for the parameters.
     - perturbations: List of perturbations for the parameters.
-    - samples: Array of sample inputs.
+    - dic_samples: dictionary of the dictionaries of samples
     - qois_dic: Dictionary of QoIs (keys as names, values as lambda functions or strings) - If empty store all data as a list of mcds.
     - db_file: Path to the database file.
     - use_mpi: Whether to use MPI for parallelism.
@@ -39,14 +39,15 @@ def run_sa_simulations(ini_filePath, strucName, SA_type, SA_method, SA_sampler, 
             PhysiCellModel = PhysiCell_Model(ini_filePath, strucName)
         except Exception as e:
             raise ValueError(f"Error initializing PhysiCell model: {e}")
-            return
         PhysiCellModel.info()
         # Check if the sensitivity analysis already exists
         try:
-            exist_db, All_Parameters, All_Samples, All_Replicates = check_existing_sa(PhysiCellModel, SA_type, SA_method, SA_sampler, param_names, ref_values, bounds, perturbations, samples, qois_dic, db_file)
+            exist_db, All_Parameters, All_Samples, All_Replicates = check_existing_sa(PhysiCellModel, SA_type, SA_method, SA_sampler, param_names, ref_values, bounds, perturbations, dic_samples, qois_dic, db_file)
         except Exception as e: 
-            raise ValueError("Sensitivity analysis with the same configuration already exists in the database.")
-            return
+            raise ValueError(f"Error checking existing sensitivity analysis: {e}")
+        # Load the database structure
+        conn = sqlite3.connect(db_file)
+        cursor = conn.cursor()
         # Remove the output folder - to avoid overwriting
         if os.path.exists(PhysiCellModel.output_folder):
             os.system('rm -rf ' + PhysiCellModel.output_folder)
@@ -54,18 +55,15 @@ def run_sa_simulations(ini_filePath, strucName, SA_type, SA_method, SA_sampler, 
             # Initialize database structure
             print(f"Creating database structure in {db_file}")
             create_db_structure(db_file)
-            conn = sqlite3.connect(db_file)
-            cursor = conn.cursor()
             # Insert metadata
             print(f"Inserting metadata into the database")
             try:
-                insert_metadata(cursor, SA_type, SA_method, SA_sampler, len(samples), param_names, bounds, ref_values, perturbations, qois_dic, ini_filePath, strucName)
+                insert_metadata(cursor, SA_type, SA_method, SA_sampler, len(dic_samples), param_names, bounds, ref_values, perturbations, qois_dic, ini_filePath, strucName)
             except Exception as e:
-                print(f"Error inserting metadata into the database: {e}")
-                return
+                raise ValueError(f"Error inserting metadata into the database: {e}")
             # Populate Inputs table
             print(f"Inserting input parameters into the database")
-            insert_inputs(cursor, samples, PhysiCellModel)
+            insert_inputs(cursor, dic_samples)
             conn.commit()
     else:
         PhysiCellModel = None
@@ -83,15 +81,15 @@ def run_sa_simulations(ini_filePath, strucName, SA_type, SA_method, SA_sampler, 
         All_Parameters = comm.bcast(All_Parameters, root=0)
 
     # Number of parameters expected in the XML and rules
-    num_params_xml = len(PhysiCellModel.XML_parameters_variable)
-    num_params_rules = len(PhysiCellModel.parameters_rules_variable)
+    params_xml = [param_name for param_name in PhysiCellModel.XML_parameters_variable.values()]
+    params_rules = [param_name for param_name in PhysiCellModel.parameters_rules_variable.values()]
 
     # Generate a three list with size NumSimulations
     if not exist_db:
-        if rank == 0: print(f"Generating {samples.shape[0]*PhysiCellModel.numReplicates} simulations")
-        for sampleID in range(samples.shape[0]):
+        if rank == 0: print(f"Generating {len(dic_samples)*PhysiCellModel.numReplicates} simulations")
+        for sampleID in dic_samples.keys():
             for replicateID in np.arange(PhysiCellModel.numReplicates):
-                All_Parameters.append(samples[sampleID])
+                All_Parameters.append(dic_samples[sampleID])
                 All_Samples.append(sampleID)
                 All_Replicates.append(replicateID)
     else:
@@ -103,9 +101,10 @@ def run_sa_simulations(ini_filePath, strucName, SA_type, SA_method, SA_sampler, 
         with ProcessPoolExecutor(max_workers=num_workers) as executor:
             futures = []
             for ind_sim in range(len(All_Samples)):
-                ParametersXML = All_Parameters[ind_sim][:num_params_xml] if num_params_xml > 0 else np.array([])
-                ParametersRules = All_Parameters[ind_sim][num_params_xml:] if num_params_rules > 0 else np.array([])
-                print(f"Submitting simulation: {ind_sim}, Sample: {All_Samples[ind_sim]}, Replicate: {All_Replicates[ind_sim]}, Parameters: {All_Parameters[ind_sim]}")
+                ParametersXML = {key: All_Parameters[ind_sim][key] for key in params_xml} if params_xml else np.array([])
+                ParametersRules = {key: All_Parameters[ind_sim][key] for key in params_rules} if params_rules else np.array([])
+                # print(f"Submitting simulation: {ind_sim}, Sample: {All_Samples[ind_sim]}, Replicate: {All_Replicates[ind_sim]}, "
+                #       f'Parameters XML: {ParametersXML}, Parameters rules: {ParametersRules}')
                 # Pass the serialized QoI functions to each process
                 futures.append(executor.submit(
                     run_replicate,
@@ -116,6 +115,7 @@ def run_sa_simulations(ini_filePath, strucName, SA_type, SA_method, SA_sampler, 
             for future in futures:
                 sample_id, replicate_id, result_data = future.result()
                 if rank == 0:
+                    print(f"Simulation finished - Sample: {sample_id}, Replicate: {replicate_id}, Parameters: {All_Parameters[sample_id]}.")
                     insert_output(cursor, sample_id, replicate_id, result_data)
                     conn.commit()
     else:
@@ -125,10 +125,11 @@ def run_sa_simulations(ini_filePath, strucName, SA_type, SA_method, SA_sampler, 
             print(f"Total number of simulations: {len(All_Samples)} Simulations per rank: {len(SplitIndexes[0])}")
         # Run simulations (MPI or sequential)
         for ind_sim in SplitIndexes[rank]:
-            ParametersXML = All_Parameters[ind_sim][:num_params_xml] if num_params_xml > 0 else np.array([])
-            ParametersRules = All_Parameters[ind_sim][num_params_xml:] if num_params_rules > 0 else np.array([])
-            print(f'Simulation: {ind_sim}, Sample: {All_Samples[ind_sim]}, Replicate: {All_Replicates[ind_sim]}, '
-                  f'Parameters XML: {ParametersXML}, Parameters rules: {ParametersRules}')
+            # Number of parameters expected in the XML and rules
+            ParametersXML = {key: All_Parameters[ind_sim][key] for key in params_xml} if params_xml else np.array([])
+            ParametersRules = {key: All_Parameters[ind_sim][key] for key in params_rules} if params_rules else np.array([])
+            # print(f'Simulation: {ind_sim}, Sample: {All_Samples[ind_sim]}, Replicate: {All_Replicates[ind_sim]}, '
+            #       f'Parameters XML: {ParametersXML}, Parameters rules: {ParametersRules}')
             result_data = run_replicate(PhysiCellModel, All_Samples[ind_sim], All_Replicates[ind_sim], ParametersXML,
                                                 ParametersRules, qois_dic if qois_dic else None)
             if use_mpi:
@@ -136,6 +137,7 @@ def run_sa_simulations(ini_filePath, strucName, SA_type, SA_method, SA_sampler, 
                     # Receive results from other ranks
                     for _ in range(1, size):
                         received_data = comm.recv(source=MPI.ANY_SOURCE)
+                        print(f"Simulation finished - Sample: {received_data['SampleID']}, Replicate: {received_data['ReplicateID']}, Parameters: {All_Parameters[received_data['SampleID']]}.")
                         insert_output(cursor, received_data['SampleID'], received_data['ReplicateID'], received_data['Data'])
                         conn.commit()
                 else:
