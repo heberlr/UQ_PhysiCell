@@ -52,6 +52,8 @@ class PhysiCell_Model:
         self.XML_parameters = configFile[keyModel].get('parameters', fallback=dict())
         if self.XML_parameters:
             self.XML_parameters = ast.literal_eval(self.XML_parameters)
+            # if number of omp_threads defined in fixed parameters overwrite the one in the .ini file
+            if ".//parallel/omp_num_threads" in list(self.XML_parameters.keys()): self.omp_num_threads = self.XML_parameters['.//parallel/omp_num_threads']
         self.XML_parameters_variable = {k: v[1] for k, v in self.XML_parameters.items() if isinstance(v, list)}
         self.XML_parameters_fixed = {k: v for k, v in self.XML_parameters.items() if not isinstance(v, list)}
         self.parameters_rules = configFile[keyModel].get('parameters_rules', fallback=dict())
@@ -69,7 +71,9 @@ class PhysiCell_Model:
         self.xml_ref_root = tree.getroot()
         if self.verbose:
             print(f"\t\t>> Checking parameters in XML file ...")
-        if not self.omp_num_threads: self.omp_num_threads = get_xml_element_value(self.xml_ref_root, './/parallel/omp_num_threads')
+        # if not in .ini file, get from XML
+        if not self.omp_num_threads: 
+            self.omp_num_threads = get_xml_element_value(self.xml_ref_root, './/parallel/omp_num_threads')
         for param_key in self.XML_parameters.keys():
             try:
                 get_xml_element_value(self.xml_ref_root, param_key)
