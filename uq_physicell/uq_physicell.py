@@ -30,8 +30,10 @@ class PhysiCell_Model:
             configFile.read_file(fd)
         # PhysiCell executable
         self.PC_executable = configFile[keyModel]['executable']
+        if not os.path.exists(self.PC_executable): raise ValueError(f"Error! Executable {self.PC_executable} not found!")
         # Path of XML file of reference
         self.XML_RefPath = configFile[keyModel]['configFile_ref']
+        if not os.path.exists(self.XML_RefPath): raise ValueError(f"Error! XML file {self.XML_RefPath} not found!")
         self.numReplicates = int(configFile[keyModel]['numReplicates'])
 
         #### Optional variables
@@ -41,6 +43,7 @@ class PhysiCell_Model:
         self.output_folder = configFile[keyModel].get('outputs_folder', fallback="UQ_PC_OutputFolder/") # folder to store the output folders
         self.outputs_folder_name = configFile[keyModel].get('outputs_folder_name', fallback="output_S%06d_R%03d/") # structure of output folders
         self.timeout = configFile[keyModel].get('timeout', fallback=60) # timeout for waiting to write files
+        self.generate_summary_File = configFile[keyModel].get('generate_summary_file', fallback=False) # generate csv file
         self.output_summary_Path = self.output_folder+'SummaryFile_%06d_%02d.csv'
         # Rules files and folder
         self.RULES_RefPath = configFile[keyModel].get('rulesFile_ref', fallback=None)
@@ -261,7 +264,7 @@ def RunModel(model: PhysiCell_Model, SampleID: int, ReplicateID: int, Parameters
                     for i, param_key in enumerate(model.parameters_rules_variable.values()):
                         dic_params[param_key] = ParametersRules[i]
             try:
-                if model.output_summary_Path:
+                if model.generate_summary_File:
                     SummaryFile = model.output_summary_Path % (SampleID, ReplicateID)
                     if model.verbose:
                         print(f"\t\t\t>>> Generating summary file {SummaryFile}...")
