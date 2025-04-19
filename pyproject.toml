@@ -49,7 +49,11 @@ dependencies = [
     "pcdl",
 ]
 
-urls = { "Homepage" = "https://github.com/heberlr/UQ_PhysiCell" }
+[project.scripts]
+uq_physicell = "uq_physicell.GUI_UQ:main"
+
+[project.urls]
+"Homepage" = "https://github.com/heberlr/UQ_PhysiCell"
 
 [tool.hatch.version]
 path = "uq_physicell/VERSION.py"
