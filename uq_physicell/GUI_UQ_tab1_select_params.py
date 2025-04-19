@@ -765,7 +765,7 @@ def save_ini_file(main_window):
 
             main_window.update_output_tab1(main_window, f"Successfully saved .ini file to: {file_path}")
             # Load the .ini file
-            main_window.load_ini_file(filePath=file_path, strucName=struc_name)
+            main_window.load_ini_file(main_window, filePath=file_path, strucName=struc_name)
         except Exception as e:
             main_window.update_output_tab1(main_window, f"Error saving .ini file: {e}")
 
