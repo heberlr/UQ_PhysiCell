@@ -419,8 +419,8 @@ def load_db_file(main_window, filePath=None):
                     # Bounds of parameters
                     bounds_str = main_window.df_metadata["Bounds"].iloc[0]
                     bounds_list = [
-                        list(map(float, filter(None, b.split(','))))  # Filter out empty strings after splitting
-                        for b in bounds_str.split() if b.strip()     # Ensure non-empty entries in bounds_str
+                        list(map(float, b.strip("[] ").split(',')))  # Remove brackets and split by comma
+                        for b in bounds_str.split(",") if b.strip()  # Split by comma and ensure non-empty entries
                     ]
                     # Reference values and perturbations
                     param_ref_str = main_window.df_metadata["Reference_Values"].iloc[0]
@@ -431,7 +431,7 @@ def load_db_file(main_window, filePath=None):
                     for id, param in enumerate(main_window.df_input['ParamName'].unique()):
                         main_window.global_SA_parameters[param] = {"bounds": bounds_list[id], "reference": param_ref_list[id], "range_percentage": param_perturb_list[id]}
                     # Convert df_input to a NumPy array with shape (number of samples, number of parameters)
-                    main_window.global_SA_parameters["samples"] = main_window.df_input.pivot(index="SampleID", columns="ParamName", values="ParamValue").reindex(columns=main_window.global_SA_parameters.keys()).to_dict()
+                    main_window.global_SA_parameters["samples"] = main_window.df_input.pivot(index="SampleID", columns="ParamName", values="ParamValue").to_dict(orient="index")
                 elif SA_type == "Local": # Disable local fields
                     main_window.local_param_combo.setEnabled(False)
                     main_window.local_ref_value_input.setEnabled(False)
@@ -443,11 +443,11 @@ def load_db_file(main_window, filePath=None):
                     param_ref_list = [float(r) for r in param_ref_str.split(',')]
                     param_pertub_str = main_window.df_metadata["Perturbations"].iloc[0]
                     param_pertub_list = [
-                        list(map(float, filter(None, b.split(','))))  # Filter out empty strings after splitting
-                        for b in bounds_str.split() if b.strip()     # Ensure non-empty entries in bounds_str
+                        list(map(float, b.strip("[] ").split(',')))  # Remove brackets, spaces, and split by comma
+                        for b in param_pertub_str.split(",") if b.strip()  # Split by comma and ensure non-empty entries
                     ]
                     # Convert df_input to a NumPy array with shape (number of samples, number of parameters)
-                    main_window.local_SA_parameters["samples"] = main_window.df_input.pivot(index="SampleID", columns="ParamName", values="ParamValue").reindex(columns=main_window.local_SA_parameters.keys()).to_dict()
+                    main_window.local_SA_parameters["samples"] = main_window.df_input.pivot(index="SampleID", columns="ParamName", values="ParamValue").to_dict(orient="index")
                     
                     # Create a dictionary for each parameter
                     for id, param in enumerate(main_window.df_input['ParamName'].unique()):
@@ -1067,7 +1067,6 @@ def run_analysis(main_window):
     df_qois.drop(columns=['ReplicateID'], inplace=True)
     df_qois = df_qois.set_index("SampleID").sort_index()
     # Convert df_input to a NumPy array with shape (number of samples, number of parameters)
-    samples = main_window.df_input.pivot(index="SampleID", columns="ParamName", values="ParamValue").sort_index().to_numpy()
     main_window.sa_results = { qoi: {time: None for time in all_times} for qoi in all_qois }
     main_window.qoi_time_values = { time: None for time in all_times }
     if main_window.analysis_type_dropdown.currentText() == "Global":
@@ -1081,6 +1080,7 @@ def run_analysis(main_window):
         for qoi in all_qois:
             for id_time, time in enumerate(list(main_window.qoi_time_values.keys())):
                 global_method = main_window.global_method_combo.currentText()
+                dic_params = np.array([[dic[param] for param in SA_problem['names']] for dic in main_window.global_SA_parameters["samples"].values()])
                 qoi_result = df_qois[f"{qoi}_{id_time}"].to_numpy()
                 print(f"qoi_result ({qoi}_{id_time}): {qoi_result}")
                 unique_times = df_qois[time].unique()
@@ -1090,27 +1090,27 @@ def run_analysis(main_window):
                 main_window.update_output_tab2(main_window, f"Running {global_method} for QoI: {qoi} and time: {main_window.qoi_time_values[time]}") 
                 # Run the sensitivity analysis
                 if global_method == "FAST - Fourier Amplitude Sensitivity Test":
-                    main_window.sa_results[qoi][time] = fast_analyze.analyze(SA_problem, samples, qoi_result)
+                    main_window.sa_results[qoi][time] = fast_analyze.analyze(SA_problem, dic_params, qoi_result)
                 elif global_method == "RBD-FAST - Random Balance Designs Fourier Amplitude Sensitivity Test":
-                    main_window.sa_results[qoi][time] = rbd_fast_analyze.analyze(SA_problem, samples, qoi_result)
+                    main_window.sa_results[qoi][time] = rbd_fast_analyze.analyze(SA_problem, dic_params, qoi_result)
                 elif global_method == "Method of Morris":
-                    main_window.sa_results[qoi][time] = morris_analyze.analyze(SA_problem, samples, qoi_result)
+                    main_window.sa_results[qoi][time] = morris_analyze.analyze(SA_problem, dic_params, qoi_result)
                 elif global_method == "Sobol Sensitivity Analysis":
-                    main_window.sa_results[qoi][time] = sobol_analyze.analyze(SA_problem, samples, qoi_result)
+                    main_window.sa_results[qoi][time] = sobol_analyze.analyze(SA_problem, dic_params, qoi_result)
                 elif global_method == "Delta Moment-Independent Measure":
-                    main_window.sa_results[qoi][time] = delta_analyze.analyze(SA_problem, samples, qoi_result)
+                    main_window.sa_results[qoi][time] = delta_analyze.analyze(SA_problem, dic_params, qoi_result)
                 elif global_method == "Derivative-based Global Sensitivity Measure (DGSM)":
-                    main_window.sa_results[qoi][time] = dgsm_analyze.analyze(SA_problem, samples, qoi_result)
+                    main_window.sa_results[qoi][time] = dgsm_analyze.analyze(SA_problem, dic_params, qoi_result)
                 elif global_method == "Fractional Factorial":
-                    main_window.sa_results[qoi][time] = ff_analyze.analyze(SA_problem, samples, qoi_result, second_order=True)
+                    main_window.sa_results[qoi][time] = ff_analyze.analyze(SA_problem, dic_params, qoi_result, second_order=True)
                 elif global_method == "PAWN Sensitivity Analysis":
-                    main_window.sa_results[qoi][time] = pawn_analyze.analyze(SA_problem, samples, qoi_result)
+                    main_window.sa_results[qoi][time] = pawn_analyze.analyze(SA_problem, dic_params, qoi_result)
                 elif global_method == "High-Dimensional Model Representation":
-                    main_window.sa_results[qoi][time] = hdmr_analyze.analyze(SA_problem, samples, qoi_result)
+                    main_window.sa_results[qoi][time] = hdmr_analyze.analyze(SA_problem, dic_params, qoi_result)
                 elif global_method == "Regional Sensitivity Analysis":
-                    main_window.sa_results[qoi][time] = rsa_analyze.analyze(SA_problem, samples, qoi_result)
+                    main_window.sa_results[qoi][time] = rsa_analyze.analyze(SA_problem, dic_params, qoi_result)
                 elif global_method == "Discrepancy Sensitivity Indices":
-                    main_window.sa_results[qoi][time] = discrepancy_analyze.analyze(SA_problem, samples, qoi_result)
+                    main_window.sa_results[qoi][time] = discrepancy_analyze.analyze(SA_problem, dic_params, qoi_result)
                 else:
                     main_window.update_output_tab2(main_window, "Error: Invalid global method selected.")
         
@@ -1122,8 +1122,8 @@ def run_analysis(main_window):
         for qoi in all_qois:
             for id_time, time in enumerate(list(main_window.qoi_time_values.keys())):
                 local_method = "OAT"
-                qoi_result = df_qois[f"{qoi}_{id_time}"].to_numpy()
-                print(f"qoi_result ({qoi}_{id_time}): {qoi_result}")
+                qoi_result = df_qois[f"{qoi}_{id_time}"].to_dict()
+                print(f"qoi_result ({qoi}_{id_time}): {qoi_result.values()}")
                 unique_times = df_qois[time].unique()
                 if len(unique_times) != 1:
                     raise ValueError(f"Expected a single unique value for time '{time}', but found: {unique_times}")
@@ -1131,7 +1131,7 @@ def run_analysis(main_window):
                 main_window.update_output_tab2(main_window, f"Running {local_method} for QoI: {qoi} and time: {main_window.qoi_time_values[time]}")
                 # Run the sensitivity analysis
                 if local_method == "OAT":
-                    main_window.sa_results[qoi][time] = OAT_analyze(param_names, samples, qoi_result)
+                    main_window.sa_results[qoi][time] = OAT_analyze(main_window.local_SA_parameters["samples"], qoi_result)
                     # It will return a sensitivity index for each perturbation - sum them
                     for key in main_window.sa_results[qoi][time]: main_window.sa_results[qoi][time][key] = np.sum(main_window.sa_results[qoi][time][key])
                 else:
