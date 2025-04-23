@@ -1082,10 +1082,15 @@ def run_analysis(main_window):
                 global_method = main_window.global_method_combo.currentText()
                 dic_params = np.array([[dic[param] for param in SA_problem['names']] for dic in main_window.global_SA_parameters["samples"].values()])
                 qoi_result = df_qois[f"{qoi}_{id_time}"].to_numpy()
+                if len(qoi_result) != len(dic_params):
+                    main_window.update_output_tab2(main_window, f"Error: Mismatch between number of samples ({len(dic_params)}) and QoI results ({len(qoi_result)})!")
+                    return
+                # Convert qoi_result to a dictionary
                 print(f"qoi_result ({qoi}_{id_time}): {qoi_result}")
                 unique_times = df_qois[time].unique()
                 if len(unique_times) != 1:
-                    raise ValueError(f"Expected a single unique value for time '{time}', but found: {unique_times}")
+                    main_window.update_output_tab2(main_window, f"Expected a single unique value for time '{time}', but found: {unique_times}")
+                    return
                 main_window.qoi_time_values[time] = unique_times[0]
                 main_window.update_output_tab2(main_window, f"Running {global_method} for QoI: {qoi} and time: {main_window.qoi_time_values[time]}") 
                 # Run the sensitivity analysis
@@ -1184,6 +1189,7 @@ def plot_sa_results(main_window):
         selected_time = next((key for key, value in main_window.qoi_time_values.items() if str(value) == plot_sa_time_dropdown.currentText()), None)
         # Clear the previous plot
         print(f"Plotting {selected_qoi} at time {selected_time} - {main_window.sa_results[selected_qoi][selected_time]}")
+        print(main_window.sa_results[selected_qoi][selected_time].keys())
         figure.clear()
         if main_window.analysis_type_dropdown.currentText() == "Global":
             SA_method = main_window.global_method_combo.currentText()
