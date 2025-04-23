@@ -28,7 +28,7 @@ def create_named_function_from_string(func_str, qoi_name):
         )
     return globals()[func_name]
 
-def summary_function(outputPath, summaryFile, dic_params, SampleID, ReplicateID, qoi_functions):
+def summary_function(outputPath, summaryFile, dic_params, SampleID, ReplicateID, qoi_functions, drop_columns):
     """
     A standalone function to encapsulate the summary function logic.
     Parameters:
@@ -50,12 +50,13 @@ def summary_function(outputPath, summaryFile, dic_params, SampleID, ReplicateID,
             ReplicateID=ReplicateID,
             qoi_funcs=qoi_functions,
             mode='time_series',
-            RemoveFolder=True
+            RemoveFolder=True,
+            drop_columns=drop_columns
         )
     except Exception as e:
         raise RuntimeError(f"Error in summary function: {e}")
 
-def run_replicate(PhysiCellModel, sample_id, replicate_id, ParametersXML, ParametersRules, qoi_functions):
+def run_replicate(PhysiCellModel, sample_id, replicate_id, ParametersXML, ParametersRules, qoi_functions, drop_columns):
     """
     Run a single replicate of the simulation and return the results.
     Parameters:
@@ -83,7 +84,7 @@ def run_replicate(PhysiCellModel, sample_id, replicate_id, ParametersXML, Parame
     result_data = PhysiCellModel.RunModel(
         sample_id, replicate_id, ParametersXML,
         ParametersRules=ParametersRules,
-        SummaryFunction=lambda *args: summary_function(*args, qoi_functions=recreated_qoi_funcs)
+        SummaryFunction=lambda *args: summary_function(*args, qoi_functions=recreated_qoi_funcs, drop_columns=drop_columns),
     )
     # print(f"Simulation completed for SampleID: {sample_id}, ReplicateID: {replicate_id}\n Result.head(): {result_data.head()}")
     
@@ -102,44 +103,50 @@ def create_db_structure(db_file):
     - db_file: Path to the database file.
     """
     if os.path.exists(db_file):
-        os.remove(db_file)
-    conn = sqlite3.connect(db_file)
-    cursor = conn.cursor()
-    # Create Metadata table
-    cursor.execute('''
-        CREATE TABLE Metadata (
-            SA_Type TEXT,
-            SA_Method TEXT,
-            SA_Sampler TEXT,
-            Num_Samples INTEGER,
-            Param_Names TEXT,
-            Bounds TEXT,
-            Reference_Values TEXT,
-            Perturbations TEXT,
-            QoIs TEXT,
-            QoIs_Functions TEXT,
-            Ini_File_Path TEXT,
-            StructureName TEXT
-        )
-    ''')
-    # Create Inputs table
-    cursor.execute('''
-        CREATE TABLE Inputs (
-            SampleID INTEGER,
-            ParamName TEXT,
-            ParamValue DOUBLE
-        )
-    ''')
-    # Create Results table
-    cursor.execute('''
-        CREATE TABLE Results (
-            SampleID INTEGER,
-            ReplicateID INTEGER,
-            Data BLOB
-        )
-    ''')
-    conn.commit()
-    conn.close()
+        try: os.remove(db_file)
+        except Exception as e:
+            raise RuntimeError(f"Error removing existing database file: {e}")
+    try:
+        # Create a new SQLite database
+        conn = sqlite3.connect(db_file)
+        cursor = conn.cursor()
+        # Create Metadata table
+        cursor.execute('''
+            CREATE TABLE Metadata (
+                SA_Type TEXT,
+                SA_Method TEXT,
+                SA_Sampler TEXT,
+                Num_Samples INTEGER,
+                Param_Names TEXT,
+                Bounds TEXT,
+                Reference_Values TEXT,
+                Perturbations TEXT,
+                QoIs TEXT,
+                QoIs_Functions TEXT,
+                Ini_File_Path TEXT,
+                StructureName TEXT
+            )
+        ''')
+        # Create Inputs table
+        cursor.execute('''
+            CREATE TABLE Inputs (
+                SampleID INTEGER,
+                ParamName TEXT,
+                ParamValue DOUBLE
+            )
+        ''')
+        # Create Results table
+        cursor.execute('''
+            CREATE TABLE Results (
+                SampleID INTEGER,
+                ReplicateID INTEGER,
+                Data BLOB
+            )
+        ''')
+        conn.commit()
+        conn.close()
+    except sqlite3.Error as e:
+        raise RuntimeError(f"Error generating tables: {e}")
 
 def convert_to_str(param_names: list, bounds: Union[list, None], ref_values: list, pert: list, qois: Union[list, None], qois_fun: Union[list, None]) -> tuple:
     """
@@ -198,14 +205,20 @@ def insert_metadata(cursor, SA_type, SA_method, SA_sampler, num_samples, param_n
     qoi_keys = list(qois_dic.keys()) if qois_dic else None
     qois_func = list(qois_dic.values()) if qois_dic else None
     # Convert the values to strings for database storage
-    try: param_names_str, bounds_str, ref_values_str, pert_str, qois_str, qois_fun_str = convert_to_str(param_names, bounds, ref_values, pert, qoi_keys, qois_func)
+    try:
+        param_names_str, bounds_str, ref_values_str, pert_str, qois_str, qois_fun_str = convert_to_str(
+            param_names, bounds, ref_values, pert, qoi_keys, qois_func
+        )
     except Exception as e:
         raise ValueError(f"Error converting values to strings: {e}")
-    
-    cursor.execute('''
-        INSERT INTO Metadata (SA_Type, SA_Method, SA_Sampler, Num_Samples, Param_Names, Bounds, Reference_Values, Perturbations, QoIs, QoIs_Functions, Ini_File_Path, StructureName)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (SA_type, SA_method, SA_sampler, num_samples, param_names_str, bounds_str, ref_values_str, pert_str, qois_str, qois_fun_str, ini_file_path, strucName))
+
+    try:
+        cursor.execute('''
+            INSERT INTO Metadata (SA_Type, SA_Method, SA_Sampler, Num_Samples, Param_Names, Bounds, Reference_Values, Perturbations, QoIs, QoIs_Functions, Ini_File_Path, StructureName)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (SA_type, SA_method, SA_sampler, num_samples, param_names_str, bounds_str, ref_values_str, pert_str, qois_str, qois_fun_str, ini_file_path, strucName))
+    except sqlite3.Error as e:
+        raise RuntimeError(f"Error inserting: {e}")
 
 def insert_inputs(cursor, dic_samples, sample_ids=None):
     """
@@ -215,11 +228,14 @@ def insert_inputs(cursor, dic_samples, sample_ids=None):
     - dic_samples: Dictionary of the dictionaries of samples
     - sample_ids: List of sample IDs to insert. If None, all samples will be inserted.
     """
-    sample_ids = sample_ids if sample_ids is not None else dic_samples.keys() 
-    for samp_id in sample_ids:
-        for param_name, param_value in dic_samples[samp_id].items():
-            cursor.execute('INSERT INTO Inputs (SampleID, ParamName, ParamValue) VALUES (?, ?, ?)',
-                           (samp_id, param_name, param_value))
+    sample_ids = sample_ids if sample_ids is not None else dic_samples.keys()
+    try:
+        for samp_id in sample_ids:
+            for param_name, param_value in dic_samples[samp_id].items():
+                cursor.execute('INSERT INTO Inputs (SampleID, ParamName, ParamValue) VALUES (?, ?, ?)',
+                               (samp_id, param_name, param_value))
+    except sqlite3.Error as e:
+        raise RuntimeError(f"Error inserting inputs into the database: {e}")
 
 def insert_output(cursor, sample_id, replicate_id, result_data):
     """
@@ -230,8 +246,11 @@ def insert_output(cursor, sample_id, replicate_id, result_data):
     - replicate_id: The replicate ID.
     - result_data: The simulation results data (as binary).
     """
-    cursor.execute('INSERT INTO Results (SampleID, ReplicateID, Data) VALUES (?, ?, ?)',
-                   (sample_id, int(replicate_id), sqlite3.Binary(result_data)))
+    try:
+        cursor.execute('INSERT INTO Results (SampleID, ReplicateID, Data) VALUES (?, ?, ?)',
+                       (sample_id, int(replicate_id), sqlite3.Binary(result_data)))
+    except sqlite3.Error as e:
+        raise RuntimeError(f"Error inserting output into the database: {e}")
 
 def check_existing_sa(PhysiCellModel, SA_type, SA_method, SA_sampler, param_names, ref_values, bounds, perturbations, dic_samples, qois_dic, db_file):
     """
@@ -368,7 +387,7 @@ def OAT_analyze(dic_samples, dic_qoi):
     Perform OAT analysis on the results.
     Parameters:
     - dic_samples: dictionary of the dictionaries of samples
-    - dic_qoi_array: dictionary of QoIs
+    - dic_qoi: dictionary of QoIs
     Return:
     - dic_results: dictionary of the results
     """
@@ -376,8 +395,9 @@ def OAT_analyze(dic_samples, dic_qoi):
     ref_pars = dic_samples[0]
     qoi_ref = dic_qoi[0]
     # Remove unused variables ref_pars and qoi_ref
-    par_samples = np.array(list(dic_samples.values())[1:])
-    qoi_samples = np.array(list(dic_qoi.values())[1:])
+    # Extract parameter samples and QoI samples, excluding the reference sample (SampleID 0)
+    par_samples = np.array([list(sample.values()) for sample_id, sample in dic_samples.items() if sample_id != 0])
+    qoi_samples = np.array([qoi for sample_id, qoi in dic_qoi.items() if sample_id != 0])
     # Initialize the results dictionary
     dic_results = {}
     for id, par in enumerate(ref_pars.keys()):
