@@ -55,7 +55,7 @@ def summ_func_TimeSeriesPopLiveDead(outputPath:str,summaryFile:Union[str,None], 
 
 
 # Generic function for creating custom QoIs (Quantities of Interest)
-def generic_QoI(outputPath: str, summaryFile: Union[str, None], dic_params: dict, SampleID: int, ReplicateID: int, qoi_funcs: dict, mode: str = 'time_series', RemoveFolder: bool = True) -> Union[pd.DataFrame, None]:
+def generic_QoI(outputPath: str, summaryFile: Union[str, None], dic_params: dict, SampleID: int, ReplicateID: int, qoi_funcs: dict, mode: str = 'time_series', RemoveFolder: bool = True, drop_columns:list = []) -> Union[pd.DataFrame, None]:
     """
     Generic function for creating custom QoIs (Quantities of Interest) based on df_cell elements.
 
@@ -75,26 +75,49 @@ def generic_QoI(outputPath: str, summaryFile: Union[str, None], dic_params: dict
         if mode == 'last_snapshot':
             # Load the last snapshot
             mcds = pcdl.TimeStep('final.xml', outputPath, microenv=False, graph=False, settingxml=None, verbose=False)
-            df_cell = mcds.get_cell_df()
+            if qoi_funcs is None:
+                # Optional: Remove replicate output folder
+                if (RemoveFolder): rmtree(outputPath)
+                # Entire mcds is returned if drop_columns is empty
+                if not drop_columns:
+                    return [mcds]
+                else:
+                    df_cell = mcds.get_cell_df()
+                    df_cell = mcds.get_cell_df()  # Ensure df_cell is initialized
+                    df_cell.drop(columns=drop_columns, inplace=True, errors='ignore')
+                return [df_cell]
+                    
+            else:
+                df_cell = mcds.get_cell_df()
 
-            # Compute QoIs
-            qoi_data = {name: func(df_cell) for name, func in qoi_funcs.items()}
-            data = {
-                'time': mcds.get_time(),
-                'sampleID': SampleID,
-                'replicateID': ReplicateID,
-                **qoi_data
-            }
-            data_conc = {**data, **dic_params}
-            df = pd.DataFrame([data_conc])
+                # Compute QoIs
+                qoi_data = {name: func(df_cell) for name, func in qoi_funcs.items()}
+                data = {
+                    'time': mcds.get_time(),
+                    'sampleID': SampleID,
+                    'replicateID': ReplicateID,
+                    **qoi_data
+                }
+                data_conc = {**data, **dic_params}
+                df = pd.DataFrame([data_conc])
 
         elif mode == 'time_series':
             # Load the time series
             mcds_ts = pcdl.TimeSeries(outputPath, microenv=False, graph=False, settingxml=None, verbose=False)
-            df_list = []
             #  All data is stored as a list of mcds
             if qoi_funcs is None:
-                return mcds_ts.get_mcds_list()
+                # Optional: Remove replicate output folder
+                if (RemoveFolder): rmtree(outputPath)
+                # Entire list of mcds is returned if drop_columns is empty
+                if not drop_columns:
+                    return mcds_ts.get_mcds_list()
+                else:
+                    df_list = []
+                    for mcds in mcds_ts.get_mcds_list():
+                        df_cell = mcds.get_cell_df()
+                        df_cell.drop(columns=drop_columns, inplace=True, errors='ignore')
+                        df_list.append(df_cell)
+                    return df_list
             else:
                 for mcds in mcds_ts.get_mcds_list():
                     df_cell = mcds.get_cell_df()
