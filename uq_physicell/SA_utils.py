@@ -424,11 +424,12 @@ def extract_qoi_from_db(db_file, qoi_functions):
         qoi_name: create_named_function_from_string(qoi_value, qoi_name)
         for qoi_name, qoi_value in qoi_functions.items()
     }
-    PhysiCellModel = PhysiCell_Model(df_metadata['Ini_File_Path'][0], df_metadata['StructureName'][0])
     df_qois = pd.DataFrame()
     for SampleID in df_output['SampleID'].unique():
-        for ReplicateID in df_output['ReplicateID'].unique():
-            mcds_ts_list = df_output[(df_output['SampleID'] == SampleID) & (df_output['ReplicateID'] == ReplicateID)]['Data'].values[0]
+        df_sample = df_output[df_output['SampleID'] == SampleID]
+        for ReplicateID in df_sample['ReplicateID'].unique():
+            mcds_ts_list = df_sample[df_sample['ReplicateID'] == ReplicateID]['Data'].values[0]
+            # print(f"SampleID: {SampleID}, ReplicateID: {ReplicateID} - mcds_ts_list: {mcds_ts_list}")
             data = {'SampleID': SampleID, 'ReplicateID': ReplicateID}
             for id_time, mcds in enumerate(mcds_ts_list):
                 data[f"time_{id_time}"] = mcds.get_time()
