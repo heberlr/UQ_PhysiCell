@@ -29,7 +29,7 @@ def run_replicate_serializable(ini_path, struc_name, sampleID, replicateID, Para
     try:
         PhysiCellModel = PhysiCell_Model(ini_path, struc_name)
         if custom_summary_function:
-            result_data_nonserialized = PhysiCellModel.runModel(
+            result_data_nonserialized = PhysiCellModel.RunModel(
                 sampleID, replicateID, ParametersXML, ParametersRules, RemoveConfigFile=True, SummaryFunction=custom_summary_function)
             result_data = pickle.dumps(result_data_nonserialized)
         else:
@@ -184,7 +184,7 @@ def run_sa_simulations(ini_filePath, strucName, SA_type, SA_method, SA_sampler, 
             ParametersXML = {key: All_Parameters[ind_sim][key] for key in params_xml} if params_xml else np.array([])
             ParametersRules = {key: All_Parameters[ind_sim][key] for key in params_rules} if params_rules else np.array([])
             if custom_summary_function:
-                result_data_nonserialized = PhysiCellModel.runModel(
+                result_data_nonserialized = PhysiCellModel.RunModel(
                     All_Samples[ind_sim], All_Replicates[ind_sim], ParametersXML, ParametersRules, RemoveConfigFile=True, SummaryFunction=custom_summary_function)
                 result_data = pickle.dumps(result_data_nonserialized)
             else:
@@ -226,7 +226,7 @@ def run_sa_simulations(ini_filePath, strucName, SA_type, SA_method, SA_sampler, 
             ParametersXML = {key: All_Parameters[ind_sim][key] for key in params_xml} if params_xml else np.array([])
             ParametersRules = {key: All_Parameters[ind_sim][key] for key in params_rules} if params_rules else np.array([])
             if custom_summary_function:
-                result_data_nonserialized = PhysiCellModel.runModel(
+                result_data_nonserialized = PhysiCellModel.RunModel(
                     All_Samples[ind_sim], All_Replicates[ind_sim], ParametersXML, ParametersRules, RemoveConfigFile=True, SummaryFunction=custom_summary_function)
                 result_data = pickle.dumps(result_data_nonserialized)
             else:
