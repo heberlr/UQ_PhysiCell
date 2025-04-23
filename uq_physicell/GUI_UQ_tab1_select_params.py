@@ -142,8 +142,13 @@ def create_tab1(main_window):
     main_window.executable_path_label = QLabel("Executable Path:")
     main_window.save_hbox.addWidget(main_window.executable_path_label)
     main_window.executable_path_input = QLineEdit()
+    main_window.executable_path_input.setEnabled(False)
+    main_window.executable_path_input.setPlaceholderText("Enter executable path")
+    main_window.executable_path_browse_button = QPushButton("Browse")
+    main_window.executable_path_browse_button.clicked.connect(lambda: main_window.executable_path_input.setText(QFileDialog.getOpenFileName(main_window, "Select Executable", "", "Executable Files (*)")[0]))
     main_window.executable_path_input.setPlaceholderText("Enter executable path")
     main_window.save_hbox.addWidget(main_window.executable_path_input)
+    main_window.save_hbox.addWidget(main_window.executable_path_browse_button)
 
     # Number of Replicates input
     main_window.num_replicates_label = QLabel("Num Replicates:")
