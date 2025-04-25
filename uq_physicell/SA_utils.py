@@ -302,13 +302,16 @@ def check_existing_sa(PhysiCellModel, SA_type, SA_method, SA_sampler, param_name
             "QoIs_Functions": qois_fun_str,
         }
         for key, expected in metadata_checks.items():
+            # Do not check Bounds because it can differ according to the samples seed
+            if key == "Bounds": continue
             # print(f"Checking {key}: Expected: {expected}, Found: {df_metadata[key].iloc[0]}")
             if df_metadata[key].iloc[0] != expected:
                 raise ValueError(f"{key} mismatch. Expected: {expected}, Found: {df_metadata[key].iloc[0]}.")
 
         # Check for missing samples
-        samples_db = df_inputs.pivot(index="SampleID", columns="ParamName", values="ParamValue").reindex(columns=param_names).to_dict()
-        missing_samples = [sample_id for sample_id in dic_samples.keys() if sample_id  in set(samples_db.keys())]
+        samples_db = df_inputs.pivot(index="SampleID", columns="ParamName", values="ParamValue").reindex(columns=param_names).to_dict(orient="index")
+        missing_samples = [sample_id for sample_id in dic_samples.keys() if sample_id not in set(samples_db.keys())]
+        print(f"Missing samples: {missing_samples}")
         
         # Add missing samples to the database
         if missing_samples:
@@ -325,7 +328,12 @@ def check_existing_sa(PhysiCellModel, SA_type, SA_method, SA_sampler, param_name
         for sample_id in dic_samples.keys():
             missing_replicates = set(range(PhysiCellModel.numReplicates)) - completed_replicates.get(sample_id, set())
             if missing_replicates:
-                parameters_missing.extend(dic_samples[sample_id] for _ in missing_replicates)
+                # Add from dic_samples if missing samples - Meaning that extra samples were added
+                # else add from db_samples to avoid duplicates
+                if missing_samples:
+                    parameters_missing.extend(dic_samples[sample_id] for _ in missing_replicates)
+                else:
+                    parameters_missing.extend(samples_db[sample_id] for _ in missing_replicates)
                 samples_missing.extend(sample_id for _ in missing_replicates)
                 replicates_missing.extend(missing_replicates)
 

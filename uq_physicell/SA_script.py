@@ -180,7 +180,7 @@ def run_sa_simulations(ini_filePath, strucName, SA_type, SA_method, SA_sampler, 
         print(f"Rank {rank} assigned {len(SplitIndexes[rank])} simulations.")
 
         # Run simulations (MPI)
-        for round_id, ind_sim in enumerate(SplitIndexes[rank]):
+        for ind_sim in SplitIndexes[rank]:
             ParametersXML = {key: All_Parameters[ind_sim][key] for key in params_xml} if params_xml else np.array([])
             ParametersRules = {key: All_Parameters[ind_sim][key] for key in params_rules} if params_rules else np.array([])
             if custom_summary_function:
@@ -217,12 +217,9 @@ def run_sa_simulations(ini_filePath, strucName, SA_type, SA_method, SA_sampler, 
     # Running sequentially
     ###################################
     else:
-        # Split simulations into rank 0
-        SplitIndexes = np.array_split(np.arange(len(All_Samples)), size, axis=0)
-        print(f"Rank {rank} assigned {len(SplitIndexes[rank])} simulations.")
-
+        print(f"Rank {rank} assigned {len(All_Samples)} simulations.")
         # Run simulations sequentially
-        for round_id, ind_sim in enumerate(SplitIndexes[rank]):
+        for ind_sim in range(len(All_Samples)):
             ParametersXML = {key: All_Parameters[ind_sim][key] for key in params_xml} if params_xml else np.array([])
             ParametersRules = {key: All_Parameters[ind_sim][key] for key in params_rules} if params_rules else np.array([])
             if custom_summary_function:
