@@ -4,7 +4,10 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QIntValidator, QDoubleValidator
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
+import seaborn as sns
 import numpy as np
+import pandas as pd
+import re # for regex (manipulating strings)
 
 # SA library
 from SALib.sample import fast_sampler, ff, finite_diff, latin, sobol, morris
@@ -12,7 +15,8 @@ from SALib.analyze import fast as fast_analyze, rbd_fast as rbd_fast_analyze, ff
 
 # My local modules
 from uq_physicell.SA_script import run_sa_simulations
-from uq_physicell.SA_utils import load_db_structure, OAT_analyze, extract_qoi_from_db
+from uq_physicell.SA_utils import load_db_structure, OAT_analyze, extract_qoi_from_db, reshape_expanded_data
+
 
 def create_tab2(main_window):
     # Add the following methods to the main_window instance
@@ -31,6 +35,8 @@ def create_tab2(main_window):
     main_window.run_simulations = run_simulations
     main_window.run_analysis = run_analysis
     main_window.plot_sa_results = plot_sa_results
+    main_window.plot_qois = plot_qois
+    main_window.calculate_qois = calculate_qois
 
     layout_tab2 = QVBoxLayout()
 
@@ -187,7 +193,7 @@ def create_tab2(main_window):
     layout_tab2.addWidget(main_window.fig_est_canvas_samples)
 
     ###########################################
-    # Horizontal layout for db file name, QoI selection, and run SA button
+    # Horizontal layout for db file name, QoI selection, plot_qoi, and run SA button
     ###########################################
     main_window.analysis_type_label = QLabel("<b>Database, QoI, Simulations, and Sensitivity Analysis</b>")
     main_window.analysis_type_label.setAlignment(Qt.AlignCenter)
@@ -201,7 +207,7 @@ def create_tab2(main_window):
     main_window.db_file_name_input.setEnabled(False)
     main_window.db_file_name_hbox.addWidget(main_window.db_file_name_input)
     # Button to open QoI definition window
-    main_window.define_qoi_button = QPushButton("Define QoI")
+    main_window.define_qoi_button = QPushButton("Define QoI(s)")
     main_window.define_qoi_button.setEnabled(False)
     main_window.define_qoi_button.clicked.connect(lambda: open_qoi_definition_window(main_window))
     main_window.db_file_name_hbox.addWidget(main_window.define_qoi_button)
@@ -210,6 +216,11 @@ def create_tab2(main_window):
     main_window.run_simulations_button.setEnabled(False)
     main_window.run_simulations_button.clicked.connect(lambda: main_window.run_simulations(main_window))
     main_window.db_file_name_hbox.addWidget(main_window.run_simulations_button)
+    # Plot QoI button
+    main_window.plot_qois_button = QPushButton("Plot QoI(s)")
+    main_window.plot_qois_button.setEnabled(False)
+    main_window.plot_qois_button.clicked.connect(lambda: main_window.plot_qois(main_window))
+    main_window.db_file_name_hbox.addWidget(main_window.plot_qois_button)
     # Run SA button
     main_window.run_sa_button = QPushButton("Run SA")
     main_window.run_sa_button.setEnabled(False)
@@ -256,19 +267,27 @@ def open_qoi_definition_window(main_window):
     instructions_label = QLabel("Define your QoIs below:")
     layout.addWidget(instructions_label)
 
-    # Predefined QoIs dictionary
-    predefined_qoi_funcs = {
-        'total_cells': "lambda df: len(df)",
-        'live_cells': "lambda df: len(df[df['dead'] == False])",
-        'dead_cells': "lambda df: len(df[df['dead'] == True])",
-        'max_volume': "lambda df: df['total_volume'].max()",
-        'min_volume': "lambda df: df['total_volume'].min()",
-        'mean_volume': "lambda df: df['total_volume'].mean()",
-        'std_volume': "lambda df: df['total_volume'].std()",
-        'total_volume': "lambda df: df['total_volume'].sum()",
-        'template_cellType_live': "lambda df: len( df[ (df['dead'] == False) & (df['cell_type'] == <cellType>) ])",
-    }
+    # Predefined QoIs dictionary based on the database structure
+    custom_qoi_option = True
+    if isinstance(main_window.df_output['Data'].iloc[0], pd.DataFrame):
+        predefined_qoi_funcs = {qoi_name: None for qoi_name in main_window.df_output['Data'].iloc[0].columns if qoi_name not in ['time'] }
+        custom_qoi_option = False
+    else:
+        predefined_qoi_funcs = {
+            'total_cells': "lambda df: len(df)",
+            'live_cells': "lambda df: len(df[df['dead'] == False])",
+            'dead_cells': "lambda df: len(df[df['dead'] == True])",
+            'max_volume': "lambda df: df['total_volume'].max()",
+            'min_volume': "lambda df: df['total_volume'].min()",
+            'mean_volume': "lambda df: df['total_volume'].mean()",
+            'std_volume': "lambda df: df['total_volume'].std()",
+            'total_volume': "lambda df: df['total_volume'].sum()",
+            'template_cellType_live': "lambda df: len( df[ (df['dead'] == False) & (df['cell_type'] == <cellType>) ])",
+        }
 
+    # Reset the qois
+    main_window.df_qois = pd.DataFrame()
+    
     # Predefined QoIs section
     predefined_qoi_label = QLabel("<b>Select Predefined QoIs</b>")
     predefined_qoi_label.setAlignment(Qt.AlignCenter)
@@ -283,7 +302,7 @@ def open_qoi_definition_window(main_window):
 
     predefined_qoi_lambda_display = QTextEdit()
     predefined_qoi_lambda_display.setReadOnly(True)
-    predefined_qoi_lambda_display.setText(predefined_qoi_funcs['live_cells'])  # Default display
+    predefined_qoi_lambda_display.setText(list(predefined_qoi_funcs.keys())[0])  # Default display first qoi
     layout.addWidget(predefined_qoi_lambda_display)
 
     # Update lambda display when a predefined QoI is selected
@@ -301,20 +320,24 @@ def open_qoi_definition_window(main_window):
     # Custom QoI section
     custom_qoi_label = QLabel("<b>Define Custom QoIs</b>")
     custom_qoi_label.setAlignment(Qt.AlignCenter)
+    custom_qoi_label.setEnabled(custom_qoi_option)
     layout.addWidget(custom_qoi_label)
 
     # Input field for custom QoI name
     custom_qoi_name_input = QLineEdit()
     custom_qoi_name_input.setPlaceholderText("Enter QoI name")
+    custom_qoi_name_input.setEnabled(custom_qoi_option)
     layout.addWidget(custom_qoi_name_input)
 
     # Input field for custom lambda function
     custom_lambda_input = QLineEdit()
     custom_lambda_input.setPlaceholderText("Enter lambda function (e.g., lambda df: len(df[df['dead'] == False]))")
+    custom_lambda_input.setEnabled(custom_qoi_option)
     layout.addWidget(custom_lambda_input)
 
     # Add custom QoI button
     add_custom_qoi_button = QPushButton("Add Custom QoI")
+    add_custom_qoi_button.setEnabled(custom_qoi_option)
     layout.addWidget(add_custom_qoi_button)
 
     # Separator line
@@ -418,9 +441,11 @@ def load_db_file(main_window, filePath=None):
                     main_window.global_SA_parameters = {}
                     # Bounds of parameters
                     bounds_str = main_window.df_metadata["Bounds"].iloc[0]
+                    # Preprocess the string to replace `np.float64(...)` with valid floats
+                    bounds_str = re.sub(r"np\.float64\((.*?)\)", r"\1", bounds_str)
                     bounds_list = [
-                        list(map(float, b.strip("[] ").split(',')))  # Remove brackets and split by comma
-                        for b in bounds_str.split(",") if b.strip()  # Split by comma and ensure non-empty entries
+                        list(map(float, b.strip("[]").split(',')))  # Remove brackets, np.float64, and split by comma
+                        for b in bounds_str.strip("[]").split("], [")  # Split by "], [" to handle lists of parameters
                     ]
                     # Reference values and perturbations
                     param_ref_str = main_window.df_metadata["Reference_Values"].iloc[0]
@@ -432,6 +457,7 @@ def load_db_file(main_window, filePath=None):
                         main_window.global_SA_parameters[param] = {"bounds": bounds_list[id], "reference": param_ref_list[id], "range_percentage": param_perturb_list[id]}
                     # Convert df_input to a NumPy array with shape (number of samples, number of parameters)
                     main_window.global_SA_parameters["samples"] = main_window.df_input.pivot(index="SampleID", columns="ParamName", values="ParamValue").to_dict(orient="index")
+                    # print(main_window.global_SA_parameters)
                 elif SA_type == "Local": # Disable local fields
                     main_window.local_param_combo.setEnabled(False)
                     main_window.local_ref_value_input.setEnabled(False)
@@ -442,9 +468,11 @@ def load_db_file(main_window, filePath=None):
                     param_ref_str = main_window.df_metadata["Reference_Values"].iloc[0]
                     param_ref_list = [float(r) for r in param_ref_str.split(',')]
                     param_pertub_str = main_window.df_metadata["Perturbations"].iloc[0]
+                    # Preprocess the string to replace `np.float64(...)` with valid floats
+                    param_pertub_str = re.sub(r"np\.float64\((.*?)\)", r"\1", param_pertub_str)
                     param_pertub_list = [
                         list(map(float, b.strip("[] ").split(',')))  # Remove brackets, spaces, and split by comma
-                        for b in param_pertub_str.split(",") if b.strip()  # Split by comma and ensure non-empty entries
+                        for b in param_pertub_str.strip("[]").split("], [")  # Split by "], [" to handle lists of parameters
                     ]
                     # Convert df_input to a NumPy array with shape (number of samples, number of parameters)
                     main_window.local_SA_parameters["samples"] = main_window.df_input.pivot(index="SampleID", columns="ParamName", values="ParamValue").to_dict(orient="index")
@@ -452,15 +480,16 @@ def load_db_file(main_window, filePath=None):
                     # Create a dictionary for each parameter
                     for id, param in enumerate(main_window.df_input['ParamName'].unique()):
                         main_window.local_SA_parameters[param] = {"reference": param_ref_list[id], "perturbations": param_pertub_list[id]}
-
+                    # print(main_window.local_SA_parameters)
                 # Disable sample_params and Plot samples buttons after successful loading
                 main_window.sample_params_button.setEnabled(False)
                 main_window.plot_samples_button.setEnabled(True)
                 # Check if qois are defined
-                if main_window.df_metadata['QoIs'].iloc[0] == "None":
+                if (main_window.df_metadata['QoIs'].iloc[0] == "None"):
                     main_window.define_qoi_button.setEnabled(True)
                 else:
                     main_window.define_qoi_button.setEnabled(False)
+       
                 # Set db file to the loaded and disable the field
                 main_window.db_file_name_input.setText(main_window.db_file_path)
                 main_window.db_file_name_input.setEnabled(False)
@@ -470,6 +499,16 @@ def load_db_file(main_window, filePath=None):
                 # Enable the button run SA
                 main_window.run_sa_button.setEnabled(True)
 
+                # Enable the plot QoI button
+                main_window.plot_qois_button.setEnabled(True)
+
+                # Enable the button to plot samples
+                main_window.plot_samples_button.setEnabled(True)
+
+                # Reset the qois
+                main_window.qoi_funcs = {}
+                main_window.df_qois = pd.DataFrame()
+                
                 # print a message in the output fields of Tab 2
                 message = f"Database file loaded: {main_window.db_file_path}"
                 main_window.update_output_tab2(main_window, message)
@@ -765,38 +804,78 @@ def plot_samples(main_window):
         main_window.ax_samples.clear()
         try:
             if main_window.analysis_type_dropdown.currentText() == "Local":
-                total_samples = 1
-                for key in main_window.local_SA_parameters.keys():
-                    if key == "samples": continue
-                    # Plot the perturbations for each parameter
-                    perturbations = np.array(main_window.local_SA_parameters[key]["perturbations"])
-                    perturbations = np.concatenate((-1.0 * perturbations, perturbations), axis=None)
-                    total_samples += len(perturbations)
-                    main_window.ax_samples.scatter(perturbations, [key] * len(perturbations), s=10, color='k')
-                    # Plot the reference value
-                    main_window.ax_samples.scatter(0, key, s=10, color='k')
-                # Plot vline of reference value
-                # main_window.ax_samples.axvline(x=0, color='gray', linestyle='--', label='Reference Value')
-                main_window.ax_samples.set_xlabel("Perturbations (%)")
-                main_window.ax_samples.set_title(f"One-At-A-Time (OAT) sampling - total of samples: {total_samples}")
+                perturbations_df = pd.DataFrame(main_window.local_SA_parameters["samples"]).T
+                for col in perturbations_df.columns:
+                    perturbations_df[col] = 100.0*(perturbations_df[col] - main_window.local_SA_parameters[col]["reference"]) / main_window.local_SA_parameters[col]["reference"]
+                # Melt the DataFrame to long format for plotting
+                perturbations_df = perturbations_df.reset_index().melt(id_vars="index", var_name="Parameter", value_name="Perturbation")
+                perturbations_df = perturbations_df.rename(columns={"index": "SampleID"})
+                # Calculate the frequency of each perturbation
+                perturbations_df['Frequency'] = perturbations_df.groupby(['Perturbation', 'Parameter'])['SampleID'].transform('count')
+                # Create the scatter plot using Seaborn
+                scatter_plot = sns.scatterplot(
+                    data=perturbations_df,
+                    x="Perturbation",
+                    y="Parameter",
+                    hue="SampleID",
+                    size="Frequency",  # Adjust point size based on frequency
+                    palette="viridis",
+                    ax=main_window.ax_samples,
+                    alpha=0.7,  # Transparency
+                )
+                # Customize the plot
+                main_window.ax_samples.tick_params(axis='x', labelsize=8)  # Set font size for x-axis ticks
+                main_window.ax_samples.tick_params(axis='y', labelsize=8)  # Set font size for y-axis ticks
+                scatter_plot.set_title(f"One-At-A-Time (OAT) sampling - Total Samples: {len(main_window.local_SA_parameters["samples"])}", fontsize=8)
+                scatter_plot.set_xlabel("Perturbations (%)", fontsize=8)
+                scatter_plot.set_ylabel("")
+                # Remove the size legend while keeping the hue legend
+                handles, labels = scatter_plot.get_legend_handles_labels()
+                new_handles = [h for h, l in zip(handles, labels) if l not in ["SampleID","Frequency"]]
+                new_labels = [l for l in labels if l not in ["SampleID","Frequency"]]
+                scatter_plot.legend(
+                    handles=new_handles,
+                    labels=new_labels,
+                    title="Sample Index",
+                    bbox_to_anchor=(1.05, 1),
+                    loc="upper left",
+                    title_fontsize=8,
+                    fontsize=8,
+                    ncol=2
+                )                
                 # Adjust plot in canvas
-                main_window.fig_est_canvas_samples.figure.tight_layout()  # Call tight_layout on the figure object
+                main_window.ax_samples.figure.tight_layout()
                 main_window.fig_est_canvas_samples.draw()
             elif main_window.analysis_type_dropdown.currentText() == "Global":
-                total_samples = len(main_window.global_SA_parameters["samples"])
-                # Plot the samples for each parameter
-                for i, key in enumerate(main_window.global_SA_parameters.keys()):
-                    if key == "samples": continue
-                    global_params = np.array([sample[key] for sample in main_window.global_SA_parameters["samples"].values()])
-                    # Plot the samples for each parameter
-                    main_window.ax_samples.scatter((global_params-main_window.global_SA_parameters[key]["bounds"][0])/(main_window.global_SA_parameters[key]["bounds"][1] - main_window.global_SA_parameters[key]["bounds"][0]), [key] * total_samples, s=10, color='k')
-                # main_window.ax_set_xlim = main_window.ax_samples.set_xlim(0, 1)
-                main_window.ax_samples.set_xlabel("Samples")
-                main_window.ax_samples.set_title(f"Global sampling - total of samples: {total_samples}")
+                normalized_df = pd.DataFrame(main_window.global_SA_parameters["samples"]).T
+                for col in normalized_df.columns:
+                    normalized_df[col] = (normalized_df[col] - main_window.global_SA_parameters[col]["bounds"][0]) / (main_window.global_SA_parameters[col]["bounds"][1] - main_window.global_SA_parameters[col]["bounds"][0])
+                # Melt the DataFrame to long format for plotting
+                normalized_df = normalized_df.reset_index().melt(id_vars="index", var_name="Parameter", value_name="Normalized Value")
+                # Create the scatter plot using Seaborn
+                scatter_plot = sns.scatterplot(
+                    data=normalized_df,
+                    x="Normalized Value",
+                    y="Parameter",
+                    hue="index",
+                    palette="viridis",
+                    s=50,  # Marker size
+                    ax = main_window.ax_samples,
+                    alpha=0.7,  # Transparency
+                )
+                # Customize the plot
+                main_window.ax_samples.tick_params(axis='x', labelsize=8)  # Set font size for x-axis ticks
+                main_window.ax_samples.tick_params(axis='y', labelsize=8)  # Set font size for y-axis ticks
+                scatter_plot.set_title(f"Global Sampling - Total Samples: {len(main_window.global_SA_parameters["samples"])}", fontsize=8)
+                scatter_plot.set_xlabel("")
+                scatter_plot.set_ylabel("")
+                scatter_plot.legend(title="Sample Index", bbox_to_anchor=(1.05, 1), loc="upper left", title_fontsize=8, fontsize=8)
                 # Adjust plot in canvas
-                main_window.fig_est_canvas_samples.figure.tight_layout()
+                main_window.ax_samples.figure.tight_layout()
+                main_window.fig_est_canvas_samples.draw()
         except Exception as e:
             main_window.update_output_tab2(main_window, f"Error plotting samples {main_window.analysis_type_dropdown.currentText()} SA: {e}")
+            print(f"Error plotting samples {main_window.analysis_type_dropdown.currentText()} SA: {e}")
 
 def update_global_sampler_options(main_window):
     # FAST - Fourier Amplitude Sensitivity Test: combatible with Fast sampler
@@ -1038,34 +1117,150 @@ def run_simulations(main_window):
     # Load the database file to display results
     main_window.load_db_file(main_window, db_file_name)
 
-
-def run_analysis(main_window):
-    main_window.update_output_tab2(main_window, "Running sensitivity analysis...")
-    # Check if the qoi_funcs dictionary is empty
-    if not main_window.qoi_funcs:
-        main_window.update_output_tab2(main_window, "Error: No QoI functions defined.")
-        return
-    # If QoIs are not in db, calculate them and store them in df_output as columns
-    if not list(main_window.qoi_funcs.keys())[0] in main_window.df_output.columns:
+def calculate_qois(main_window):
+    # if 'Data' in main_window.df_output.columns: # if 'Data' column is present, it will calculate the QoIs
+    #     print(f"df_output['Data'] is type: {type(main_window.df_output['Data'])}")
+    #     print(f"first element of df_output['Data']: {type(main_window.df_output['Data'].iloc[0])}")
+    # else: # qois are already in the database
+    #     print("df_output['Data'] column not found in df_output DataFrame.")
+    
+    # Check if 'Data' column in main_window.df_output is a series of DataFrame
+    if isinstance(main_window.df_output['Data'].iloc[0], pd.DataFrame):
+        if not main_window.qoi_funcs:
+            main_window.update_output_tab2(main_window, "Error: No QoI functions defined.")
+            raise ValueError("No QoI functions defined.")
         main_window.update_output_tab2(main_window, "Calculating QoIs...")
         try:
-            df_qois = extract_qoi_from_db(main_window.db_file_path, main_window.qoi_funcs)
-            if df_qois.empty: 
-                main_window.update_output_tab2(main_window, "Error: No able to extract QoIs from the database.")
-                return
+            # Extract the consistent 'time' column from the first DataFrame
+            time_column = main_window.df_output['Data'].iloc[0]['time'].values
+
+            # Flatten the 'Data' column into a single DataFrame with SampleID and ReplicateID
+            expanded_data = pd.concat(
+                [
+                    pd.DataFrame(data).assign(SampleID=SampleID, ReplicateID=ReplicateID)
+                    for (SampleID, ReplicateID), group in main_window.df_output.groupby(['SampleID', 'ReplicateID'])
+                    for data in group['Data']  # Ensure 'Data' contains DataFrames
+                ],
+                ignore_index=True
+            )
+
+            # Dynamically calculate the number of repetitions for the time column
+            num_repeats = len(expanded_data) // len(time_column)
+            if len(expanded_data) % len(time_column) != 0:
+                raise ValueError("Mismatch between expanded_data rows and time column length.")
+            expanded_data['time'] = np.tile(time_column, num_repeats)
+
+            # Filter the columns to include only QoIs
+            qoi_columns = [col for col in expanded_data.columns if col in main_window.qoi_funcs.keys()]
+
+            # Reshape the expanded_data to match the expected format
+            reshaped_data = reshape_expanded_data(expanded_data, qoi_columns)
+            # Assign the reshaped data to main_window.df_qois
+            main_window.df_qois = reshaped_data
+            main_window.update_output_tab2(main_window, "QoIs calculated successfully.")
+        except Exception as e:
+            main_window.update_output_tab2(main_window, f"Error calculating QoIs from DataFrame: {e}")
+    # Check if 'Data' column in main_window.df_output is a series of mcds list
+    elif isinstance(main_window.df_output['Data'].iloc[0], list):
+        if not main_window.qoi_funcs:
+            main_window.update_output_tab2(main_window, "Error: No QoI functions defined.")
+            raise ValueError("No QoI functions defined.")
+        main_window.update_output_tab2(main_window, "Calculating QoIs...")
+        try:
+            main_window.df_qois = extract_qoi_from_db(main_window.db_file_path, main_window.qoi_funcs)
+        except Exception as e:
+            main_window.update_output_tab2(main_window, f"Error calculating QoIs from mcds list: {e}")
+            raise ValueError(f"Error calculating QoIs. {e}")
+        if main_window.df_qois.empty:
+            main_window.update_output_tab2(main_window, "Error: Unable to generate QoIs from the database.")
+            raise ValueError("Unable to generate QoIs from the database.")
+    # If QoIs are already in the database and 'Data' column is not present
+    else:
+        main_window.df_qois = main_window.df_output
+
+    # Take the average among the replicates and sort the samples
+    try:
+        main_window.df_qois = main_window.df_qois.groupby(['SampleID']).mean(numeric_only=True).reset_index() # ignores NaN values
+        main_window.df_qois.drop(columns=['ReplicateID'], inplace=True)
+        main_window.df_qois = main_window.df_qois.set_index("SampleID").sort_index()
+    except Exception as e:
+        main_window.update_output_tab2(main_window, f"Error taking the average among replicates: {e}")
+        raise ValueError(f"Error taking the average among replicates: {e}")
+
+def plot_qois(main_window):
+    main_window.update_output_tab2(main_window, "Plotting QoIs...")
+    # Create a dialog window for plotting QoIs
+    plot_qoi_window = QDialog(main_window)
+    plot_qoi_window.setWindowTitle("Plot QoIs")
+    plot_qoi_window.setGeometry(100, 100, 800, 600)
+    # Create a layout for the dialog
+    layout = QVBoxLayout(plot_qoi_window)
+    # Add input for the QoI to plot
+    plot_qoi_hbox = QHBoxLayout()
+    plot_qoi_label = QLabel("Select QoI to plot:")
+    plot_qoi_combo = QComboBox()
+    plot_qoi_combo.addItems(list(main_window.qoi_funcs.keys()))
+    plot_qoi_hbox.addWidget(plot_qoi_label)
+    plot_qoi_hbox.addWidget(plot_qoi_combo)
+    layout.addLayout(plot_qoi_hbox)
+    # Create a new figure and canvas for the plot
+    figure = Figure(figsize=(5, 3))
+    canvas = FigureCanvas(figure)
+    layout.addWidget(canvas)
+    # Calculate the QoIs if not already done
+    if main_window.df_qois.empty:
+        try: calculate_qois(main_window)
         except Exception as e:
             main_window.update_output_tab2(main_window, f"Error calculating QoIs: {e}")
             return
-    else:
-        df_qois = main_window.df_output
+
+    def update_plot_qoi():
+        # Clear the previous plot
+        figure.clear()
+        ax = figure.add_subplot(111)
+        selected_qoi = plot_qoi_combo.currentText()
+        # Plot the selected QoI
+        if selected_qoi in main_window.qoi_funcs.keys():
+            qoi_columns = sorted([col for col in main_window.df_qois.columns if col.startswith(selected_qoi)])
+            time_columns = sorted([col for col in main_window.df_qois.columns if col.startswith("time_")])
+            # Prepare the data for seaborn
+            plot_data = pd.DataFrame({
+                "Time": main_window.df_qois[time_columns].values.flatten(),
+                selected_qoi: main_window.df_qois[qoi_columns].values.flatten(),
+                "SampleID": main_window.df_qois.index.repeat(len(qoi_columns))
+            })
+            # Plot using seaborn
+            sns.lineplot(data=plot_data, x="Time", y=selected_qoi, hue="SampleID", ax=ax)
+            ax.set_xlabel("Time")
+            ax.set_ylabel(selected_qoi)
+            ax.legend(title="Sample Index")
+            canvas.draw()
+        else:
+            main_window.update_output_tab2(main_window, f"Error: {selected_qoi} not found in the output data.")
+        # Adjust layout and draw the canvas
+        figure.tight_layout()
+        canvas.draw()
+
+    # Connect the combo box to update the plot
+    plot_qoi_combo.currentIndexChanged.connect(update_plot_qoi)
+    # Set the default selected qoi and update the plot
+    plot_qoi_combo.setCurrentIndex(0)
+    update_plot_qoi()
+    # Show the dialog
+    plot_qoi_window.exec_()
+
+def run_analysis(main_window):
+    main_window.update_output_tab2(main_window, "Running sensitivity analysis...")
+     # Calculate the QoIs if not already done
+    if main_window.df_qois.empty:
+        try: calculate_qois(main_window)
+        except Exception as e:
+            main_window.update_output_tab2(main_window, f"Error calculating QoIs: {e}")
+            return
     # Run the analysis
     all_qois = list(main_window.qoi_funcs.keys())
-    all_times = [col for col in df_qois.columns if col.startswith("time")]
+    all_times = [col for col in main_window.df_qois.columns if col.startswith("time")]
     print(f"all_qois: {all_qois} and all_times: {all_times}")
-    # Take the average amoung the replicates and sort the samples
-    df_qois = df_qois.groupby(['SampleID']).mean().reset_index()
-    df_qois.drop(columns=['ReplicateID'], inplace=True)
-    df_qois = df_qois.set_index("SampleID").sort_index()
     # Convert df_input to a NumPy array with shape (number of samples, number of parameters)
     main_window.sa_results = { qoi: {time: None for time in all_times} for qoi in all_qois }
     main_window.qoi_time_values = { time: None for time in all_times }
@@ -1081,13 +1276,13 @@ def run_analysis(main_window):
             for id_time, time in enumerate(list(main_window.qoi_time_values.keys())):
                 global_method = main_window.global_method_combo.currentText()
                 dic_params = np.array([[dic[param] for param in SA_problem['names']] for dic in main_window.global_SA_parameters["samples"].values()])
-                qoi_result = df_qois[f"{qoi}_{id_time}"].to_numpy()
+                qoi_result = main_window.df_qois[f"{qoi}_{id_time}"].to_numpy()
                 if len(qoi_result) != len(dic_params):
                     main_window.update_output_tab2(main_window, f"Error: Mismatch between number of samples ({len(dic_params)}) and QoI results ({len(qoi_result)})!")
                     return
                 # Convert qoi_result to a dictionary
                 print(f"qoi_result ({qoi}_{id_time}): {qoi_result}")
-                unique_times = df_qois[time].unique()
+                unique_times = main_window.df_qois[time].unique()
                 if len(unique_times) != 1:
                     main_window.update_output_tab2(main_window, f"Expected a single unique value for time '{time}', but found: {unique_times}")
                     return
@@ -1127,9 +1322,9 @@ def run_analysis(main_window):
         for qoi in all_qois:
             for id_time, time in enumerate(list(main_window.qoi_time_values.keys())):
                 local_method = "OAT"
-                qoi_result = df_qois[f"{qoi}_{id_time}"].to_dict()
+                qoi_result = main_window.df_qois[f"{qoi}_{id_time}"].to_dict()
                 print(f"qoi_result ({qoi}_{id_time}): {qoi_result.values()}")
-                unique_times = df_qois[time].unique()
+                unique_times = main_window.df_qois[time].unique()
                 if len(unique_times) != 1:
                     raise ValueError(f"Expected a single unique value for time '{time}', but found: {unique_times}")
                 main_window.qoi_time_values[time] = unique_times[0]
@@ -1151,10 +1346,8 @@ def plot_sa_results(main_window):
     plot_window = QDialog(main_window)
     plot_window.setWindowTitle("Sensitivity Analysis Results")
     plot_window.setGeometry(100, 100, 800, 600)
-
     # Create a layout for the dialog
     layout = QVBoxLayout(plot_window)
-
     # Add a combo box to select the qoi
     plot_sa_qoi_hbox = QHBoxLayout()
     plot_sa_label = QLabel("Select the QoI to plot:")
@@ -1165,7 +1358,6 @@ def plot_sa_results(main_window):
     plot_sa_dropdown_qoi.addItems(list(main_window.sa_results.keys()))
     plot_sa_qoi_hbox.addWidget(plot_sa_dropdown_qoi)
     layout.addLayout(plot_sa_qoi_hbox)
-
     # Add a combo box to select the time
     plot_sa_time_hbox = QHBoxLayout()
     plot_sa_time_label = QLabel("Select the time to plot (min):")
@@ -1176,12 +1368,10 @@ def plot_sa_results(main_window):
     plot_sa_time_dropdown.addItems([str(value) for value in main_window.qoi_time_values.values()])
     plot_sa_time_hbox.addWidget(plot_sa_time_dropdown)
     layout.addLayout(plot_sa_time_hbox)
-
     # Create a new figure and canvas for the plot
     figure = Figure(figsize=(5, 3))
     canvas = FigureCanvas(figure)
     layout.addWidget(canvas)
-
     # Define the update_plot function before connecting it
     def update_plot():
         # Get the selected qoi
