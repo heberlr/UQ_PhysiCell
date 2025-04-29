@@ -22,6 +22,7 @@ class MainWindow(QMainWindow):
         self.db_file_path = None  # Store the path of the loaded .db file
         self.csv_data = pd.DataFrame()  # Empty DataFrame for rules
         self.qoi_funcs = {}  # Store the QoI functions
+        self.df_qois = pd.DataFrame()  # DataFrame to store the output of the analysis
 
         self.setWindowTitle("UQ_PhysiCell - GUI")
 
