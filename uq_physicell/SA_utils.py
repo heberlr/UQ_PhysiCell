@@ -399,18 +399,21 @@ def OAT_analyze(dic_samples, dic_qoi):
     Return:
     - dic_results: dictionary of the results
     """
-    # Sample 0 is the reference sample
-    ref_pars = dic_samples[0]
-    qoi_ref = dic_qoi[0]
     # Remove unused variables ref_pars and qoi_ref
-    # Extract parameter samples and QoI samples, excluding the reference sample (SampleID 0)
-    par_samples = np.array([list(sample.values()) for sample_id, sample in dic_samples.items() if sample_id != 0])
+    # Extract parameter samples and QoI samples
+    par_samples = np.array([list(sample.values()) for sample in dic_samples.values()])
+    # Normalize the parameter samples
+    par_samples = (par_samples - par_samples.min(axis=0)) / (par_samples.max(axis=0) - par_samples.min(axis=0))
+    # Sample 0 is the reference sample
+    ref_pars = par_samples[0]; par_samples = par_samples[1:]
+    qoi_ref = dic_qoi[0]
+    # Extract QoI samples, excluding the reference sample (SampleID different of 0)
     qoi_samples = np.array([qoi for sample_id, qoi in dic_qoi.items() if sample_id != 0])
     # Initialize the results dictionary
     dic_results = {}
-    for id, par in enumerate(ref_pars.keys()):
+    for id, par in enumerate(dic_samples[0].keys()):
         # Calculate the mean and std deviation of the QoIs for each parameter
-        par_var = np.abs(par_samples[:, id] - ref_pars[par])
+        par_var = np.abs(par_samples[:, id] - ref_pars[id])
         non_zero_indices = np.where(par_var != 0)[0]
         dic_results[par] = np.abs(qoi_samples[non_zero_indices] - qoi_ref) / par_var[non_zero_indices]  # Compute SI without skipping
 
@@ -454,3 +457,30 @@ def extract_qoi_from_db(db_file, qoi_functions):
             df_qois = pd.concat([df_qois, df_qoi_replicate], ignore_index=True)
     df_qois = df_qois.reset_index(drop=True)
     return df_qois
+
+def reshape_expanded_data(expanded_data, qoi_columns):
+    try:
+        # Ensure QoI columns are numeric
+        for qoi in qoi_columns:
+            expanded_data[qoi] = pd.to_numeric(expanded_data[qoi], errors='coerce')
+
+        # Create a unique time_id for each time step
+        expanded_data['time_id'] = expanded_data.groupby(['SampleID', 'ReplicateID']).cumcount()
+
+        # Pivot the DataFrame to create columns for each QoI and time_id
+        reshaped_data = expanded_data.pivot_table(
+            index=['SampleID', 'ReplicateID'],
+            columns='time_id',
+            values=qoi_columns + ['time']
+        )
+
+        # Flatten the multi-index columns
+        reshaped_data.columns = [
+            f"{col[0]}_{int(col[1])}" if col[0] != 'time' else f"time_{int(col[1])}"
+            for col in reshaped_data.columns
+        ]
+        reshaped_data.reset_index(inplace=True)
+
+        return reshaped_data
+    except Exception as e:
+        raise ValueError(f"Error reshaping expanded data: {e}")
