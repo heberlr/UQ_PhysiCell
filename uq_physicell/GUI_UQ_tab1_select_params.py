@@ -27,6 +27,7 @@ def create_tab1(main_window):
     main_window.set_parameter_value = set_parameter_value
     main_window.add_parameter_to_analysis = add_parameter_to_analysis
     main_window.remove_parameter = remove_parameter
+    main_window.update_rules_file = update_rules_file
     main_window.update_ini_preview = update_ini_preview
     main_window.update_output_tab1 = update_output_tab1
     main_window.save_ini_file = save_ini_file
@@ -651,6 +652,9 @@ def set_parameter_value(main_window):
             main_window.update_ini_preview(main_window)
             main_window.update_selected_param_label(main_window, path, main_window.current_leaf_node.text.strip() if main_window.current_leaf_node.text else "None")
             main_window.update_output_tab1(main_window, f"Set parameter '{path}' to value '{new_value}'")
+            # Check if the parameter is a rules file or folder
+            if path == ".//cell_rules/rulesets/ruleset/filename" or path == ".//cell_rules/rulesets/ruleset/folder":
+                main_window.update_rules_file(main_window)
         except Exception as e:
             main_window.update_output_tab1(main_window, f"Error setting parameter: {e}")
 
@@ -679,8 +683,29 @@ def remove_parameter(main_window):
             main_window.update_output_tab1(main_window, f"Removed analysis parameter '{path}'")
         main_window.update_ini_preview(main_window)
         main_window.update_selected_param_label(main_window, path, main_window.current_leaf_node.text.strip() if main_window.current_leaf_node.text else "None")
+        # Check if the parameter is a rules file or folder
+        if path == ".//cell_rules/rulesets/ruleset/filename" or path == ".//cell_rules/rulesets/ruleset/folder":
+            main_window.update_rules_file(main_window)
     except Exception as e:
         main_window.update_output_tab1(main_window, f"Error removing parameter: {e}")
+
+def update_rules_file(main_window):
+    # Update the rules file path based on the selected folder and filename
+    try:
+        # Check if folder_path is already set in fixed_parameters, else use the same folder of XML
+        if ".//cell_rules/rulesets/ruleset/folder" in main_window.fixed_parameters.keys():
+            folder_path = main_window.fixed_parameters[".//cell_rules/rulesets/ruleset/folder"]
+        else:
+            folder_path = folder_path = main_window.xml_file_path.rsplit("/", 1)[0]  # Get the folder path of the XML file
+        # Check if filename is already set in fixed_parameters, else use the XML
+        if ".//cell_rules/rulesets/ruleset/filename" in main_window.fixed_parameters.keys():
+            filename = main_window.fixed_parameters[".//cell_rules/rulesets/ruleset/filename"]
+        else:
+            filename = main_window.get_xml_value(main_window, ".//cell_rules/rulesets/ruleset/filename")
+        main_window.rule_path = os.path.join(folder_path, filename)
+        main_window.update_output_tab1(main_window, f"Updated rules file path: {main_window.rule_path}")
+    except Exception as e:
+        main_window.update_output_tab1(main_window, f"Error updating rules file path: {e}")
 
 def update_ini_preview(main_window):
     # Update the preview of the .ini file with proper line breaks
@@ -828,9 +853,14 @@ def load_ini_file(main_window, filePath=None, strucName=None):
                 else:
                     main_window.fixed_parameters[key] = value
 
+            # Check if rules file exists in the fixed parameters from .ini file
+            if ".//cell_rules/rulesets/ruleset/filename" in main_window.fixed_parameters.keys():
+                update_rules_file(main_window)
+
             # Extract the rule file path if it exists
-            if 'rulesFile_ref' in config[struc_name]:
-                if main_window.csv_data.empty: main_window.load_csv_file(main_window) # load the rules CSV file if csv_data is empty
+            if 'rulesFile_ref' in config[struc_name].keys():
+                main_window.rule_path = config[struc_name]['rulesFile_ref']
+                main_window.load_csv_file(main_window) # load the rules CSV file
                 for key, value in eval(config[struc_name]['parameters_rules']).items():
                     if isinstance(value, list):
                         main_window.analysis_rules_parameters[key] = value
