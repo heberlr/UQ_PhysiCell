@@ -1,12 +1,22 @@
-from mpi4py import MPI
 import numpy as np
 import os
 import sqlite3
 import pickle
-from concurrent.futures import ProcessPoolExecutor
 
 from uq_physicell import PhysiCell_Model
 from uq_physicell.SA_utils import run_replicate, create_db_structure, insert_metadata, insert_inputs, insert_output, check_existing_sa, summary_function, create_named_function_from_string, load_db_structure
+
+# Check if the required libraries are available - futures and mpi4pyß
+try:
+    from concurrent.futures import ProcessPoolExecutor
+    futures_available = True
+except ImportError:
+    futures_available = False
+try:
+    from mpi4py import MPI
+    mpi_available = True
+except ImportError:
+    mpi_available = False
 
 def run_replicate_serializable(ini_path, struc_name, sampleID, replicateID, ParametersXML, ParametersRules, qois_dic=None, drop_columns=[], custom_summary_function=None):
     """
@@ -61,10 +71,14 @@ def run_sa_simulations(ini_filePath, strucName, SA_type, SA_method, SA_sampler, 
     - custom_summary_function: Function to summarize the results (optional, if defined it ignores qoi_dic and drop_columns).
     """
     if use_mpi:
+        if not mpi_available:
+            raise ImportError("mpi4py is not available. Please install mpi4py or set use_mpi=False.")
         comm = MPI.COMM_WORLD
         size = comm.Get_size()
         rank = comm.Get_rank()
     else:
+        if use_futures and not futures_available:
+            raise ImportError("concurrent.futures is not available. Please install futures or set use_futures=False.")
         size = 1
         rank = 0
 
