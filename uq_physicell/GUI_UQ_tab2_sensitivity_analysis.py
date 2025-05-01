@@ -7,15 +7,15 @@ from matplotlib.figure import Figure
 import seaborn as sns
 import numpy as np
 import pandas as pd
-import re # for regex (manipulating strings)
+
 
 # SA library
 from SALib.sample import fast_sampler, ff, finite_diff, latin, sobol, morris
-from SALib.analyze import fast as fast_analyze, rbd_fast as rbd_fast_analyze, ff as ff_analyze, pawn as pawn_analyze, dgsm as dgsm_analyze, hdmr as hdmr_analyze, rsa as rsa_analyze, discrepancy as discrepancy_analyze, delta as delta_analyze, sobol as sobol_analyze, morris as morris_analyze
+from SALib.analyze import fast as fast_analyze, rbd_fast as rbd_fast_analyze, ff as ff_analyze, pawn as pawn_analyze, dgsm as dgsm_analyze, enhanced_hdmr as hdmr_analyze, rsa as rsa_analyze, discrepancy as discrepancy_analyze, delta as delta_analyze, sobol as sobol_analyze, morris as morris_analyze
 
 # My local modules
 from uq_physicell.SA_script import run_sa_simulations
-from uq_physicell.SA_utils import load_db_structure, OAT_analyze, extract_qoi_from_db, reshape_expanded_data
+from uq_physicell.SA_utils import load_db_structure, OAT_analyze, calculate_qoi_statistics
 
 # Compatibility of samplers with methods following the SALib library
 # https://salib.readthedocs.io/en/latest/index.html
@@ -99,7 +99,6 @@ def create_tab2(main_window):
     main_window.run_analysis = run_analysis
     main_window.plot_sa_results = plot_sa_results
     main_window.plot_qois = plot_qois
-    main_window.calculate_qois = calculate_qois
 
     layout_tab2 = QVBoxLayout()
 
@@ -510,24 +509,11 @@ def load_db_file(main_window, filePath=None):
                     main_window.global_bounds.setEnabled(False)
                     # Populate the global_SA_parameters dictionary with values from the database
                     main_window.global_SA_parameters = {}
-                    # Bounds of parameters
-                    bounds_str = main_window.df_metadata["Bounds"].iloc[0]
-                    # Preprocess the string to replace `np.float64(...)` with valid floats
-                    bounds_str = re.sub(r"np\.float64\((.*?)\)", r"\1", bounds_str)
-                    bounds_list = [
-                        list(map(float, b.strip("[]").split(',')))  # Remove brackets, np.float64, and split by comma
-                        for b in bounds_str.strip("[]").split("], [")  # Split by "], [" to handle lists of parameters
-                    ]
-                    # Reference values and perturbations
-                    param_ref_str = main_window.df_metadata["Reference_Values"].iloc[0]
-                    param_ref_list = [float(r) for r in param_ref_str.split(',')]
-                    param_perturb_str = main_window.df_metadata["Perturbations"].iloc[0]
-                    param_perturb_list = [float(p) for p in param_perturb_str.split(',')]
-                    # Create a dictionary for each parameter
-                    for id, param in enumerate(main_window.df_input['ParamName'].unique()):
-                        main_window.global_SA_parameters[param] = {"bounds": bounds_list[id], "reference": param_ref_list[id], "range_percentage": param_perturb_list[id]}
-                    # Convert df_input to a dictionary of dictionaries with external keys sampleID and internal keys ParamName - sorted by sampleID
-                    main_window.global_SA_parameters["samples"] = main_window.df_input.pivot(index="SampleID", columns="ParamName", values="ParamValue").sort_index().to_dict(orient="index")
+                    main_window.global_SA_parameters["samples"] = main_window.df_input
+                    for id, param in enumerate(main_window.df_metadata['Param_Names'].iloc[0]):
+                        main_window.global_SA_parameters[param] = {"bounds": main_window.df_metadata['Bounds'].iloc[0][id], 
+                                                                   "reference": main_window.df_metadata['Reference_Values'].iloc[0][id], 
+                                                                   "range_percentage": main_window.df_metadata['Perturbations'].iloc[0][id]}
                     # print(main_window.global_SA_parameters)
                 elif SA_type == "Local": # Disable local fields
                     main_window.local_param_combo.setEnabled(False)
@@ -535,23 +521,12 @@ def load_db_file(main_window, filePath=None):
                     main_window.local_perturb_input.setEnabled(False)
                     # Populate the local_SA_parameters dictionary with values from the database
                     main_window.local_SA_parameters = {}
-                    # Reference values and perturbations
-                    param_ref_str = main_window.df_metadata["Reference_Values"].iloc[0]
-                    param_ref_list = [float(r) for r in param_ref_str.split(',')]
-                    param_pertub_str = main_window.df_metadata["Perturbations"].iloc[0]
-                    # Preprocess the string to replace `np.float64(...)` with valid floats
-                    param_pertub_str = re.sub(r"np\.float64\((.*?)\)", r"\1", param_pertub_str)
-                    param_pertub_list = [
-                        list(map(float, b.strip("[] ").split(',')))  # Remove brackets, spaces, and split by comma
-                        for b in param_pertub_str.strip("[]").split("], [")  # Split by "], [" to handle lists of parameters
-                    ]
-                    # Convert df_input to a NumPy array with shape (number of samples, number of parameters)
-                    main_window.local_SA_parameters["samples"] = main_window.df_input.pivot(index="SampleID", columns="ParamName", values="ParamValue").to_dict(orient="index")
-                    
-                    # Create a dictionary for each parameter
-                    for id, param in enumerate(main_window.df_input['ParamName'].unique()):
-                        main_window.local_SA_parameters[param] = {"reference": param_ref_list[id], "perturbations": param_pertub_list[id]}
+                    main_window.local_SA_parameters["samples"] = main_window.df_input
+                    for id, param in enumerate(main_window.df_metadata['Param_Names'].iloc[0]):
+                        main_window.local_SA_parameters[param] = {"reference": main_window.df_metadata['Reference_Values'].iloc[0][id], 
+                                                                  "perturbations": main_window.df_metadata['Perturbations'].iloc[0][id]}
                     # print(main_window.local_SA_parameters)
+                
                 # Disable sample_params and Plot samples buttons after successful loading
                 main_window.sample_params_button.setEnabled(False)
                 main_window.plot_samples_button.setEnabled(True)
@@ -1189,76 +1164,7 @@ def run_simulations(main_window):
     main_window.update_output_tab2(main_window, f"Simulations completed and saved to {db_file_name} with QoIs: {', '.join(main_window.qoi_funcs.keys())}.")
     # Load the database file to display results
     main_window.load_db_file(main_window, db_file_name)
-
-def calculate_qois(main_window):
-    # if 'Data' in main_window.df_output.columns: # if 'Data' column is present, it will calculate the QoIs
-    #     print(f"df_output['Data'] is type: {type(main_window.df_output['Data'])}")
-    #     print(f"first element of df_output['Data']: {type(main_window.df_output['Data'].iloc[0])}")
-    # else: # qois are already in the database
-    #     print("df_output['Data'] column not found in df_output DataFrame.")
     
-    # Check if 'Data' column in main_window.df_output is a series of DataFrame
-    if isinstance(main_window.df_output['Data'].iloc[0], pd.DataFrame):
-        if not main_window.qoi_funcs:
-            main_window.update_output_tab2(main_window, "Error: No QoI functions defined.")
-            raise ValueError("No QoI functions defined.")
-        main_window.update_output_tab2(main_window, "Calculating QoIs...")
-        try:
-            # Extract the consistent 'time' column from the first DataFrame
-            time_column = main_window.df_output['Data'].iloc[0]['time'].values
-
-            # Flatten the 'Data' column into a single DataFrame with SampleID and ReplicateID
-            expanded_data = pd.concat(
-                [
-                    pd.DataFrame(data).assign(SampleID=SampleID, ReplicateID=ReplicateID)
-                    for (SampleID, ReplicateID), group in main_window.df_output.groupby(['SampleID', 'ReplicateID'])
-                    for data in group['Data']  # Ensure 'Data' contains DataFrames
-                ],
-                ignore_index=True
-            )
-
-            # Dynamically calculate the number of repetitions for the time column
-            num_repeats = len(expanded_data) // len(time_column)
-            if len(expanded_data) % len(time_column) != 0:
-                raise ValueError("Mismatch between expanded_data rows and time column length.")
-            expanded_data['time'] = np.tile(time_column, num_repeats)
-
-            # Filter the columns to include only QoIs
-            qoi_columns = [col for col in expanded_data.columns if col in main_window.qoi_funcs.keys()]
-
-            # Reshape the expanded_data to match the expected format
-            reshaped_data = reshape_expanded_data(expanded_data, qoi_columns)
-            # Assign the reshaped data to main_window.df_qois
-            main_window.df_qois = reshaped_data
-            main_window.update_output_tab2(main_window, "QoIs calculated successfully.")
-        except Exception as e:
-            main_window.update_output_tab2(main_window, f"Error calculating QoIs from DataFrame: {e}")
-    # Check if 'Data' column in main_window.df_output is a series of mcds list
-    elif isinstance(main_window.df_output['Data'].iloc[0], list):
-        if not main_window.qoi_funcs:
-            main_window.update_output_tab2(main_window, "Error: No QoI functions defined.")
-            raise ValueError("No QoI functions defined.")
-        main_window.update_output_tab2(main_window, "Calculating QoIs...")
-        try:
-            main_window.df_qois = extract_qoi_from_db(main_window.db_file_path, main_window.qoi_funcs)
-        except Exception as e:
-            main_window.update_output_tab2(main_window, f"Error calculating QoIs from mcds list: {e}")
-            raise ValueError(f"Error calculating QoIs. {e}")
-        if main_window.df_qois.empty:
-            main_window.update_output_tab2(main_window, "Error: Unable to generate QoIs from the database.")
-            raise ValueError("Unable to generate QoIs from the database.")
-    # If QoIs are already in the database and 'Data' column is not present
-    else:
-        main_window.df_qois = main_window.df_output
-
-    # Take the average among the replicates and sort the samples
-    try:
-        main_window.df_qois = main_window.df_qois.groupby(['SampleID']).mean(numeric_only=True).reset_index() # ignores NaN values
-        main_window.df_qois.drop(columns=['ReplicateID'], inplace=True)
-        main_window.df_qois = main_window.df_qois.set_index("SampleID").sort_index()
-    except Exception as e:
-        main_window.update_output_tab2(main_window, f"Error taking the average among replicates: {e}")
-        raise ValueError(f"Error taking the average among replicates: {e}")
 
 def plot_qois(main_window):
     main_window.update_output_tab2(main_window, "Plotting QoIs...")
@@ -1282,7 +1188,7 @@ def plot_qois(main_window):
     layout.addWidget(canvas)
     # Calculate the QoIs if not already done
     if main_window.df_qois.empty:
-        try: calculate_qois(main_window)
+        try: main_window.df_qois = calculate_qoi_statistics(main_window.df_output, main_window.qoi_funcs, db_file_path = main_window.db_file_name_input.text().strip())
         except Exception as e:
             main_window.update_output_tab2(main_window, f"Error calculating QoIs: {e}")
             return
