@@ -480,19 +480,19 @@ def load_db_file(main_window, filePath=None):
             try:
                 # Load the database structure
                 main_window.update_output_tab2(main_window, f"Loading database file {main_window.db_file_path} ...")
-                main_window.df_metadata, main_window.df_input, main_window.df_output = load_db_structure(main_window.db_file_path)
+                df_metadata, dic_input, main_window.df_output = load_db_structure(main_window.db_file_path)
                 # print(main_window.df_output)
                 # Load the .ini file
-                main_window.load_ini_file(main_window, main_window.df_metadata['Ini_File_Path'].iloc[0], main_window.df_metadata['StructureName'].iloc[0])
-                print( main_window.df_metadata)
+                main_window.load_ini_file(main_window, df_metadata['Ini_File_Path'].iloc[0], df_metadata['StructureName'].iloc[0])
+                print( df_metadata)
                 # Define the widget to display db structure
-                SA_type = main_window.df_metadata['SA_Type'].iloc[0]
+                SA_type = df_metadata['SA_Type'].iloc[0]
                 main_window.analysis_type_dropdown.setCurrentText(SA_type)
                 main_window.update_analysis_type(main_window)
                 main_window.analysis_type_dropdown.setEnabled(False)
                 if SA_type == "Global": # Disable global fields
                     # Update the global method and sampler combo boxes
-                    db_sa_sampler = main_window.df_metadata['SA_Sampler'].iloc[0]
+                    db_sa_sampler = df_metadata['SA_Sampler'].iloc[0]
                     # Allow method compatible with the sampler
                     main_window.global_method_combo.clear()
                     if db_sa_sampler in samplers_to_method:
@@ -509,11 +509,11 @@ def load_db_file(main_window, filePath=None):
                     main_window.global_bounds.setEnabled(False)
                     # Populate the global_SA_parameters dictionary with values from the database
                     main_window.global_SA_parameters = {}
-                    main_window.global_SA_parameters["samples"] = main_window.df_input
-                    for id, param in enumerate(main_window.df_metadata['Param_Names'].iloc[0]):
-                        main_window.global_SA_parameters[param] = {"bounds": main_window.df_metadata['Bounds'].iloc[0][id], 
-                                                                   "reference": main_window.df_metadata['Reference_Values'].iloc[0][id], 
-                                                                   "range_percentage": main_window.df_metadata['Perturbations'].iloc[0][id]}
+                    main_window.global_SA_parameters["samples"] = dic_input
+                    for id, param in enumerate(df_metadata['Param_Names'].iloc[0]):
+                        main_window.global_SA_parameters[param] = {"bounds": df_metadata['Bounds'].iloc[0][id], 
+                                                                   "reference": df_metadata['Reference_Values'].iloc[0][id], 
+                                                                   "range_percentage": df_metadata['Perturbations'].iloc[0][id]}
                     # print(main_window.global_SA_parameters)
                 elif SA_type == "Local": # Disable local fields
                     main_window.local_param_combo.setEnabled(False)
@@ -521,17 +521,17 @@ def load_db_file(main_window, filePath=None):
                     main_window.local_perturb_input.setEnabled(False)
                     # Populate the local_SA_parameters dictionary with values from the database
                     main_window.local_SA_parameters = {}
-                    main_window.local_SA_parameters["samples"] = main_window.df_input
-                    for id, param in enumerate(main_window.df_metadata['Param_Names'].iloc[0]):
-                        main_window.local_SA_parameters[param] = {"reference": main_window.df_metadata['Reference_Values'].iloc[0][id], 
-                                                                  "perturbations": main_window.df_metadata['Perturbations'].iloc[0][id]}
+                    main_window.local_SA_parameters["samples"] = dic_input
+                    for id, param in enumerate(df_metadata['Param_Names'].iloc[0]):
+                        main_window.local_SA_parameters[param] = {"reference": df_metadata['Reference_Values'].iloc[0][id], 
+                                                                  "perturbations": df_metadata['Perturbations'].iloc[0][id]}
                     # print(main_window.local_SA_parameters)
                 
                 # Disable sample_params and Plot samples buttons after successful loading
                 main_window.sample_params_button.setEnabled(False)
                 main_window.plot_samples_button.setEnabled(True)
                 # Check if qois are defined
-                if (main_window.df_metadata['QoIs'].iloc[0] == "None"):
+                if (df_metadata['QoIs'].iloc[0] == "None"):
                     main_window.define_qoi_button.setEnabled(True)
                 else:
                     main_window.define_qoi_button.setEnabled(False)
@@ -1233,7 +1233,7 @@ def run_analysis(main_window):
     main_window.update_output_tab2(main_window, "Running sensitivity analysis...")
      # Calculate the QoIs if not already done
     if main_window.df_qois.empty:
-        try: calculate_qois(main_window)
+        try: main_window.df_qois = calculate_qoi_statistics(main_window.df_output, main_window.qoi_funcs, db_file_path = main_window.db_file_name_input.text().strip())
         except Exception as e:
             main_window.update_output_tab2(main_window, f"Error calculating QoIs: {e}")
             return
