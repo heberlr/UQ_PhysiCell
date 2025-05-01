@@ -353,7 +353,7 @@ def load_db_structure(db_file):
     - db_file: Path to the database file.
     Return:
     - df_metadata: DataFrame containing metadata information.
-    - df_inputs: DataFrame containing input parameters.
+    - dic_inputs: Dictionary containing input parameters.
     - df_results: DataFrame containing simulation results.
     """
     conn = sqlite3.connect(db_file)
@@ -409,7 +409,7 @@ def load_db_structure(db_file):
     inputs = cursor.fetchall()
     df_inputs = pd.DataFrame(inputs, columns=['SampleID', 'ParamName', 'ParamValue'])
     # Convert df_input to a dictionary of dictionaries with external keys sampleID and internal keys ParamName - sorted by sampleID
-    df_inputs = df_inputs.pivot(index="SampleID", columns="ParamName", values="ParamValue").sort_index().to_dict(orient="index")
+    dic_inputs = df_inputs.pivot(index="SampleID", columns="ParamName", values="ParamValue").sort_index().to_dict(orient="index")
     
     # Load Results
     cursor.execute('SELECT * FROM Results')
@@ -437,7 +437,7 @@ def load_db_structure(db_file):
     else:
         df_results_modified = df_results
     
-    return df_metadata, df_inputs, df_results_modified
+    return df_metadata, dic_inputs, df_results_modified
 
 def OAT_analyze(dic_samples, dic_qoi):
     """
