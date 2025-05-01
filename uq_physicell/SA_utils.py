@@ -5,6 +5,7 @@ import pickle
 import numpy as np
 import pandas as pd
 from typing import Union
+import re # for regex (manipulating strings)
 
 from uq_physicell import PhysiCell_Model, generic_QoI
 
@@ -357,27 +358,71 @@ def load_db_structure(db_file):
     """
     conn = sqlite3.connect(db_file)
     cursor = conn.cursor()
+    
     # Load Metadata
     cursor.execute('SELECT * FROM Metadata')
     metadata = cursor.fetchall()         
     df_metadata = pd.DataFrame(metadata, columns=['SA_Type', 'SA_Method', 'SA_Sampler', 'Num_Samples', 'Param_Names', 'Bounds', 'Reference_Values', 'Perturbations', 'QoIs', 'QoIs_Functions', 'Ini_File_Path', 'StructureName'])
+    # Convert the Bounds, Reference_Values, Perturbations, QoIs, and QoIs_Functions columns to lists of floats
+    if df_metadata['SA_Type'].iloc[0] == "Global":
+        # Parameter names
+        param_names_str = df_metadata["Param_Names"].iloc[0]
+        param_names_list = [p.strip() for p in param_names_str.split(',')]
+        # Bounds
+        bounds_str = df_metadata["Bounds"].iloc[0]
+        # Preprocess the string to replace `np.float64(...)` with valid floats
+        bounds_str = re.sub(r"np\.float64\((.*?)\)", r"\1", bounds_str)
+        bounds_list = [
+            list(map(float, b.strip("[]").split(',')))  # Remove brackets, np.float64, and split by comma
+            for b in bounds_str.strip("[]").split("], [")  # Split by "], [" to handle lists of parameters
+        ]
+        # Reference values and perturbations
+        param_ref_str = df_metadata["Reference_Values"].iloc[0]
+        param_ref_list = [float(r) for r in param_ref_str.split(',')]
+        param_perturb_str = df_metadata["Perturbations"].iloc[0]
+        param_perturb_list = [float(p) for p in param_perturb_str.split(',')]
+    elif df_metadata['SA_Type'].iloc[0] == "Local":
+        # Parameter names
+        param_names_str = df_metadata["Param_Names"].iloc[0]
+        param_names_list = [p.strip() for p in param_names_str.split(',')]
+        # Bounds
+        bounds_list = df_metadata["Bounds"].iloc[0]
+        # Reference values and perturbations
+        param_ref_str = df_metadata["Reference_Values"].iloc[0]
+        param_ref_list = [float(r) for r in param_ref_str.split(',')]
+        param_perturb_str = df_metadata["Perturbations"].iloc[0]
+        # Preprocess the string to replace `np.float64(...)` with valid floats
+        param_perturb_str = re.sub(r"np\.float64\((.*?)\)", r"\1", param_perturb_str)
+        param_perturb_list = [
+            list(map(float, b.strip("[] ").split(',')))  # Remove brackets, spaces, and split by comma
+            for b in param_perturb_str.strip("[]").split("], [")  # Split by "], [" to handle lists of parameters
+        ]
+    else: raise ValueError(f"Unknown SA_Type: {df_metadata['SA_Type'].iloc[0]}")
+    # Substitute the processed values back into the DataFrame
+    df_metadata.at[0, "Param_Names"] = param_names_list
+    df_metadata.at[0, "Bounds"] = bounds_list
+    df_metadata.at[0, "Reference_Values"] = param_ref_list
+    df_metadata.at[0, "Perturbations"] = param_perturb_list
+    
     # Load Inputs
     cursor.execute('SELECT * FROM Inputs')
     inputs = cursor.fetchall()
     df_inputs = pd.DataFrame(inputs, columns=['SampleID', 'ParamName', 'ParamValue'])
+    # Convert df_input to a dictionary of dictionaries with external keys sampleID and internal keys ParamName - sorted by sampleID
+    df_inputs = df_inputs.pivot(index="SampleID", columns="ParamName", values="ParamValue").sort_index().to_dict(orient="index")
+    
     # Load Results
     cursor.execute('SELECT * FROM Results')
     results = cursor.fetchall()
     conn.close()
     df_results = pd.DataFrame(results, columns=['SampleID', 'ReplicateID', 'Data'])
+    
     # Deserialize the Data column
     df_results['Data'] = df_results['Data'].apply(pickle.loads)
-    # If QoIs is None - all data was stored as a list of mcds
-    if df_metadata['QoIs'].values[0] == "None": 
-        return df_metadata, df_inputs, df_results
-    else: # If QoIs are not None - converts df_results['Data'] to qois columns
+
+    # If QoIs are not None - converts df_results['Data'] to qois columns
+    if df_metadata['QoIs'].values[0] != "None": 
         # Convert Data column to qois
-        df_results_modified = df_results.copy()
         df_results_modified.drop(columns=['Data'], inplace=True)
         for qoi in df_metadata['QoIs'].values[0].split(', '):
             for i in range(df_results.shape[0]):
@@ -388,6 +433,10 @@ def load_db_structure(db_file):
                 for id in range(len(qoi_values)):
                     df_results_modified.at[i, f"{qoi}_{id}"] = qoi_values[id]
                     df_results_modified.at[i, f"time_{id}"] = time_values[id]
+    # If QoIs are None - keep the Data column as is
+    else:
+        df_results_modified = df_results
+    
     return df_metadata, df_inputs, df_results_modified
 
 def OAT_analyze(dic_samples, dic_qoi):
@@ -484,3 +533,62 @@ def reshape_expanded_data(expanded_data, qoi_columns):
         return reshaped_data
     except Exception as e:
         raise ValueError(f"Error reshaping expanded data: {e}")
+    
+def calculate_qoi_statistics(df_qois_data, qoi_funcs, db_file_path):
+    """
+    Calculate the mean of the QoI values.
+    Parameters:
+    - df_qois: DataFrame containing the extracted QoI values.
+    - qoi_funcs: Dictionary of QoI functions (keys as names, values as lambda functions or None).
+    Return:
+    - df_statistics: DataFrame containing the mean and standard deviation of the QoI values.
+    """
+    qoi_columns = list(qoi_funcs.keys())
+    if not qoi_columns:
+        raise ValueError("Error: No QoI functions defined.")
+    # Check if 'Data' column in df_qois_data is a DataFrame - Case of db generated by custom summary function
+    if isinstance(df_qois_data['Data'].iloc[0], pd.DataFrame):
+        try:
+            # Extract the consistent 'time' column from the first DataFrame
+            time_column = df_qois_data['Data'].iloc[0]['time'].values
+            # Flatten the 'Data' column into a single DataFrame with SampleID and ReplicateID
+            expanded_data = pd.concat(
+                [
+                    pd.DataFrame(data).assign(SampleID=SampleID, ReplicateID=ReplicateID)
+                    for (SampleID, ReplicateID), group in df_qois_data.groupby(['SampleID', 'ReplicateID'])
+                    for data in group['Data']  # Ensure 'Data' contains DataFrames
+                ],
+                ignore_index=True
+            )
+            # Dynamically calculate the number of repetitions for the time column
+            num_repeats = len(expanded_data) // len(time_column)
+            if len(expanded_data) % len(time_column) != 0:
+                raise ValueError("Mismatch between expanded_data rows and time column length.")
+            expanded_data['time'] = np.tile(time_column, num_repeats)
+            # Reshape the expanded_data to match the expected format
+            reshaped_data = reshape_expanded_data(expanded_data, qoi_columns)
+            # Assign the reshaped data to df_qois
+            df_qois = reshaped_data
+        except Exception as e:
+            raise ValueError(f"Error calculating QoIs from DataFrame: {e}")
+    # Check if 'Data' column in df_qois_data is a series of mcds list - Case of db generated by generic summary function with NO QoI functions
+    elif isinstance(df_qois_data['Data'].iloc[0], list):
+        try:
+            df_qois = extract_qoi_from_db(db_file_path, qoi_funcs)
+        except Exception as e:
+            raise ValueError(f"Error calculating QoIs from mcds list: {e}")
+        if df_qois.empty:
+            raise ValueError("df_qois is empty, unable to generate QoIs from the database.")
+    # If QoIs are already in the database and 'Data' column is not present
+    else:
+        df_qois = df_qois_data
+
+    # Take the average among the replicates and sort the samples
+    try:
+        df_qois = df_qois.groupby(['SampleID']).mean(numeric_only=True).reset_index() # ignores NaN values
+        df_qois.drop(columns=['ReplicateID'], inplace=True)
+        df_qois = df_qois.set_index("SampleID").sort_index()
+    except Exception as e:
+        raise ValueError(f"Error taking the average among replicates: {e}")
+    
+    return df_qois
