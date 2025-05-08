@@ -30,6 +30,10 @@ class PhysiCell_Model:
             configFile.read_file(fd)
         # PhysiCell executable
         self.PC_executable = configFile[keyModel]['executable']
+        if self.verbose:
+            print(f"\t\t>> Checking executable format ...")
+        if os.name == 'nt':
+            self.PC_executable = self.PC_executable.replace(os.altsep, os.sep) + '.exe'
         if not os.path.exists(self.PC_executable): raise ValueError(f"Error! Executable {self.PC_executable} not found!")
         # Path of XML file of reference
         self.XML_RefPath = configFile[keyModel]['configFile_ref']
@@ -61,10 +65,6 @@ class PhysiCell_Model:
             self.parameters_rules = ast.literal_eval(self.parameters_rules)
         self.parameters_rules_variable = {k: v[1] for k, v in self.parameters_rules.items() if isinstance(v, list)}
         self.parameters_rules_fixed = {k: v for k, v in self.parameters_rules.items() if not isinstance(v, list)}
-        if self.verbose:
-            print(f"\t\t>> Checking executable format ...")
-        if os.name == 'nt':
-            self.PC_executable = self.PC_executable.replace(os.altsep, os.sep) + '.exe'
 
     def _load_xml_reference(self) -> None:
         tree = ET.parse(self.XML_RefPath)
