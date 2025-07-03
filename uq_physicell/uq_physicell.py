@@ -341,12 +341,12 @@ def get_rule_index_in_csv(rules: list, key_rules: str) -> int:
     try:
         cell_type, signal, direction, behavior, parameter = key_rules.split(",")
     except ValueError:
-        raise ValueError("Error in rule format: Provide 'cell_type,signal,direction,behavior,parameter' where parameter can be 'saturation', 'half_max', 'hill_power', or 'dead'.")
+        raise ValueError("Error in rule format: Provide 'cell_type,signal,direction,behavior,parameter' where parameter can be 'saturation', 'half_max', 'hill_power', 'dead', or 'inactive'.")
     try:
         for idx, rule in enumerate(rules):
             if ( (cell_type == rule['cell_type']) and (signal == rule['signal']) and 
                 (direction == rule['direction']) and (behavior == rule['behavior']) and
-                (parameter in ['saturation', 'half_max', 'hill_power', 'dead']) ):
+                (parameter in ['saturation', 'half_max', 'hill_power', 'dead', 'inactive']) ):
                 return idx
     except ValueError:
         raise ValueError(f"Error! Rule {cell_type},{signal},{direction},{behavior} not found or parameter {parameter} does not exist!")
@@ -357,10 +357,21 @@ def generate_csv_file(rules: list, csv_file_out: str, dic_parameters_rules: dict
             fieldNames = ['cell_type', 'signal', 'direction', 'behavior', 'saturation', 'half_max', 'hill_power', 'dead']
             writer = csv.DictWriter(csvfile, fieldnames=fieldNames, delimiter=',')
             rules_temp = rules.copy()
+            rules_inactived = []
             for parameterID in dic_parameters_rules.keys():
                 value, key_rule, param_name = dic_parameters_rules[parameterID]
                 index_rule = get_rule_index_in_csv(rules, key_rule)
-                rules_temp[index_rule][param_name] = value
-            for rule in rules_temp: writer.writerow(rule)
+                if (param_name not in fieldNames) and (param_name != "inactive"):
+                    raise ValueError(f"Error! Parameter {param_name} not found in RULE: {key_rule}. Available parameters: {fieldNames} and inactive option.")
+                # if the parameter is 'inactive', remove the rule or ignore it
+                if (param_name == "inactive"):
+                    if ( value == 1 ): rules_inactived.append(index_rule)
+                    continue
+                else:
+                    rules_temp[index_rule][param_name] = value
+            for id, rule in enumerate(rules_temp):
+                # if the rule is not inactived, write it to the csv file
+                if id not in rules_inactived:
+                    writer.writerow(rule)
     except:
         raise ValueError(f"Error generating csv file.")
