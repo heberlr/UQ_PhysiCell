@@ -1,0 +1,2 @@
+epithelial,virus,increases,transform to epithelial_infected,0.1,0.4,8,0
+macrophage,volume,decreases,phagocytose epithelial_infected,0,5000,12,0
