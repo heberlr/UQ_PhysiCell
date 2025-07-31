@@ -50,7 +50,7 @@ dependencies = [
 ]
 
 [project.scripts]
-uq_physicell = "uq_physicell.GUI_UQ:main"
+uq_physicell = "uq_physicell.gui.main:main"
 
 [project.urls]
 "Homepage" = "https://github.com/heberlr/UQ_PhysiCell"
