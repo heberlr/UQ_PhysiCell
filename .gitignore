@@ -6,8 +6,10 @@ __pycache__/*
 uq_physicell/uq_physicell.egg-*
 /dist
 /examples/PhysiCell-master/*
+/examples/virus-mac-new/output/*
 UQ_PC_InputFolder/*
 UQ_PC_OutputFolder/*
 ALL_CITATIONS.txt
 *.pyc
 *.db
+studio_debug.log
