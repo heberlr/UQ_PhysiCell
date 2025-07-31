@@ -16,6 +16,7 @@ import copy
 class PhysiCell_Model:
     def __init__(self, configFilePath: str, keyModel: str, verbose: bool = False) -> None:
         self.configFilePath = configFilePath
+        self.keyModel = keyModel
         self.verbose = verbose
         self._load_config(configFilePath, keyModel)
         self._load_xml_reference()
