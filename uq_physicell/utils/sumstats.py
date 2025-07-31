@@ -3,20 +3,20 @@ import pandas as pd
 from shutil import rmtree
 from typing import Union
 
-'''
-A library of summary statistics to be applied to PhysiCell simulation output files.
-
-Each method takes arguments
-1) outputPath: a PhysiCell output directory 
-2) summaryFile: a file to storage the summary of the PhysiCell simulation 
-3) dic_params: a dictionary with the parameters used in the simulation
-4) SampleID: a unique identifier for the sample
-5) ReplicateID: a unique identifier for the replicate
-
-Each method will return the appropriate data frame summary.
-'''
-# Final population of live and dead cells
 def summ_func_FinalPopLiveDead(outputPath:str,summaryFile:Union[str,None], dic_params:dict, SampleID:int, ReplicateID:int) -> Union[pd.DataFrame,None]:
+    """
+    Final population of live and dead cells
+    
+    Parameters:
+    - outputPath: str -> Path to the PhysiCell output directory.
+    - summaryFile: Union[str, None] -> File to store the summary (optional).
+    - dic_params: dict -> Dictionary of simulation parameters.
+    - SampleID: int -> Unique identifier for the sample.
+    - ReplicateID: int -> Unique identifier for the replicate.
+    
+    Returns:
+    - pd.DataFrame or None -> DataFrame with the computed QoIs or None if saved to a file.
+    """
     # read the last file
     mcds = pcdl.TimeStep('final.xml',outputPath, microenv=False, graph=False, settingxml=None, verbose=False)
     # dataframe of cells
@@ -37,6 +37,20 @@ def summ_func_FinalPopLiveDead(outputPath:str,summaryFile:Union[str,None], dic_p
 
 # Population over time of live and dead cells
 def summ_func_TimeSeriesPopLiveDead(outputPath:str,summaryFile:Union[str,None], dic_params:dict, SampleID:int, ReplicateID:int) -> Union[pd.DataFrame,None]:
+    """
+    Population over time of live and dead cells
+
+    Parameters:
+    - outputPath: str -> Path to the PhysiCell output directory.
+    - summaryFile: Union[str, None] -> File to store the summary (optional).
+    - dic_params: dict -> Dictionary of simulation parameters.
+    - SampleID: int -> Unique identifier for the sample.
+    - ReplicateID: int -> Unique identifier for the replicate.
+    
+    Returns:
+    - pd.DataFrame or None -> DataFrame with the computed QoIs or None if saved to a file.
+    """
+
     mcds_ts = pcdl.TimeSeries(outputPath, microenv=False, graph=False, settingxml=None, verbose=False)
     for mcds in mcds_ts.get_mcds_list():
         df_cell = mcds.get_cell_df() 
@@ -67,6 +81,8 @@ def generic_QoI(outputPath: str, summaryFile: Union[str, None], dic_params: dict
     - ReplicateID: int -> Unique identifier for the replicate.
     - qoi_funcs: dict -> Dictionary of QoI functions with keys as QoI names and values as functions/lambdas.
     - mode: str -> Mode of operation: 'last_snapshot', 'time_series', or 'summary'.
+    - RemoveFolder: bool -> Whether to remove the output folder after processing.
+    - drop_columns: list -> List of columns to drop from the DataFrame.
 
     Returns:
     - pd.DataFrame or None -> DataFrame with the computed QoIs or None if saved to a file.
@@ -119,6 +135,7 @@ def generic_QoI(outputPath: str, summaryFile: Union[str, None], dic_params: dict
                         df_list.append(df_cell)
                     return df_list
             else:
+                df_list = []
                 for mcds in mcds_ts.get_mcds_list():
                     df_cell = mcds.get_cell_df()
                     try: 

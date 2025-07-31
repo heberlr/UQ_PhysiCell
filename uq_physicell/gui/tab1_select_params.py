@@ -1,10 +1,11 @@
-from PyQt5.QtWidgets import QVBoxLayout, QLabel, QHBoxLayout, QPushButton, QLineEdit, QTextEdit, QComboBox, QFileDialog, QInputDialog, QMessageBox
+from PyQt5.QtWidgets import QScrollArea, QWidget, QVBoxLayout, QLabel, QHBoxLayout, QPushButton, QLineEdit, QTextEdit, QComboBox, QFileDialog, QInputDialog, QMessageBox, QGroupBox
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QIntValidator
 import os
-import xml.etree.ElementTree as ET
 import pandas as pd
 import configparser
+
+from .load_files import load_xml_file, load_csv_file, update_rules_file, load_ini_file
 
 def create_tab1(main_window):
     # Add the following methods to the main_window instance
@@ -33,15 +34,28 @@ def create_tab1(main_window):
     main_window.save_ini_file = save_ini_file
     main_window.load_ini_file = load_ini_file
 
-    layout_tab1 = QVBoxLayout()
+    # Create a scroll area
+    scroll_area = QScrollArea()
+    scroll_area.setWidgetResizable(True)  # Allow resizing
+
+    # Create a container widget for the layout
+    container_widget = QWidget()
+    layout_tab1 = QVBoxLayout(container_widget)
+
+    # Add the container widget to the scroll area
+    scroll_area.setWidget(container_widget)
 
     # Button to load XML
-    main_window.load_xml_label = QLabel("<b>Load PhysiCell .xml file</b>")
-    main_window.load_xml_label.setAlignment(Qt.AlignCenter)
-    layout_tab1.addWidget(main_window.load_xml_label)
-    main_window.load_xml_button = QPushButton("Load PhysiCell XML")
-    main_window.load_xml_button.clicked.connect(lambda: main_window.load_xml_file(main_window))
-    layout_tab1.addWidget(main_window.load_xml_button)
+    load_xml_hbox = QHBoxLayout()
+    load_xml_label = QLabel("<b>PhysiCell configuration file</b>: ")
+    load_xml_hbox.addWidget(load_xml_label)
+    load_xml_button = QPushButton("Load PhysiCell .xml File")
+    load_xml_button.setStyleSheet("background-color: lightgreen; color: black")
+    load_xml_button.clicked.connect(lambda: main_window.load_xml_file(main_window))
+    load_xml_hbox.addWidget(load_xml_button)
+    # Add stretch to push everything to the left
+    load_xml_hbox.addStretch()
+    layout_tab1.addLayout(load_xml_hbox)
 
     # Separator line
     layout_tab1.addWidget(QLabel("<hr>"))
@@ -53,47 +67,78 @@ def create_tab1(main_window):
 
     # Horizontal layout for combo box
     main_window.combo_hbox = QHBoxLayout()
+    main_window.combo_hbox.setAlignment(Qt.AlignLeft)
+    main_window.combo_label = QLabel("Select Parameter:")
+    main_window.combo_hbox.addWidget(main_window.combo_label)
     main_window.combo_box = QComboBox()
-    main_window.combo_box.addItem("Select Parameter...")
+    main_window.combo_box.addItem("Select root...")
     main_window.combo_box.setEnabled(False)
     main_window.combo_hbox.addWidget(main_window.combo_box)
+    main_window.combo_hbox.addStretch()
     layout_tab1.addLayout(main_window.combo_hbox)
-
+    
+    # Create a group box for parameter details
+    main_window.param_details_groupbox = QGroupBox("Parameter Details")
+    param_details_layout = QVBoxLayout()
     # Label to display selected parameter path
-    main_window.selected_param_label = QLabel("Path: None")
-    layout_tab1.addWidget(main_window.selected_param_label)
-
+    main_window.selected_param_label = QLabel("XML path: None")
+    param_details_layout.addWidget(main_window.selected_param_label)
     # Label to display selected parameter value
-    main_window.selected_value_label = QLabel("Value: None")
-    layout_tab1.addWidget(main_window.selected_value_label)
+    main_window.selected_value_label = QLabel("Current value: None")
+    param_details_layout.addWidget(main_window.selected_value_label)
+    # Set the layout for the group box
+    main_window.param_details_groupbox.setLayout(param_details_layout)
+    # Add the group box to the main layout
+    layout_tab1.addWidget(main_window.param_details_groupbox)
 
     # Horizontal layout for value input and buttons
     main_window.value_hbox = QHBoxLayout()
+    main_window.value_label = QLabel("New Value:")
+    main_window.value_hbox.addWidget(main_window.value_label)
     main_window.new_value_input = QLineEdit()
     main_window.new_value_input.setPlaceholderText("Enter new value")
     main_window.new_value_input.setEnabled(False)
     main_window.value_hbox.addWidget(main_window.new_value_input)
-
+    # Button to set parameter value
     main_window.set_param_button = QPushButton("Set Parameter")
+    main_window.set_param_button.setStyleSheet("background-color: lightgreen; color: darkgray;")
     main_window.set_param_button.setEnabled(False)
     main_window.set_param_button.clicked.connect(lambda: main_window.set_parameter_value(main_window))
     main_window.value_hbox.addWidget(main_window.set_param_button)
-
+    # Button to add parameter to analysis
     main_window.add_analysis_button = QPushButton("Add to Analysis")
     main_window.add_analysis_button.setEnabled(False)
+    main_window.add_analysis_button.setStyleSheet("background-color: lightgreen; color: darkgray;")
     main_window.add_analysis_button.clicked.connect(lambda: main_window.add_parameter_to_analysis(main_window))
     main_window.value_hbox.addWidget(main_window.add_analysis_button)
-
+    # Add text into new_value_input enables the set parameter button and disables it if empty (oposite for add_analysis_button)
+    main_window.new_value_input.textChanged.connect(
+        lambda: [
+            main_window.set_param_button.setEnabled(main_window.new_value_input.text().strip() != ""),
+            main_window.set_param_button.setStyleSheet(
+                "background-color: lightgreen; color: black;" if main_window.new_value_input.text().strip() 
+                else "background-color: lightgreen; color: darkgray;"
+            ),
+            main_window.add_analysis_button.setEnabled(not main_window.set_param_button.isEnabled()),
+            main_window.add_analysis_button.setStyleSheet(
+                "background-color: lightgreen; color: black;" if not main_window.new_value_input.text().strip() 
+                else "background-color: lightgreen; color: darkgray;"
+            )
+        ]
+    )
     main_window.remove_param_button = QPushButton("Remove Parameter")
     main_window.remove_param_button.setEnabled(False)
+    main_window.remove_param_button.setStyleSheet("background-color: yellow; color: black")
     main_window.remove_param_button.clicked.connect(lambda: main_window.remove_parameter(main_window))
     main_window.value_hbox.addWidget(main_window.remove_param_button)
 
+    # Add space between buttons
+    main_window.value_hbox.addStretch()
     main_window.load_rules_button = QPushButton("Load Rules CSV")
     main_window.load_rules_button.setEnabled(False)
+    main_window.load_rules_button.setStyleSheet("background-color: lightgreen; color: black")
     main_window.load_rules_button.clicked.connect(lambda: main_window.load_csv_file(main_window))
     main_window.value_hbox.addWidget(main_window.load_rules_button)
-    main_window.value_hbox.addStretch()
     layout_tab1.addLayout(main_window.value_hbox)
 
     # Add the rule section here
@@ -145,7 +190,8 @@ def create_tab1(main_window):
     main_window.executable_path_input = QLineEdit()
     main_window.executable_path_input.setEnabled(False)
     main_window.executable_path_input.setPlaceholderText("Enter executable path")
-    main_window.executable_path_browse_button = QPushButton("Browse")
+    main_window.executable_path_browse_button = QPushButton("Select")
+    main_window.executable_path_browse_button.setStyleSheet("background-color: lightgreen; color: black")
     main_window.executable_path_browse_button.clicked.connect(lambda: main_window.executable_path_input.setText(QFileDialog.getOpenFileName(main_window, "Select Executable", "", "Executable Files (*)")[0]))
     main_window.executable_path_input.setPlaceholderText("Enter executable path")
     main_window.save_hbox.addWidget(main_window.executable_path_input)
@@ -161,53 +207,13 @@ def create_tab1(main_window):
 
     # Save .ini File button
     main_window.save_ini_button = QPushButton("Save .ini File")
+    main_window.save_ini_button.setStyleSheet("background-color: yellow; color: black")
     main_window.save_ini_button.clicked.connect(lambda: main_window.save_ini_file(main_window))
     main_window.save_hbox.addWidget(main_window.save_ini_button)
 
     layout_tab1.addLayout(main_window.save_hbox)
 
-    return layout_tab1
-
-def load_xml_file(main_window, filePath=None):
-    # Load the XML file and parse it
-    if filePath is None:
-        # Open file dialog to select XML file
-        options = QFileDialog.Options()
-        main_window.xml_file_path, _ = QFileDialog.getOpenFileName(main_window, "Select PhysiCell XML File", "", "XML Files (*.xml);;All Files (*)", options=options)
-        # Clear parameters, .ini File Preview, and output
-        main_window.analysis_parameters.clear()
-        main_window.fixed_parameters.clear()
-        main_window.analysis_rules_parameters.clear()
-        main_window.fixed_rules_parameters.clear()
-        main_window.ini_preview_text.clear()
-        main_window.output_text.clear()
-    else:
-        main_window.xml_file_path = filePath
-
-    if main_window.xml_file_path:
-        try:
-            # Parse XML file
-            main_window.xml_tree = ET.parse(main_window.xml_file_path).getroot()
-            # Define the path to the rules CSV file
-            folder_path = main_window.xml_file_path.rsplit("/", 1)[0]  # Get the folder path of the XML file
-            filename = main_window.xml_tree.find(".//cell_rules/rulesets/ruleset/filename").text.strip()
-            main_window.rule_path = os.path.join(folder_path, filename)  # Initialize rule path
-            # Build parent-child mapping
-            main_window.parent_map = {child: parent for parent in main_window.xml_tree.iter() for child in parent}
-            # Clear existing combo boxes
-            main_window.clear_combo_boxes(main_window)
-            # Create the first combo box for root-level children
-            main_window.create_combo_box(main_window, main_window.xml_tree, "Root")
-            main_window.update_output_tab1(main_window, f"Loaded XML file: {main_window.xml_file_path}")
-            # Activate the buttons
-            main_window.new_value_input.setEnabled(True)
-            main_window.set_param_button.setEnabled(True)
-            main_window.add_analysis_button.setEnabled(True)
-            main_window.remove_param_button.setEnabled(True)
-            main_window.load_rules_button.setEnabled(True)
-        except Exception as e:
-            main_window.clear_combo_boxes(main_window)
-            main_window.update_output_tab1(main_window, f"Error loading XML: {e}")
+    return scroll_area
 
 def create_combo_box(main_window, parent_node, label):
     # Create a new combo box for the given parent node
@@ -223,7 +229,7 @@ def create_combo_box(main_window, parent_node, label):
     combo_box.currentIndexChanged.connect(lambda: main_window.handle_combo_selection(main_window, combo_box, parent_node))
 
     # Add "->" label only if there is already a combo box in the layout
-    if main_window.combo_hbox.count() > 0:
+    if main_window.combo_hbox.count() > 1:
         arrow_label = QLabel("\u2794")  # Unicode for a proper arrow (➔)
         arrow_label.setAlignment(Qt.AlignCenter)
         main_window.combo_hbox.addWidget(arrow_label)
@@ -231,7 +237,7 @@ def create_combo_box(main_window, parent_node, label):
     # Add the combo box to the layout
     main_window.combo_hbox.addWidget(combo_box)
 
-def clear_combo_boxes(main_window, starting_index=0):
+def clear_combo_boxes(main_window, starting_index=1):
     # Clear combo boxes and "->" labels starting from the given index
     while main_window.combo_hbox.count() > starting_index:
         widget = main_window.combo_hbox.takeAt(starting_index).widget()
@@ -278,31 +284,8 @@ def update_selected_param_label(main_window, path, value):
         new_value += "\u2794 <analysis>"
 
     # Update the labels
-    main_window.selected_param_label.setText(f"Path: {path}")
-    main_window.selected_value_label.setText(f"Value: {value} {new_value}")
-
-def load_csv_file(main_window):
-    # Toggle between loading and unloading the rules CSV
-    if main_window.load_rules_button.text() == "Unload Rules CSV":
-        # Unload the rules widgets
-        main_window.clear_rule_section(main_window)  # Clear the rule section
-        main_window.load_rules_button.setText("Load Rules CSV")
-        main_window.update_output_tab1(main_window, "Unloaded rules CSV.")
-    else:
-        # Load the rules CSV
-        try:
-            if os.path.exists(main_window.rule_path):
-                # Predefine column names
-                column_names = ["cell", "signal", "direction", "behavior", "saturation", "half-max", "hill-power", "apply-dead"]
-                main_window.csv_data = pd.read_csv(main_window.rule_path, names=column_names, header=None)
-                # print(main_window.csv_data)
-                main_window.update_output_tab1(main_window, f"Loaded CSV file: {main_window.rule_path}")
-                main_window.create_rule_section(main_window)  # Create the rules section
-                main_window.load_rules_button.setText("Unload Rules CSV")
-            else:
-                main_window.update_output_tab1(main_window, f"Error: CSV file not found at {main_window.rule_path}")
-        except Exception as e:
-            main_window.update_output_tab1(main_window, f"Error loading CSV file: {e}")
+    main_window.selected_param_label.setText(f"XML path: {path}")
+    main_window.selected_value_label.setText(f"Current value: {value} {new_value}")
 
 def clear_rule_section(main_window):
     # Clear all widgets in the rule_section_vbox
@@ -371,13 +354,19 @@ def create_rule_section(main_window):
     # Add the rule layout to the main layout
     main_window.rule_section_vbox.addLayout(rule_hbox)
 
+    # Group box for rule details
+    rule_details_groupbox = QGroupBox("Rule Details")
+    rule_details_layout = QVBoxLayout()
     # Label to display selected rule path
     main_window.selected_rule_label = QLabel("Rule Path: None")
-    main_window.rule_section_vbox.addWidget(main_window.selected_rule_label)
-
+    rule_details_layout.addWidget(main_window.selected_rule_label)
     # Label to display selected rule value
     main_window.selected_rule_value_label = QLabel("Rule Value: None")
-    main_window.rule_section_vbox.addWidget(main_window.selected_rule_value_label)
+    rule_details_layout.addWidget(main_window.selected_rule_value_label)
+    # Set the layout for the group box
+    rule_details_groupbox.setLayout(rule_details_layout)
+    # Add the group box to the main layout
+    main_window.rule_section_vbox.addWidget(rule_details_groupbox)
 
     # Horizontal layout for rule buttons
     rule_buttons_hbox = QHBoxLayout()
@@ -390,15 +379,34 @@ def create_rule_section(main_window):
     # Add buttons for setting, adding to analysis, and removing rules parameters
     set_rule_button = QPushButton("Set Rule Parameter")
     set_rule_button.clicked.connect(lambda: main_window.set_rule_parameter(main_window))
+    set_rule_button.setStyleSheet("background-color: lightgreen; color: black")
     rule_buttons_hbox.addWidget(set_rule_button)
 
     add_rule_analysis_button = QPushButton("Add Rule to Analysis")
     add_rule_analysis_button.clicked.connect(lambda: main_window.add_rule_to_analysis(main_window))
+    add_rule_analysis_button.setStyleSheet("background-color: lightgreen; color: black")
     rule_buttons_hbox.addWidget(add_rule_analysis_button)
 
     remove_rule_button = QPushButton("Remove Rule Parameter")
     remove_rule_button.clicked.connect(lambda: main_window.remove_rule_parameter(main_window))
+    remove_rule_button.setStyleSheet("background-color: yellow; color: black")
     rule_buttons_hbox.addWidget(remove_rule_button)
+
+    # Add text into new_value_input_rule enables the set parameter button and disables it if empty (oposite for add_analysis_button)
+    main_window.new_value_input_rule.textChanged.connect(
+        lambda: [
+            set_rule_button.setEnabled(main_window.new_value_input_rule.text().strip() != ""),
+            set_rule_button.setStyleSheet(
+                "background-color: lightgreen; color: black;" if main_window.new_value_input_rule.text().strip() 
+                else "background-color: lightgreen; color: darkgray;"
+            ),
+            add_rule_analysis_button.setEnabled(not set_rule_button.isEnabled()),
+            add_rule_analysis_button.setStyleSheet(
+                "background-color: lightgreen; color: black;" if not main_window.new_value_input_rule.text().strip() 
+                else "background-color: lightgreen; color: darkgray;"
+            )
+        ]
+    )
 
     # Add the buttons layout to the main layout
     main_window.rule_section_vbox.addLayout(rule_buttons_hbox)
@@ -433,8 +441,8 @@ def handle_combo_selection_for_rules(main_window):
         ]
 
         if rule_row.empty:
-            main_window.selected_rule_label.setText("Rule Path: None")
-            main_window.selected_rule_value_label.setText("Rule Value: None")
+            main_window.selected_rule_label.setText("Rule: None")
+            main_window.selected_rule_value_label.setText("Value: None")
             return
 
         # Extract the respective value for the selected parameter
@@ -458,8 +466,8 @@ def handle_combo_selection_for_rules(main_window):
             new_value += "\u2794 <analysis>"
 
         # Update Rule Path and Rule Value
-        main_window.selected_rule_label.setText(f"Rule Path: {rule_key}")
-        main_window.selected_rule_value_label.setText(f"Rule Value: {value} {new_value}")
+        main_window.selected_rule_label.setText(f"Rule: {rule_key}")
+        main_window.selected_rule_value_label.setText(f"Value: {value} {new_value}")
     except Exception as e:
         main_window.update_output_tab1(main_window, f"Error handling rule selection: {e}")
 
@@ -689,23 +697,6 @@ def remove_parameter(main_window):
     except Exception as e:
         main_window.update_output_tab1(main_window, f"Error removing parameter: {e}")
 
-def update_rules_file(main_window):
-    # Update the rules file path based on the selected folder and filename
-    try:
-        # Check if folder_path is already set in fixed_parameters, else use the same folder of XML
-        if ".//cell_rules/rulesets/ruleset/folder" in main_window.fixed_parameters.keys():
-            folder_path = main_window.fixed_parameters[".//cell_rules/rulesets/ruleset/folder"]
-        else:
-            folder_path = folder_path = main_window.xml_file_path.rsplit("/", 1)[0]  # Get the folder path of the XML file
-        # Check if filename is already set in fixed_parameters, else use the XML
-        if ".//cell_rules/rulesets/ruleset/filename" in main_window.fixed_parameters.keys():
-            filename = main_window.fixed_parameters[".//cell_rules/rulesets/ruleset/filename"]
-        else:
-            filename = main_window.get_xml_value(main_window, ".//cell_rules/rulesets/ruleset/filename")
-        main_window.rule_path = os.path.join(folder_path, filename)
-        main_window.update_output_tab1(main_window, f"Updated rules file path: {main_window.rule_path}")
-    except Exception as e:
-        main_window.update_output_tab1(main_window, f"Error updating rules file path: {e}")
 
 def update_ini_preview(main_window):
     # Update the preview of the .ini file with proper line breaks
@@ -798,108 +789,3 @@ def save_ini_file(main_window):
             main_window.load_ini_file(main_window, filePath=file_path, strucName=struc_name)
         except Exception as e:
             main_window.update_output_tab1(main_window, f"Error saving .ini file: {e}")
-
-def load_ini_file(main_window, filePath=None, strucName=None):
-    # Load .ini file and extract parameters for sensitivity analysis
-    if filePath is None:
-        options = QFileDialog.Options()
-        main_window.ini_file_path, _ = QFileDialog.getOpenFileName(main_window, "Select .ini File", "", "INI Files (*.ini);;All Files (*)", options=options)
-    else:
-        main_window.ini_file_path = filePath
-    if main_window.ini_file_path:
-        try:
-            # Read the .ini file
-            config = configparser.ConfigParser()
-            config.read(main_window.ini_file_path)
-
-            # Get all sections from the .ini file
-            sections = config.sections()
-            if not sections:
-                main_window.update_output_tab1(main_window, "Error: No sections found in the .ini file.")
-                return
-
-            # If only one section, load it directly
-            if len(sections) == 1:
-                struc_name = sections[0]
-            elif strucName is not None:
-                struc_name = strucName
-            else:
-                # Create a dialog to display radio buttons for section selection
-                dialog = QInputDialog(main_window)
-                dialog.setWindowTitle("Select structure name")
-                dialog.setLabelText("Select the structure section to load:")
-                dialog.setComboBoxItems(sections)
-                dialog.setOption(QInputDialog.UseListViewForComboBoxItems)
-
-                if dialog.exec_() == QInputDialog.Accepted:
-                    struc_name = dialog.textValue()
-                    if struc_name not in sections:
-                        main_window.update_output_tab1(main_window, f"Error: Structure name '{struc_name}' not found in the .ini file.")
-                        return
-                else:
-                    main_window.update_output_tab1(main_window, "No section selected.")
-                    return
-
-            # Extract parameters from the selected section
-            main_window.struc_name_input.setText(struc_name)
-            main_window.executable_path_input.setText(config[struc_name]['executable'])
-            main_window.num_replicates_input.setText(config[struc_name]['numReplicates'])
-            main_window.load_xml_file(main_window, config[struc_name]['configFile_ref'])
-
-            # Add the loaded parameters to dictionaries
-            for key, value in eval(config[struc_name]['parameters']).items():
-                if isinstance(value, list):
-                    main_window.analysis_parameters[key] = value
-                else:
-                    main_window.fixed_parameters[key] = value
-
-            # Check if rules file exists in the fixed parameters from .ini file
-            if ".//cell_rules/rulesets/ruleset/filename" in main_window.fixed_parameters.keys():
-                update_rules_file(main_window)
-
-            # Extract the rule file path if it exists
-            if 'rulesFile_ref' in config[struc_name].keys():
-                main_window.rule_path = config[struc_name]['rulesFile_ref']
-                main_window.load_csv_file(main_window) # load the rules CSV file
-                for key, value in eval(config[struc_name]['parameters_rules']).items():
-                    if isinstance(value, list):
-                        main_window.analysis_rules_parameters[key] = value
-                    else:
-                        main_window.fixed_rules_parameters[key] = value
-
-            # Update the preview of the .ini file
-            main_window.update_ini_preview(main_window)
-
-            # Write a message in the output fields of Tab 1 and Tab 2
-            message = f".ini file loaded: {main_window.ini_file_path} - structure name: {struc_name}"
-            main_window.update_output_tab1(main_window, message)  # Tab 1 output
-            main_window.update_output_tab2(main_window, message)  # Tab 2 output
-
-            # Re-enable buttons after successful loading
-            main_window.analysis_type_dropdown.setEnabled(True)
-            main_window.sample_params_button.setEnabled(True)
-            main_window.plot_samples_button.setEnabled(True)
-            # Re-enable widgets after run_SA
-            main_window.global_method_combo.setEnabled(True)
-            main_window.global_sampler_combo.setEnabled(True)
-            main_window.global_param_combo.setEnabled(True)
-            main_window.global_ref_value_input.setEnabled(True)
-            main_window.global_range_percentage.setEnabled(True)
-            main_window.global_bounds.setEnabled(True)
-            main_window.local_param_combo.setEnabled(True)
-            main_window.local_ref_value_input.setEnabled(True)
-            main_window.local_perturb_input.setEnabled(True)
-            # Disable the run SA button
-            main_window.run_sa_button.setEnabled(False)
-
-            # Update the analysis type dropdown
-            main_window.update_analysis_type(main_window)
-
-        except Exception as e:
-            # Ensure buttons remain disabled if loading fails
-            main_window.analysis_type_dropdown.setEnabled(False)
-            main_window.sample_params_button.setEnabled(False)
-            main_window.plot_samples_button.setEnabled(False)
-            error_message = f"Error loading .ini file: {e}"
-            main_window.update_output_tab1(main_window, error_message)  # Tab 1 output
-            main_window.update_output_tab2(main_window, error_message)  # Tab 2 output

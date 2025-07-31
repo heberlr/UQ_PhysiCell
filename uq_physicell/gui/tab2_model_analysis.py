@@ -1,5 +1,5 @@
 import os, sys
-from PyQt5.QtWidgets import QVBoxLayout, QLabel, QHBoxLayout, QPushButton, QComboBox, QLineEdit, QTextEdit, QDialog, QFileDialog, QInputDialog, QListWidget, QMessageBox
+from PyQt5.QtWidgets import QVBoxLayout, QLabel, QHBoxLayout, QPushButton, QComboBox, QLineEdit, QTextEdit, QDialog, QFileDialog, QInputDialog, QListWidget, QMessageBox, QSizePolicy
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QIntValidator, QDoubleValidator
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -7,84 +7,19 @@ from matplotlib.figure import Figure
 import seaborn as sns
 import numpy as np
 import pandas as pd
-
-
-# SA library
-from SALib.sample import fast_sampler, ff, finite_diff, latin, sobol, morris
-from SALib.analyze import fast as fast_analyze, rbd_fast as rbd_fast_analyze, ff as ff_analyze, pawn as pawn_analyze, dgsm as dgsm_analyze, enhanced_hdmr as hdmr_analyze, rsa as rsa_analyze, discrepancy as discrepancy_analyze, delta as delta_analyze, sobol as sobol_analyze, morris as morris_analyze
+import traceback
 
 # My local modules
-from uq_physicell.SA_script import run_sa_simulations
-from uq_physicell.SA_utils import load_db_structure, OAT_analyze, calculate_qoi_statistics
-
-# Compatibility of samplers with methods following the SALib library
-# https://salib.readthedocs.io/en/latest/index.html
-# https://salib.readthedocs.io/en/latest/user-guide/analysis.html
-# https://salib.readthedocs.io/en/latest/user-guide/sampling.html
-
-# Issues with methods:
-# Discrepancy Sensitivity Indices: Error Bounds are not consistent 'l_bounds' < 'u_bounds'
-# Delta Moment-Independent Measure: Error module 'numpy' has no attribute 'trapezoid' (outdated numpy version)
-samplers_to_method = {
-    "Fast": [
-        "FAST - Fourier Amplitude Sensitivity Test",
-        "RBD-FAST - Random Balance Designs Fourier Amplitude Sensitivity Test",
-        "Delta Moment-Independent Measure",
-        "PAWN Sensitivity Analysis",
-        "High-Dimensional Model Representation",
-        "Regional Sensitivity Analysis",
-        "Discrepancy Sensitivity Indices"
-    ],
-    "Fractional Factorial": [
-        "Fractional Factorial",
-        "RBD-FAST - Random Balance Designs Fourier Amplitude Sensitivity Test",
-        "Delta Moment-Independent Measure",
-        "PAWN Sensitivity Analysis",
-        "High-Dimensional Model Representation",
-        "Regional Sensitivity Analysis",
-        "Discrepancy Sensitivity Indices"
-    ],
-    "Finite Difference": [
-        "Derivative-based Global Sensitivity Measure (DGSM)",
-        "RBD-FAST - Random Balance Designs Fourier Amplitude Sensitivity Test",
-        "Delta Moment-Independent Measure",
-        "PAWN Sensitivity Analysis",
-        "High-Dimensional Model Representation",
-        "Regional Sensitivity Analysis",
-        "Discrepancy Sensitivity Indices"
-    ],
-    "Latin hypercube sampling (LHS)": [
-        "RBD-FAST - Random Balance Designs Fourier Amplitude Sensitivity Test",
-        "Delta Moment-Independent Measure",
-        "PAWN Sensitivity Analysis",
-        "High-Dimensional Model Representation",
-        "Regional Sensitivity Analysis",
-        "Discrepancy Sensitivity Indices"
-    ],
-    "Sobol": [
-        "Sobol Sensitivity Analysis",
-        "RBD-FAST - Random Balance Designs Fourier Amplitude Sensitivity Test",
-        "Delta Moment-Independent Measure",
-        "PAWN Sensitivity Analysis",
-        "High-Dimensional Model Representation",
-        "Regional Sensitivity Analysis",
-        "Discrepancy Sensitivity Indices"
-    ],
-    "Morris": [
-        "Method of Morris",
-        "RBD-FAST - Random Balance Designs Fourier Amplitude Sensitivity Test",
-        "Delta Moment-Independent Measure",
-        "PAWN Sensitivity Analysis",
-        "High-Dimensional Model Representation",
-        "Regional Sensitivity Analysis",
-        "Discrepancy Sensitivity Indices"
-    ]
-}
+from uq_physicell.model_analysis.samplers import run_global_sampler, run_local_sampler
+from uq_physicell.model_analysis.sensitivity_analysis import run_global_sa, run_local_sa, samplers_to_method
+from uq_physicell.model_analysis.main import ModelAnalysisContext, run_simulations
+from uq_physicell.model_analysis.utils import calculate_qoi_statistics
+from uq_physicell.model_analysis.database import load_structure
 
 def create_tab2(main_window):
     # Add the following methods to the main_window instance
     main_window.update_output_tab2 = update_output_tab2
-    main_window.load_db_file = load_db_file
+    main_window.load_ma_database = load_ma_database
     main_window.update_analysis_type = update_analysis_type
     main_window.update_local_inputs = update_local_inputs
     main_window.update_local_SA_reference = update_local_SA_reference
@@ -95,30 +30,12 @@ def create_tab2(main_window):
     main_window.sample_parameters = sample_parameters
     main_window.plot_samples = plot_samples
     main_window.update_global_sampler_options = update_global_sampler_options
-    main_window.run_simulations = run_simulations
+    main_window.run_simulations_function = run_simulations_function
     main_window.run_analysis = run_analysis
     main_window.plot_sa_results = plot_sa_results
     main_window.plot_qois = plot_qois
 
     layout_tab2 = QVBoxLayout()
-
-    ###########################################
-    # Buttons to load .ini file and .db file
-    ###########################################
-    main_window.load_ini_label = QLabel("<b>Load .ini and .db Files</b>")
-    main_window.load_ini_label.setAlignment(Qt.AlignCenter)
-    layout_tab2.addWidget(main_window.load_ini_label)
-    load_button_hbox = QHBoxLayout()
-    main_window.load_ini_button = QPushButton("Load .ini File")
-    main_window.load_ini_button.clicked.connect(lambda: main_window.load_ini_file(main_window))
-    load_button_hbox.addWidget(main_window.load_ini_button)
-    main_window.load_db_button = QPushButton("Load .db File")
-    main_window.load_db_button.clicked.connect(lambda: main_window.load_db_file(main_window))
-    load_button_hbox.addWidget(main_window.load_db_button)
-    layout_tab2.addLayout(load_button_hbox)
-
-    # Separator line
-    layout_tab2.addWidget(QLabel("<hr>"))
 
     ###########################################
     # Dropdown for sensitivity analysis type
@@ -134,6 +51,7 @@ def create_tab2(main_window):
     main_window.analysis_type_dropdown.setEnabled(False)
     main_window.analysis_type_dropdown.currentIndexChanged.connect(lambda: main_window.update_analysis_type(main_window))
     main_window.analysis_type_hbox.addWidget(main_window.analysis_type_dropdown)
+    main_window.analysis_type_hbox.addStretch()
     layout_tab2.addLayout(main_window.analysis_type_hbox)
 
     ###########################################
@@ -177,7 +95,6 @@ def create_tab2(main_window):
     main_window.global_method_combo.addItems([
         "FAST - Fourier Amplitude Sensitivity Test",
         "RBD-FAST - Random Balance Designs Fourier Amplitude Sensitivity Test",
-        "Method of Morris",
         "Sobol Sensitivity Analysis",
         "Delta Moment-Independent Measure",
         "Derivative-based Global Sensitivity Measure (DGSM)",
@@ -190,6 +107,8 @@ def create_tab2(main_window):
     main_window.global_method_combo.setVisible(False)
     main_window.global_method_combo.currentIndexChanged.connect(lambda: main_window.update_global_sampler_options(main_window))
     main_window.globalSA_method_hbox.addWidget(main_window.global_method_combo)
+    main_window.globalSA_method_hbox.addStretch()
+    main_window.globalSA_method_hbox.addSpacing(10)
     # Sampler options
     main_window.global_sampler_label = QLabel("Sampler:")
     main_window.global_sampler_label.setVisible(False)
@@ -198,6 +117,7 @@ def create_tab2(main_window):
     main_window.global_sampler_combo.setVisible(False)
     main_window.globalSA_method_hbox.addWidget(main_window.global_sampler_combo)
     main_window.globalSA_vbox.addLayout(main_window.globalSA_method_hbox)
+    main_window.globalSA_method_hbox.addStretch()
     # Hbox of parameters
     main_window.globalSA_parameters_hbox = QHBoxLayout()
     # Select parameter for global SA
@@ -239,20 +159,17 @@ def create_tab2(main_window):
     buttonSA_hbox = QHBoxLayout()
     # Sample paramaters button
     main_window.sample_params_button = QPushButton("Sample Parameters")
+    main_window.sample_params_button.setStyleSheet("background-color: lightgreen; color: black")
     main_window.sample_params_button.clicked.connect(lambda: main_window.sample_parameters(main_window))
     main_window.sample_params_button.setEnabled(False)
     buttonSA_hbox.addWidget(main_window.sample_params_button)
     # Plot samples button
     main_window.plot_samples_button = QPushButton("Plot Samples")
+    main_window.plot_samples_button.setStyleSheet("background-color: lightgreen; color: black")
     main_window.plot_samples_button.clicked.connect(lambda: main_window.plot_samples(main_window))
     buttonSA_hbox.addWidget(main_window.plot_samples_button)
     main_window.plot_samples_button.setEnabled(False)
     layout_tab2.addLayout(buttonSA_hbox)
-    # Figure of samples
-    main_window.fig_est_canvas_samples = FigureCanvas(Figure(figsize=(5, 3)))
-    main_window.ax_samples = main_window.fig_est_canvas_samples.figure.add_subplot(111)
-    main_window.fig_est_canvas_samples.setVisible(False)
-    layout_tab2.addWidget(main_window.fig_est_canvas_samples)
 
     ###########################################
     # Horizontal layout for db file name, QoI selection, plot_qoi, and run SA button
@@ -271,21 +188,25 @@ def create_tab2(main_window):
     # Button to open QoI definition window
     main_window.define_qoi_button = QPushButton("Define QoI(s)")
     main_window.define_qoi_button.setEnabled(False)
+    main_window.define_qoi_button.setStyleSheet("background-color: lightgreen; color: black")
     main_window.define_qoi_button.clicked.connect(lambda: open_qoi_definition_window(main_window))
     main_window.db_file_name_hbox.addWidget(main_window.define_qoi_button)
     # Run simulations button
     main_window.run_simulations_button = QPushButton("Run Simulations")
     main_window.run_simulations_button.setEnabled(False)
-    main_window.run_simulations_button.clicked.connect(lambda: main_window.run_simulations(main_window))
+    main_window.run_simulations_button.setStyleSheet("background-color: lightgreen; color: black")
+    main_window.run_simulations_button.clicked.connect(lambda: main_window.run_simulations_function(main_window))
     main_window.db_file_name_hbox.addWidget(main_window.run_simulations_button)
     # Plot QoI button
     main_window.plot_qois_button = QPushButton("Plot QoI(s)")
     main_window.plot_qois_button.setEnabled(False)
+    main_window.plot_qois_button.setStyleSheet("background-color: lightgreen; color: black")
     main_window.plot_qois_button.clicked.connect(lambda: main_window.plot_qois(main_window))
     main_window.db_file_name_hbox.addWidget(main_window.plot_qois_button)
     # Run SA button
     main_window.run_sa_button = QPushButton("Run SA")
     main_window.run_sa_button.setEnabled(False)
+    main_window.run_sa_button.setStyleSheet("background-color: lightgreen; color: black")
     main_window.run_sa_button.clicked.connect(lambda: main_window.run_analysis(main_window))
     main_window.db_file_name_hbox.addWidget(main_window.run_sa_button)
     layout_tab2.addLayout(main_window.db_file_name_hbox)
@@ -330,11 +251,13 @@ def open_qoi_definition_window(main_window):
     layout.addWidget(instructions_label)
 
     # Predefined QoIs dictionary based on the database structure
+    predefined_qoi_funcs = {}
     custom_qoi_option = True
-    if isinstance(main_window.df_output['Data'].iloc[0], pd.DataFrame):
-        predefined_qoi_funcs = {qoi_name: None for qoi_name in main_window.df_output['Data'].iloc[0].columns if qoi_name not in ['time'] }
-        custom_qoi_option = False
-    else:
+    if not main_window.df_output.empty:
+        if isinstance(main_window.df_output['Data'].iloc[0], pd.DataFrame):
+            predefined_qoi_funcs = {qoi_name: None for qoi_name in main_window.df_output['Data'].iloc[0].columns if qoi_name not in ['time'] }
+            custom_qoi_option = False
+    if not predefined_qoi_funcs:
         predefined_qoi_funcs = {
             'total_cells': "lambda df: len(df)",
             'live_cells': "lambda df: len(df[df['dead'] == False])",
@@ -374,6 +297,7 @@ def open_qoi_definition_window(main_window):
 
     # Add predefined QoI button
     add_predefined_qoi_button = QPushButton("Add Selected Predefined QoI")
+    add_predefined_qoi_button.setStyleSheet("background-color: lightgreen; color: black")
     layout.addWidget(add_predefined_qoi_button)
 
     # Separator line
@@ -400,6 +324,7 @@ def open_qoi_definition_window(main_window):
     # Add custom QoI button
     add_custom_qoi_button = QPushButton("Add Custom QoI")
     add_custom_qoi_button.setEnabled(custom_qoi_option)
+    add_custom_qoi_button.setStyleSheet("background-color: lightgreen; color: black")
     layout.addWidget(add_custom_qoi_button)
 
     # Separator line
@@ -442,6 +367,7 @@ def open_qoi_definition_window(main_window):
 
     # Button to remove selected QoI
     remove_qoi_button = QPushButton("Remove Selected QoI")
+    remove_qoi_button.setStyleSheet("background-color: yellow; color: black")
     layout.addWidget(remove_qoi_button)
 
     def remove_selected_qoi():
@@ -456,6 +382,7 @@ def open_qoi_definition_window(main_window):
 
     # Close button
     close_button = QPushButton("Close")
+    close_button.setStyleSheet("background-color: lightgreen; color: black")
     close_button.clicked.connect(qoi_window.accept)
     layout.addWidget(close_button)
     # Set the layout and show the dialog
@@ -469,98 +396,96 @@ def update_output_tab2(main_window, message):
     # Update the output section in Tab 2 with a new message
     main_window.output_text_tab2.append(message)
 
-def load_db_file(main_window, filePath=None):
-        # Load the database file and extract parameters for sensitivity analysis
-        if filePath is None:
-            options = QFileDialog.Options()
-            main_window.db_file_path, _ = QFileDialog.getOpenFileName(main_window, "Select .db File", "", "DB Files (*.db);;All Files (*)", options=options)
+def load_ma_database(main_window):
+    try:
+        # Load the database structure
+        main_window.update_output_tab2(main_window, f"Loading database file {main_window.ma_file_path} ...")
+        df_metadata, df_parameter_space, df_qois, dic_input, main_window.df_output = load_structure(main_window.ma_file_path)
+        # Load the .ini file
+        main_window.load_ini_file(main_window, df_metadata['Ini_File_Path'].iloc[0], df_metadata['StructureName'].iloc[0])
+        print(df_metadata)
+        # Define the widget to display db structure
+        Sampler = df_metadata['Sampler'].iloc[0]
+        Param_explorer_type = "Local" if Sampler == "OAT" else "Global"
+        # Switch the exploration type to the one defined in the database
+        main_window.analysis_type_dropdown.setCurrentText(Param_explorer_type)
+        main_window.update_analysis_type(main_window)
+        main_window.analysis_type_dropdown.setEnabled(False)
+        if Param_explorer_type == "Global": # Global fields
+            main_window.global_method_combo.clear()
+            if Sampler in samplers_to_method:
+                main_window.global_method_combo.addItems(samplers_to_method[Sampler])
+            else: # LHS sampler map to methods that are not constrained
+                main_window.global_method_combo.addItems(samplers_to_method["Latin hypercube sampling (LHS)"])
+            main_window.global_method_combo.setCurrentText(main_window.global_method_combo.itemText(0))
+            # main_window.global_method_combo.setEnabled(False)
+            main_window.global_sampler_combo.setCurrentText(Sampler)
+            main_window.global_param_combo.setEnabled(True)
+            main_window.global_ref_value_input.setEnabled(False)
+            main_window.global_sampler_combo.setEnabled(False)
+            main_window.global_range_percentage.setEnabled(False)
+            main_window.global_bounds.setEnabled(False)
+            # Populate the global_SA_parameters dictionary with values from the database
+            main_window.global_SA_parameters = {}
+            main_window.global_SA_parameters["samples"] = dic_input
+            for id, param in enumerate(df_parameter_space['ParamName']):
+                main_window.global_SA_parameters[param] = {"lower_bounds": [df_parameter_space['Lower_Bound'].iloc[id]],
+                                                            "upper_bounds": [df_parameter_space['Upper_Bound'].iloc[id]],
+                                                            "ref_value": df_parameter_space['ReferenceValue'].iloc[id], 
+                                                            "perturbation": float(df_parameter_space['Perturbation'].iloc[id])}
+            # Update the global parameters
+            main_window.update_global_inputs(main_window)
+        else: # Activate local fields
+            main_window.local_param_combo.setEnabled(True)
+            main_window.local_ref_value_input.setEnabled(True)
+            main_window.local_perturb_input.setEnabled(True)
+            # Populate the local_SA_parameters dictionary with values from the database
+            main_window.local_SA_parameters = {}
+            main_window.local_SA_parameters["samples"] = dic_input
+            for id, param in enumerate(df_parameter_space['ParamName']):
+                if type(df_parameter_space['Perturbation'].iloc[id]) == list:
+                    df_parameter_space['Perturbation'].iloc[id] = [float(x) for x in df_parameter_space['Perturbation'].iloc[id]]
+                main_window.local_SA_parameters[param] = {"ref_value": df_parameter_space['ReferenceValue'].iloc[id], 
+                                                            "perturbation": df_parameter_space['Perturbation'].iloc[id]}
+            # Update the local parameters
+            main_window.update_local_inputs(main_window)
+    
+        # Check if qois are defined
+        if (df_qois['QOI_Name'].iloc[0] == None):
+            main_window.define_qoi_button.setEnabled(True)
         else:
-            main_window.db_file_path = filePath
-        if main_window.db_file_path:
-            try:
-                # Load the database structure
-                main_window.update_output_tab2(main_window, f"Loading database file {main_window.db_file_path} ...")
-                df_metadata, dic_input, main_window.df_output = load_db_structure(main_window.db_file_path)
-                # print(main_window.df_output)
-                # Load the .ini file
-                main_window.load_ini_file(main_window, df_metadata['Ini_File_Path'].iloc[0], df_metadata['StructureName'].iloc[0])
-                print( df_metadata)
-                # Define the widget to display db structure
-                SA_type = df_metadata['SA_Type'].iloc[0]
-                main_window.analysis_type_dropdown.setCurrentText(SA_type)
-                main_window.update_analysis_type(main_window)
-                main_window.analysis_type_dropdown.setEnabled(False)
-                if SA_type == "Global": # Disable global fields
-                    # Update the global method and sampler combo boxes
-                    db_sa_sampler = df_metadata['SA_Sampler'].iloc[0]
-                    # Allow method compatible with the sampler
-                    main_window.global_method_combo.clear()
-                    if db_sa_sampler in samplers_to_method:
-                        main_window.global_method_combo.addItems(samplers_to_method[db_sa_sampler])
-                    else: # LHS sampler map to methods that are not constrained
-                        main_window.global_method_combo.addItems(samplers_to_method["Latin hypercube sampling (LHS)"])
-                    main_window.global_method_combo.setCurrentText(main_window.global_method_combo.itemText(0))
-                    # main_window.global_method_combo.setEnabled(False)
-                    main_window.global_sampler_combo.setCurrentText(db_sa_sampler)
-                    main_window.global_sampler_combo.setEnabled(False)
-                    main_window.global_param_combo.setEnabled(False)
-                    main_window.global_ref_value_input.setEnabled(False)
-                    main_window.global_range_percentage.setEnabled(False)
-                    main_window.global_bounds.setEnabled(False)
-                    # Populate the global_SA_parameters dictionary with values from the database
-                    main_window.global_SA_parameters = {}
-                    main_window.global_SA_parameters["samples"] = dic_input
-                    for id, param in enumerate(df_metadata['Param_Names'].iloc[0]):
-                        main_window.global_SA_parameters[param] = {"bounds": df_metadata['Bounds'].iloc[0][id], 
-                                                                   "reference": df_metadata['Reference_Values'].iloc[0][id], 
-                                                                   "range_percentage": df_metadata['Perturbations'].iloc[0][id]}
-                    # print(main_window.global_SA_parameters)
-                elif SA_type == "Local": # Disable local fields
-                    main_window.local_param_combo.setEnabled(False)
-                    main_window.local_ref_value_input.setEnabled(False)
-                    main_window.local_perturb_input.setEnabled(False)
-                    # Populate the local_SA_parameters dictionary with values from the database
-                    main_window.local_SA_parameters = {}
-                    main_window.local_SA_parameters["samples"] = dic_input
-                    for id, param in enumerate(df_metadata['Param_Names'].iloc[0]):
-                        main_window.local_SA_parameters[param] = {"reference": df_metadata['Reference_Values'].iloc[0][id], 
-                                                                  "perturbations": df_metadata['Perturbations'].iloc[0][id]}
-                    # print(main_window.local_SA_parameters)
-                
-                # Disable sample_params and Plot samples buttons after successful loading
-                main_window.sample_params_button.setEnabled(False)
-                main_window.plot_samples_button.setEnabled(True)
-                # Check if qois are defined
-                if (df_metadata['QoIs'].iloc[0] == "None"):
-                    main_window.define_qoi_button.setEnabled(True)
-                else:
-                    main_window.define_qoi_button.setEnabled(False)
-       
-                # Set db file to the loaded and disable the field
-                main_window.db_file_name_input.setText(main_window.db_file_path)
-                main_window.db_file_name_input.setEnabled(False)
-                # Disable select the qois and run simulations
-                main_window.run_simulations_button.setEnabled(False)
+            main_window.define_qoi_button.setEnabled(False)
+        
+        # Enable the plot QoI button
+        main_window.plot_qois_button.setEnabled(True)
+        # Enable the button run SA
+        main_window.run_sa_button.setEnabled(True)
 
-                # Enable the button run SA
-                main_window.run_sa_button.setEnabled(True)
+        # Disable sample_params button after successful loading
+        main_window.sample_params_button.setEnabled(False)
+        # Disable run simulations button after successful loading
+        main_window.run_simulations_button.setEnabled(False)
 
-                # Enable the plot QoI button
-                main_window.plot_qois_button.setEnabled(True)
+        # Set db file to the loaded and disable the field
+        main_window.db_file_name_input.setText(main_window.ma_file_path)
+        main_window.db_file_name_input.setEnabled(False)
 
-                # Enable the button to plot samples
-                main_window.plot_samples_button.setEnabled(True)
+        # Enable the button to plot samples
+        main_window.plot_samples_button.setEnabled(True)
 
-                # Reset the qois
-                main_window.qoi_funcs = {}
-                main_window.df_qois = pd.DataFrame()
-                
-                # print a message in the output fields of Tab 2
-                message = f"Database file loaded: {main_window.db_file_path}"
-                main_window.update_output_tab2(main_window, message)
-            except Exception as e:
-                error_message = f"Error loading .db file: {e}"
-                main_window.update_output_tab2(main_window, error_message)
+        # Reset the qois
+        main_window.qoi_funcs = {}
+        main_window.df_qois = pd.DataFrame()
+        
+        # print a message in the output fields of Tab 2
+        message = f"Database file loaded: {main_window.ma_file_path}"
+        main_window.update_output_tab2(main_window, message)
+    except Exception as e:
+        error_message = f"Error loading .db file: {e} (Type: {type(e).__name__})"
+        # Add traceback for more technical details
+        error_message += f"\nTraceback: {traceback.format_exc()}"
+        print(error_message)
+        main_window.update_output_tab2(main_window, error_message)
 
 def update_analysis_type(main_window):
     # Show/hide UI elements based on selected analysis type
@@ -594,11 +519,11 @@ def update_analysis_type(main_window):
         # Populate local_SA_parameters with reference values and default perturbations
         for key, value in main_window.analysis_parameters.items():
             ref_value = float(main_window.get_xml_value(main_window, key))  # Get the default XML value - string
-            main_window.local_SA_parameters[value[1]] = {"reference": ref_value, "perturbations": [1, 10, 20]}
+            main_window.local_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": [1, 10, 20]}
 
         for key, value in main_window.analysis_rules_parameters.items():
             ref_value = main_window.get_rule_value(main_window, key)  # Get the default rule value
-            main_window.local_SA_parameters[value[1]] = {"reference": ref_value, "perturbations": [1, 10, 20]}
+            main_window.local_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": [1, 10, 20]}
 
         # Add friendly names to the combo box
         main_window.local_param_combo.addItems(list(main_window.local_SA_parameters.keys()))
@@ -639,13 +564,13 @@ def update_analysis_type(main_window):
         # Populate global_SA_parameters with reference values and default range percentage
         for key, value in main_window.analysis_parameters.items():
             ref_value = float(main_window.get_xml_value(main_window, key))  # Get the default XML value - string
-            print(f"Update Analysis type - {key}: {ref_value}")
-            main_window.global_SA_parameters[value[1]] = {"reference": ref_value, "range_percentage": 20.0, "bounds": [float(ref_value) * 0.8, float(ref_value) * 1.2]}
+            # print(f"Update Analysis type - {key}: {ref_value}")
+            main_window.global_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": 20.0, "lower_bounds": float(ref_value) * 0.8, "upper_bounds": float(ref_value) * 1.2}
 
         for key, value in main_window.analysis_rules_parameters.items():
             ref_value = main_window.get_rule_value(main_window, key)  # Get the default rule value
-            print(f"Update Analysis type - {key}: {ref_value}")
-            main_window.global_SA_parameters[value[1]] = {"reference": ref_value, "range_percentage": 20.0, "bounds": [float(ref_value) * 0.8, float(ref_value) * 1.2]}
+            # print(f"Update Analysis type - {key}: {ref_value}")
+            main_window.global_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": 20.0, "lower_bounds": float(ref_value) * 0.8, "upper_bounds": float(ref_value) * 1.2}
 
         # Add friendly names to the combo box
         main_window.global_param_combo.addItems(list(main_window.global_SA_parameters.keys()))
@@ -670,8 +595,8 @@ def update_local_inputs(main_window):
     selected_param = main_window.local_param_combo.currentText()
     if selected_param in main_window.local_SA_parameters:
         param_data = main_window.local_SA_parameters[selected_param]
-        main_window.local_ref_value_input.setText(str(param_data["reference"]))
-        main_window.local_perturb_input.setText(",".join(map(str, param_data["perturbations"])))
+        main_window.local_ref_value_input.setText(str(param_data["ref_value"]))
+        main_window.local_perturb_input.setText(",".join(map(str, param_data["perturbation"])))
 
         # Connect signals to update local_SA_parameters when editing is finished
         main_window.local_ref_value_input.editingFinished.connect(lambda: main_window.update_local_SA_reference(main_window))
@@ -683,7 +608,7 @@ def update_local_SA_reference(main_window):
     if selected_param in main_window.local_SA_parameters:
         try:
             new_ref_value = float(main_window.local_ref_value_input.text())
-            main_window.local_SA_parameters[selected_param]["reference"] = new_ref_value
+            main_window.local_SA_parameters[selected_param]["ref_value"] = new_ref_value
         except ValueError:
             main_window.update_output_tab2(main_window, "Error: Invalid reference value.")
 
@@ -693,7 +618,7 @@ def update_local_SA_perturbations(main_window):
     if selected_param in main_window.local_SA_parameters:
         try:
             new_perturbations = [float(p) for p in main_window.local_perturb_input.text().split(",")]
-            main_window.local_SA_parameters[selected_param]["perturbations"] = new_perturbations
+            main_window.local_SA_parameters[selected_param]["perturbation"] = new_perturbations
         except ValueError:
             main_window.update_output_tab2(main_window, "Error: Invalid perturbation values.")
 
@@ -702,16 +627,17 @@ def update_global_inputs(main_window):
     selected_param = main_window.global_param_combo.currentText()
     if selected_param in main_window.global_SA_parameters:
         param_data = main_window.global_SA_parameters[selected_param]
-        main_window.global_ref_value_input.setText(str(param_data["reference"]))
-        main_window.global_range_percentage.setText(str(param_data["range_percentage"]))
+        main_window.global_ref_value_input.setText(str(param_data["ref_value"]))
+        main_window.global_range_percentage.setText(str(param_data["perturbation"]))
 
         try:
-            range_percentage = param_data["range_percentage"]
-            lower_bound = param_data["reference"] * (1 - range_percentage / 100)
-            upper_bound = param_data["reference"] * (1 + range_percentage / 100)
+            range_percentage = param_data["perturbation"]
+            lower_bound = param_data["ref_value"] * (1 - range_percentage / 100)
+            upper_bound = param_data["ref_value"] * (1 + range_percentage / 100)
             main_window.global_bounds.setText(f"{lower_bound:.3e}, {upper_bound:.3e}")
             # Store bounds in global_SA_parameters
-            main_window.global_SA_parameters[selected_param]["bounds"] = [lower_bound, upper_bound]
+            main_window.global_SA_parameters[selected_param]["lower_bounds"] = lower_bound
+            main_window.global_SA_parameters[selected_param]["upper_bounds"] = upper_bound
         except ValueError:
             main_window.update_output_tab2(main_window, "Error: Invalid reference value or range percentage.")
 
@@ -725,7 +651,7 @@ def update_global_SA_reference(main_window):
     if selected_param in main_window.global_SA_parameters:
         try:
             new_ref_value = float(main_window.global_ref_value_input.text())
-            main_window.global_SA_parameters[selected_param]["reference"] = new_ref_value
+            main_window.global_SA_parameters[selected_param]["ref_value"] = new_ref_value
         except ValueError:
             main_window.update_output_tab2(main_window, "Error: Invalid reference value.")
 
@@ -743,97 +669,32 @@ def sample_parameters(main_window):
     # Sample parameters based on the selected SA
     analysis_type = main_window.analysis_type_dropdown.currentText()
     if analysis_type == "Local":
+        main_window.update_output_tab2(main_window, f"Sampling parameters from One-At-A-Time approach...")
+        # Check if samples already exist, if so, delete them
+        if 'samples' in main_window.local_SA_parameters.keys():
+            del main_window.local_SA_parameters["samples"]
+        # Run the local sampler
         try:
-            main_window.update_output_tab2(main_window, f"Sampling parameters from One-At-A-Time method...")
-            if 'samples' in main_window.local_SA_parameters.keys():
-                del main_window.local_SA_parameters["samples"]
-            param_names = list(main_window.local_SA_parameters.keys())
-            params_ref = {key: main_window.local_SA_parameters[key]["reference"] for key in main_window.local_SA_parameters.keys()}
-            # First sample is the reference value
-            main_window.local_SA_parameters["samples"] = {0: params_ref}
-            main_window.update_output_tab2(main_window, f"\tAdding Reference value: {params_ref}")
-            for id, par in enumerate(param_names):
-                perturbations = np.array(main_window.local_SA_parameters[par]["perturbations"])
-                main_window.update_output_tab2(main_window, f"\tSampling parameter: <{par}> using Perturbations: +/- {perturbations}%")
-                perturbations = np.concatenate((-perturbations, perturbations))  # Combine negative and positive perturbations
-                for idx, var in enumerate(perturbations):
-                    sample_id = id * len(perturbations) + idx + 1  # Unique sample ID for each perturbation
-                    if sample_id not in (main_window.local_SA_parameters["samples"].keys()):
-                        main_window.local_SA_parameters["samples"][sample_id] = params_ref.copy()  # Start with reference values
-                    main_window.local_SA_parameters["samples"][sample_id][par] = params_ref[par] * (1 + var / 100.0)
-            main_window.update_output_tab2(main_window, f"Generated {len(main_window.local_SA_parameters['samples'])} samples.")
-            # print(main_window.local_SA_parameters["samples"])
-        except ValueError:
-            main_window.update_output_tab2(main_window, "Error: Invalid input for reference value or perturbations.")
+            main_window.local_SA_parameters["samples"] = run_local_sampler(main_window.local_SA_parameters)
+        except ValueError as e:
+            main_window.update_output_tab2(main_window, f"Error in local sampler: {e}")
+            return
     elif analysis_type == "Global":
+        sampler = main_window.global_sampler_combo.currentText()
+        main_window.update_output_tab2(main_window, f"Sampling parameters from sampler: {sampler}...")
+        # Check if samples already exist, if so, delete them
+        if 'samples' in main_window.global_SA_parameters.keys():
+            del main_window.global_SA_parameters["samples"]
+        # Run the global sampler based on the selected sampler
         try:
-            method = main_window.global_method_combo.currentText()
-            sampler = main_window.global_sampler_combo.currentText()
-            main_window.update_output_tab2(main_window, f"Sampling parameters from method: {method} and sampler: {sampler}.")
-            if 'samples' in main_window.global_SA_parameters.keys():
-                del main_window.global_SA_parameters["samples"]
-            param_names = list(main_window.global_SA_parameters.keys())
-            # Define SA problem
-            SA_problem = {
-                'num_vars': len(main_window.global_SA_parameters),
-                'names': param_names,
-                'bounds': [main_window.global_SA_parameters[param]["bounds"] for param in main_window.global_SA_parameters]
-            }
-            # Samplers: "Fast", "Fractional Factorial", "Finite Difference", 
-            # "Latin hypercube sampling (LHS)", "Sobol", "Morris"
-            if sampler == "Fast":
-                #  The number of samples is N*D, where D is the number of parameters
+            # Request number of samples from the user to run the global sampler
+            if sampler not in ['Fractional Factorial', 'Finite Difference']:
                 N, ok = QInputDialog.getInt(main_window, "Number of Samples", "Enter the desired number of samples:", value=8, min=1)
-                M = 4
-                if not ok or N <= 4*(M**2):
-                    main_window.update_output_tab2(main_window, "Error: The number of samples must be a positive integer greater than 4*(M**2).")
-                    return
-                else: 
-                    global_samples = fast_sampler.sample(SA_problem, N, M=M, seed=42)
-            elif sampler == "Fractional Factorial":
-                # The number of samples is 2**D, where D is the number of parameters
-                global_samples = ff.sample(SA_problem, seed=42)
-            elif sampler == "Finite Difference":
-                # The number of samples is N*D, where D is the number of parameters
-                N, ok = QInputDialog.getInt(main_window, "Number of Samples", "Enter the desired number of samples:", value=8, min=1)
-                if not ok or N < 1:
-                    main_window.update_output_tab2(main_window, "Error: The number of samples must be a positive integer.")
-                    return
-                global_samples = finite_diff.sample(SA_problem, N, seed=42)
-            elif sampler == "Latin hypercube sampling (LHS)":
-                # The number of samples is N
-                N, ok = QInputDialog.getInt(main_window, "Number of Samples", "Enter the desired number of samples:", value=8, min=1)
-                if not ok or N < 1:
-                    main_window.update_output_tab2(main_window, "Error: The number of samples must be a positive integer.")
-                    return
-                global_samples = latin.sample(SA_problem, N, seed=42)
-            elif sampler == "Sobol":
-                # If second-order indices: N*(2D+2) sample if only first-order indices: N*(D+2) samples, where D is the number of parameters
-                N, ok = QInputDialog.getInt(main_window, "Number of Samples", "Enter the desired number of samples (must be a power of 2):", value=8, min=2)
-                if not ok or (N & (N - 1)) != 0:
-                    main_window.update_output_tab2(main_window, "Error: The number of samples must be a power of 2.")
-                    return
-                global_samples = sobol.sample(SA_problem, N, calc_second_order=True, seed=42)
-            elif sampler == "Morris":
-                # The number of samples is (G/D +1)*N/T, where D is the number of parameters, G is the number of groups, and T is the number of trajectories
-                N, ok = QInputDialog.getInt(main_window, "Number of Samples", "Enter the desired number of samples:", value=8, min=1)
-                if not ok or N < 1:
-                    main_window.update_output_tab2(main_window, "Error: The number of samples must be a positive integer.")
-                    return
-                global_samples = morris.sample(SA_problem, N, seed=42)
             else:
-                main_window.update_output_tab2(main_window, "Error: Invalid sampler selected.")
-                return
-            main_window.update_output_tab2(main_window, f"Generated {global_samples.shape[0]} samples.")
-            # Convert the samples to a dictionary of dictionaries - sorted by sample ID
-            main_window.global_SA_parameters["samples"] = {}
-            for i in range(global_samples.shape[0]):
-                sample_dict = {}
-                for j, param in enumerate(param_names):
-                    sample_dict[param] = global_samples[i][j]
-                main_window.global_SA_parameters["samples"][i] = sample_dict
-        except Exception as e:
-            main_window.update_output_tab2(main_window, f"Error sampling {analysis_type} SA: {e}")
+                N = None  # For Fractional Factorial and Finite Difference, N is not required
+            main_window.global_SA_parameters["samples"] = run_global_sampler(main_window.global_SA_parameters, sampler, N=N)
+        except ValueError as e:
+            main_window.update_output_tab2(main_window, f"Error in global sampler: {e}")
             return
 
     # Make the define_qoi, DB file name field and "Run Simulations" button visible
@@ -842,45 +703,60 @@ def sample_parameters(main_window):
     main_window.run_simulations_button.setEnabled(True)
 
 def plot_samples(main_window):
-    # Toggle the visibility of the sample plot
-    if main_window.fig_est_canvas_samples.isVisible():
-        main_window.fig_est_canvas_samples.setVisible(False)
-        main_window.plot_samples_button.setText("Plot Samples")
-    else:
-        main_window.fig_est_canvas_samples.setVisible(True)
-        main_window.plot_samples_button.setText("Hide Samples")
-        main_window.ax_samples.clear()
+    # Create a dialog window for plotting samples
+    plot_samples_window = QDialog(main_window)
+    plot_samples_window.setWindowTitle("Parameter Samples")
+    plot_samples_window.setGeometry(100, 100, 800, 600)
+    layout = QVBoxLayout(plot_samples_window)
+
+    # Add info label
+    info_label = QLabel("Parameter Sampling Visualization")
+    info_label.setAlignment(Qt.AlignCenter)
+    layout.addWidget(info_label)
+
+    # Create a new figure and canvas for the plot
+    figure = Figure(figsize=(6, 4))
+    canvas = FigureCanvas(figure)
+    layout.addWidget(canvas)
+
+    def update_plot():
+        figure.clear()
+        ax = figure.add_subplot(111)
         try:
             if main_window.analysis_type_dropdown.currentText() == "Local":
                 perturbations_df = pd.DataFrame(main_window.local_SA_parameters["samples"]).T
                 for col in perturbations_df.columns:
-                    perturbations_df[col] = 100.0*(perturbations_df[col] - main_window.local_SA_parameters[col]["reference"]) / main_window.local_SA_parameters[col]["reference"]
-                # Melt the DataFrame to long format for plotting
-                perturbations_df = perturbations_df.reset_index().melt(id_vars="index", var_name="Parameter", value_name="Perturbation")
+                    perturbations_df[col] = 100.0 * (
+                        perturbations_df[col] - main_window.local_SA_parameters[col]["ref_value"]
+                    ) / main_window.local_SA_parameters[col]["ref_value"]
+                perturbations_df = perturbations_df.reset_index().melt(
+                    id_vars="index", var_name="Parameter", value_name="Perturbation"
+                )
                 perturbations_df = perturbations_df.rename(columns={"index": "SampleID"})
-                # Calculate the frequency of each perturbation
-                perturbations_df['Frequency'] = perturbations_df.groupby(['Perturbation', 'Parameter'])['SampleID'].transform('count')
-                # Create the scatter plot using Seaborn
+                perturbations_df['Frequency'] = perturbations_df.groupby(
+                    ['Perturbation', 'Parameter']
+                )['SampleID'].transform('count')
                 scatter_plot = sns.scatterplot(
                     data=perturbations_df,
                     x="Perturbation",
                     y="Parameter",
                     hue="SampleID",
-                    size="Frequency",  # Adjust point size based on frequency
+                    size="Frequency",
                     palette="viridis",
-                    ax=main_window.ax_samples,
-                    alpha=0.7,  # Transparency
+                    ax=ax,
+                    alpha=0.7,
                 )
-                # Customize the plot
-                main_window.ax_samples.tick_params(axis='x', labelsize=8)  # Set font size for x-axis ticks
-                main_window.ax_samples.tick_params(axis='y', labelsize=8)  # Set font size for y-axis ticks
-                scatter_plot.set_title(f"One-At-A-Time (OAT) sampling - Total Samples: {len(main_window.local_SA_parameters["samples"])}", fontsize=8)
+                ax.tick_params(axis='x', labelsize=8)
+                ax.tick_params(axis='y', labelsize=8)
+                scatter_plot.set_title(
+                    f"One-At-A-Time (OAT) sampling - Total Samples: {len(main_window.local_SA_parameters['samples'])}",
+                    fontsize=8,
+                )
                 scatter_plot.set_xlabel("Perturbations (%)", fontsize=8)
                 scatter_plot.set_ylabel("")
-                # Remove the size legend while keeping the hue legend
                 handles, labels = scatter_plot.get_legend_handles_labels()
-                new_handles = [h for h, l in zip(handles, labels) if l not in ["SampleID","Frequency"]]
-                new_labels = [l for l in labels if l not in ["SampleID","Frequency"]]
+                new_handles = [h for h, l in zip(handles, labels) if l not in ["SampleID", "Frequency"]]
+                new_labels = [l for l in labels if l not in ["SampleID", "Frequency"]]
                 scatter_plot.legend(
                     handles=new_handles,
                     labels=new_labels,
@@ -890,43 +766,61 @@ def plot_samples(main_window):
                     title_fontsize=8,
                     fontsize=8,
                     ncol=2
-                )                
+                )
             elif main_window.analysis_type_dropdown.currentText() == "Global":
                 normalized_df = pd.DataFrame(main_window.global_SA_parameters["samples"]).T
                 for col in normalized_df.columns:
-                    normalized_df[col] = (normalized_df[col] - main_window.global_SA_parameters[col]["bounds"][0]) / (main_window.global_SA_parameters[col]["bounds"][1] - main_window.global_SA_parameters[col]["bounds"][0])
-                # Melt the DataFrame to long format for plotting
-                normalized_df = normalized_df.reset_index().melt(id_vars="index", var_name="Parameter", value_name="Normalized Value")
-                # Create the scatter plot using Seaborn
+                    normalized_df[col] = (
+                        normalized_df[col] - main_window.global_SA_parameters[col]["lower_bounds"]
+                    ) / (
+                        main_window.global_SA_parameters[col]["upper_bounds"] - main_window.global_SA_parameters[col]["lower_bounds"]
+                    )
+                normalized_df = normalized_df.reset_index().melt(
+                    id_vars="index", var_name="Parameter", value_name="Normalized Value"
+                )
                 scatter_plot = sns.scatterplot(
                     data=normalized_df,
                     x="Normalized Value",
                     y="Parameter",
                     hue="index",
                     palette="viridis",
-                    s=50,  # Marker size
-                    ax = main_window.ax_samples,
-                    alpha=0.7,  # Transparency
+                    s=50,
+                    ax=ax,
+                    alpha=0.7,
                 )
-                # Customize the plot
-                main_window.ax_samples.tick_params(axis='x', labelsize=8)  # Set font size for x-axis ticks
-                main_window.ax_samples.tick_params(axis='y', labelsize=8)  # Set font size for y-axis ticks
-                scatter_plot.set_title(f"Global Sampling - Total Samples: {len(main_window.global_SA_parameters["samples"])}", fontsize=8)
+                ax.tick_params(axis='x', labelsize=8)
+                ax.tick_params(axis='y', labelsize=8)
+                scatter_plot.set_title(
+                    f"Global Sampling - Total Samples: {len(main_window.global_SA_parameters['samples'])}",
+                    fontsize=8,
+                )
                 scatter_plot.set_xlabel("")
                 scatter_plot.set_ylabel("")
-                scatter_plot.legend(title="Sample Index", bbox_to_anchor=(1.05, 1), loc="upper left", title_fontsize=8, fontsize=8)
-            # Adjust plot in canvas
-            # main_window.ax_samples.figure.tight_layout()
-            main_window.ax_samples.figure.set_constrained_layout(True)
-            main_window.fig_est_canvas_samples.draw()
+                scatter_plot.legend(
+                    title="Sample Index",
+                    bbox_to_anchor=(1.05, 1),
+                    loc="upper left",
+                    title_fontsize=8,
+                    fontsize=8,
+                )
+            figure.set_constrained_layout(True)
+            canvas.draw()
         except Exception as e:
-            main_window.update_output_tab2(main_window, f"Error plotting samples {main_window.analysis_type_dropdown.currentText()} SA: {e}")
-            print(f"Error plotting samples {main_window.analysis_type_dropdown.currentText()} SA: {e}")
+            QMessageBox.warning(plot_samples_window, "Plot Error", f"Error plotting samples: {e}")
+
+    update_plot()
+
+    # Add a close button
+    close_button = QPushButton("Close")
+    close_button.setStyleSheet("background-color: lightgreen; color: black")
+    close_button.clicked.connect(plot_samples_window.accept)
+    layout.addWidget(close_button)
+
+    plot_samples_window.exec_()
 
 def update_global_sampler_options(main_window):
     # FAST - Fourier Amplitude Sensitivity Test: combatible with Fast sampler
     # RBD-FAST - Random Balance Designs Fourier Amplitude Sensitivity Test: combatible with all samplers
-    # Method of Morris: combatible with Morris sampler
     # Sobol’ Sensitivity Analysis: combatible with Sobol samplers
     # Delta Moment-Independent Measure: combatible with all samplers
     # Derivative-based Global Sensitivity Measure (DGSM): combatible with Finite Difference sampler
@@ -946,16 +840,14 @@ def update_global_sampler_options(main_window):
     elif method == "RBD-FAST - Random Balance Designs Fourier Amplitude Sensitivity Test":
         main_window.global_sampler_combo.addItems([
             "Fast", "Fractional Factorial", "Finite Difference", 
-            "Latin hypercube sampling (LHS)", "Sobol", "Morris"
+            "Latin hypercube sampling (LHS)", "Sobol"
         ])
-    elif method == "Method of Morris":
-        main_window.global_sampler_combo.addItems(["Morris"])
     elif method == "Sobol Sensitivity Analysis":
         main_window.global_sampler_combo.addItems(["Sobol"])
     elif method == "Delta Moment-Independent Measure":
         main_window.global_sampler_combo.addItems([
             "Fast", "Fractional Factorial", "Finite Difference", 
-            "Latin hypercube sampling (LHS)", "Sobol", "Morris"
+            "Latin hypercube sampling (LHS)", "Sobol"
         ])
     elif method == "Derivative-based Global Sensitivity Measure (DGSM)":
         main_window.global_sampler_combo.addItems(["Finite Difference"])
@@ -969,12 +861,12 @@ def update_global_sampler_options(main_window):
     ]:
         main_window.global_sampler_combo.addItems([
             "Fast", "Fractional Factorial", "Finite Difference", 
-            "Latin hypercube sampling (LHS)", "Sobol", "Morris"
+            "Latin hypercube sampling (LHS)", "Sobol"
         ])
     else:
         main_window.global_sampler_combo.addItems([])  # No compatible samplers  
 
-def run_simulations(main_window):
+def run_simulations_function(main_window):
     # Handle the execution of simulations
     try:
         # Create a dialog window for workers and thread configuration
@@ -1090,74 +982,31 @@ def run_simulations(main_window):
                 qoi_str = "None"
         else:
             qoi_str = ', '.join(main_window.qoi_funcs.keys())
+    except Exception as e:
+        main_window.update_output_tab2(main_window, f"Error setting up simulations: {e}")
+        print(f"Error setting up simulations: {e}")
+        return
 
+    try:
+        # Update the output tab with the current status
+        main_window.update_output_tab2(main_window, f"Running simulations with sampler: {SA_sampler} and number of samples: {len(SA_samples)}")
+        model_config = {"ini_path": main_window.ini_file_path, "struc_name": main_window.struc_name_input.text().strip()}
         # Determine the samples to use according to the analysis type
         SA_type = main_window.analysis_type_dropdown.currentText()
+        # Simulatethe model with the selected samples
         if "Local" == SA_type:
-            try:
-                SA_method = "OAT"
-                SA_sampler = "OAT"
-                SA_samples = main_window.local_SA_parameters.get("samples")
-                SA_param_names = [key for key in main_window.local_SA_parameters.keys() if key != "samples"]
-                SA_bounds = None
-                SA_ref_values = [main_window.local_SA_parameters[param]["reference"] for param in SA_param_names]
-                SA_perturbations = [main_window.local_SA_parameters[param]["perturbations"] for param in SA_param_names]
-                if SA_samples is None:
-                    raise ValueError("No samples generated for local sensitivity analysis.")
-            except KeyError:
-                main_window.update_output_tab2(main_window, "Error: No samples generated for local sensitivity analysis.")
-                return
+            sampler = "OAT"
+            # Model Analysis context
+            context = ModelAnalysisContext(db_file_name, model_config, sampler, main_window.local_SA_parameters, qoi_str, num_workers=int(num_workers))
+            run_simulations(context)
         elif "Global" == SA_type:
-            try:
-                SA_method = main_window.global_method_combo.currentText()
-                SA_sampler = main_window.global_sampler_combo.currentText()
-                SA_samples = main_window.global_SA_parameters.get("samples")
-                SA_param_names = [key for key in main_window.global_SA_parameters.keys() if key != "samples"]
-                SA_bounds = [main_window.global_SA_parameters[param]["bounds"] for param in SA_param_names]
-                SA_ref_values = [main_window.global_SA_parameters[param]["reference"] for param in SA_param_names]
-                SA_perturbations = [main_window.global_SA_parameters[param]["range_percentage"] for param in SA_param_names]
-                if SA_samples is None:
-                    raise ValueError("No samples generated for global sensitivity analysis.")
-            except KeyError:
-                main_window.update_output_tab2(main_window, "Error: No samples generated for global sensitivity analysis.")
-                return
-
-        # Validate other required inputs
-        if not main_window.ini_file_path:
-            main_window.update_output_tab2(main_window, "Error: .ini file path is missing.")
-            return
-        if not main_window.struc_name_input.text().strip():
-            main_window.update_output_tab2(main_window, "Error: Structure name is required.")
-            return
+            sampler = main_window.global_sampler_combo.currentText()
+            # Model Analysis context
+            context = ModelAnalysisContext(db_file_name, model_config, sampler, main_window.global_SA_parameters, qoi_str, num_workers=int(num_workers))
+            run_simulations(context)
     except Exception as e:
-        main_window.update_output_tab2(main_window, f"Error during simulation execution: {e}")
-
-    # Update the output tab with the current status
-    main_window.update_output_tab2(main_window, f"Running simulations with {SA_type} method: {SA_method}, sampler: {SA_sampler}, number of samples: {len(SA_samples)}")
-    # Debugging information
-    print(f"Running simulations with {SA_type} method: {SA_method}, sampler: {SA_sampler}, number of samples: {len(SA_samples)}")
-    print(f".ini file path: {main_window.ini_file_path} - DB file name: {db_file_name} - structure name: {main_window.struc_name_input.text().strip()} - selected QoIs: {qoi_str}")
-    print(f"Parameters: {SA_param_names} - Bounds: {SA_bounds} - Reference values: {SA_ref_values} - Perturbations: {SA_perturbations}")
-
-    # Simulate running the model with the selected samples
-    try: run_sa_simulations(
-        ini_filePath=main_window.ini_file_path,
-        strucName=main_window.struc_name_input.text().strip(),
-        SA_type=SA_type,
-        SA_method=SA_method,
-        SA_sampler=SA_sampler,
-        param_names=SA_param_names,
-        ref_values=SA_ref_values,
-        bounds=SA_bounds,
-        perturbations=SA_perturbations,
-        dic_samples=SA_samples,
-        qois_dic=main_window.qoi_funcs,
-        db_file=db_file_name,
-        use_futures=True,
-        num_workers=int(num_workers)  # Pass the number of workers to the function
-        )
-    except Exception as e:
-        main_window.update_output_tab2(main_window, f"Error running simulations: {e}")
+        main_window.update_output_tab2(main_window, f"Error: Running simulations with {sampler} failed: {e}")
+        print(f"Error: Running simulations with {sampler} failed: {e}")
         return
 
     # Simulate saving the samples to the database (replace with actual simulation logic)
@@ -1237,109 +1086,30 @@ def run_analysis(main_window):
         except Exception as e:
             main_window.update_output_tab2(main_window, f"Error calculating QoIs: {e}")
             return
-    # Run the analysis
+    # Prepare the QoIs for analysis
     all_qois_names = list(main_window.qoi_funcs.keys())
     all_times_label = [col for col in main_window.df_qois.columns if col.startswith("time")]
     print(f"all_qois: {all_qois_names} and all_times: {all_times_label}")
-    # Save the time values in a dictionary with the time labels as keys
-    main_window.qoi_time_values = {}
-    for time_label in all_times_label:
-        unique_values = main_window.df_qois[time_label].unique()
-        if len(unique_values) == 1:
-            main_window.qoi_time_values[time_label] = unique_values[0]
-        else:
-            main_window.update_output_tab2(main_window, f"Error: More than one unique value for time label '{time_label}': {unique_values}.")
-    # Sort the time values
-    main_window.qoi_time_values = dict(sorted(main_window.qoi_time_values.items(), key=lambda item: item[1]))
-    # Create the sa_result structure
-    main_window.sa_results = { qoi: {} for qoi in all_qois_names }
     if main_window.analysis_type_dropdown.currentText() == "Global":
-        param_names = [key for key in main_window.global_SA_parameters.keys() if key != "samples"]
-        SA_problem = {
-            'num_vars': len(param_names),
-            'names': param_names,
-            'bounds': [main_window.global_SA_parameters[param]["bounds"] for param in param_names]
-        }
-        print(f"SA_problem: {SA_problem}")
-        # Get the selected method
         global_method = main_window.global_method_combo.currentText()
-        # Generate params_np - it is sorted by sample ID
-        params_np = np.array([[param_sample_dic[param] for param in SA_problem['names']] for param_sample_dic in main_window.global_SA_parameters["samples"].values()])
-        # Run the sensitivity analysis for each QoI and time
-        for qoi in all_qois_names: 
-            for time_id, time_label in enumerate(main_window.qoi_time_values.keys()):
-                # Generate qoi_result_np - it is sorted by sample ID
-                qoi_result_np = main_window.df_qois[f"{qoi}_{time_id}"].to_numpy()
-                if len(qoi_result_np) != len(params_np):
-                    main_window.update_output_tab2(main_window, f"Error: Mismatch between number of samples ({len(params_np)}) and QoI results ({len(qoi_result_np)})!")
-                    return
-                # print(f"qoi_result ({qoi}_{id_time}): {qoi_result_np}")
-                main_window.update_output_tab2(main_window, f"Running {global_method} for QoI: {qoi} and time: {main_window.qoi_time_values[time_label]}") 
-                # Run the sensitivity analysis
-                try:
-                    if global_method == "FAST - Fourier Amplitude Sensitivity Test":
-                        main_window.sa_results[qoi][time_label] = fast_analyze.analyze(SA_problem, params_np, qoi_result_np)
-                    elif global_method == "RBD-FAST - Random Balance Designs Fourier Amplitude Sensitivity Test":  
-                        # try: 
-                        # If all qoi_result_np are equal, there is no variance
-                        # if np.all(qoi_result_np == qoi_result_np[0]): continue
-                        # Remove NaN values from qoi_result_np and correspondent input params_np
-                        # mask = ~np.isnan(qoi_result_np)
-                        # params_np = params_np[mask]; qoi_result_np = qoi_result_np[mask]
-                        main_window.sa_results[qoi][time_label] = rbd_fast_analyze.analyze(SA_problem, params_np, qoi_result_np)
-                        # except ZeroDivisionError as e:
-                        #     main_window.update_output_tab2(main_window, f"Zero division error running RBD-FAST for QoI: {qoi} and time: {main_window.qoi_time_values[time_label]}: {e}")
-                        #     # Preserve the structure with placeholder values
-                        #     main_window.sa_results[qoi][time_label] = {
-                        #         "S1": np.full(SA_problem['num_vars'], np.nan),
-                        #         "ST": np.full(SA_problem['num_vars'], np.nan),
-                        #         "names": SA_problem['names']
-                        #     }
-                        #     continue
-                    elif global_method == "Method of Morris":
-                        main_window.sa_results[qoi][time_label] = morris_analyze.analyze(SA_problem, params_np, qoi_result_np)
-                    elif global_method == "Sobol Sensitivity Analysis":
-                        main_window.sa_results[qoi][time_label] = sobol_analyze.analyze(SA_problem, params_np, qoi_result_np)
-                    elif global_method == "Delta Moment-Independent Measure":
-                        main_window.sa_results[qoi][time_label] = delta_analyze.analyze(SA_problem, params_np, qoi_result_np)
-                    elif global_method == "Derivative-based Global Sensitivity Measure (DGSM)":
-                        main_window.sa_results[qoi][time_label] = dgsm_analyze.analyze(SA_problem, params_np, qoi_result_np)
-                    elif global_method == "Fractional Factorial":
-                        main_window.sa_results[qoi][time_label] = ff_analyze.analyze(SA_problem, params_np, qoi_result_np, second_order=True)
-                    elif global_method == "PAWN Sensitivity Analysis":
-                        main_window.sa_results[qoi][time_label] = pawn_analyze.analyze(SA_problem, params_np, qoi_result_np)
-                    elif global_method == "High-Dimensional Model Representation":
-                        main_window.sa_results[qoi][time_label] = hdmr_analyze.analyze(SA_problem, params_np, qoi_result_np)
-                    elif global_method == "Regional Sensitivity Analysis":
-                        main_window.sa_results[qoi][time_label] = rsa_analyze.analyze(SA_problem, params_np, qoi_result_np)
-                    elif global_method == "Discrepancy Sensitivity Indices":
-                        main_window.sa_results[qoi][time_label] = discrepancy_analyze.analyze(SA_problem, params_np, qoi_result_np)
-                    else:
-                        main_window.update_output_tab2(main_window, "Error: Invalid global method selected.")
-                except Exception as e:
-                    main_window.update_output_tab2(main_window, f"Error running {global_method} for QoI: {qoi} and time: {main_window.qoi_time_values[time_label]}: {e}")
-                    return
-       
+        try:
+            main_window.sa_results, main_window.qoi_time_values = run_global_sa(main_window.global_SA_parameters, global_method, all_times_label, all_qois_names, main_window.df_qois)
+        except Exception as e:
+            main_window.update_output_tab2(main_window, f"Error running global sensitivity analysis: {e}")
+            return
+
         # Plot the results
         main_window.update_output_tab2(main_window, f"Plotting results for {global_method}")
         main_window.plot_sa_results(main_window)
     elif main_window.analysis_type_dropdown.currentText() == "Local":
-        param_names = [key for key in main_window.local_SA_parameters.keys() if key != "samples"]
-        for qoi in all_qois_names:
-            for id_time, time_label in enumerate(list(main_window.qoi_time_values.keys())):
-                local_method = "OAT"
-                qoi_result_dict = main_window.df_qois[f"{qoi}_{id_time}"].to_dict()
-                main_window.update_output_tab2(main_window, f"Running {local_method} for QoI: {qoi} and time: {main_window.qoi_time_values[time_label]}")
-                # Run the sensitivity analysis
-                if local_method == "OAT":
-                    main_window.sa_results[qoi][time_label] = OAT_analyze(main_window.local_SA_parameters["samples"], qoi_result_dict)
-                    # It will return a sensitivity index for each perturbation - sum them
-                    for key in main_window.sa_results[qoi][time_label]: main_window.sa_results[qoi][time_label][key] = np.sum(main_window.sa_results[qoi][time_label][key])
-                else:
-                    main_window.update_output_tab2(main_window, "Error: Invalid local method selected.") 
-        
+        try:
+            main_window.sa_results, main_window.qoi_time_values = run_local_sa(main_window.local_SA_parameters, all_times_label, all_qois_names, main_window.df_qois)
+        except Exception as e:
+            main_window.update_output_tab2(main_window, f"Error running local sensitivity analysis: {e}")
+            return
+       
         # Plot the results
-        main_window.update_output_tab2(main_window, f"Plotting results for {local_method} SA.")
+        main_window.update_output_tab2(main_window, f"Plotting results for OAT SA.")
         main_window.plot_sa_results(main_window)
 
 def plot_sa_results(main_window):
@@ -1367,7 +1137,9 @@ def plot_sa_results(main_window):
     plot_sa_SI_dropdown = QComboBox(plot_window)
     plot_sa_SI_dropdown.setEditable(False)
     if main_window.analysis_type_dropdown.currentText() == "Global":
-        sensitivity_measurements = list(main_window.sa_results[ list(main_window.sa_results.keys())[-1] ][ list(main_window.qoi_time_values)[-1] ].keys())
+        qoi_label = list(main_window.sa_results.keys())[-1]
+        time_label = list(main_window.sa_results[qoi_label].keys())[-1]
+        sensitivity_measurements = list(main_window.sa_results[qoi_label][time_label].keys())
         # Remove 'names' and 'target' from the list
         if 'names' in sensitivity_measurements: sensitivity_measurements.remove('names') # All methods
         if 'target' in sensitivity_measurements: sensitivity_measurements.remove('target') # for Regional SA method
@@ -1394,60 +1166,66 @@ def plot_sa_results(main_window):
         selected_sm = plot_sa_SI_dropdown.currentText()
         # Clear the previous plot
         print(f"Plotting {selected_sm} of SA from {selected_qoi}.")
-        if main_window.analysis_type_dropdown.currentText() == "Global":
-            SA_method = main_window.global_method_combo.currentText()
-            plot_data = pd.DataFrame([
-                {
-                    "Time": main_window.qoi_time_values[time_label],
-                    "Sensitivity Index": main_window.sa_results[selected_qoi][time_label][selected_sm][param_id],
-                    "Parameter": param
-                }
-                for time_label in main_window.sa_results[selected_qoi].keys()
-                for param_id, param in enumerate(main_window.sa_results[selected_qoi][time_label]['names'])
-            ])
-            # print(plot_data)
-            # Sort Parameters by the maximum Sensitivity Index in descending order
-            parameter_order = (
-                plot_data.groupby("Parameter")["Sensitivity Index"]
-                .max()
-                .sort_values(ascending=False)
-                .index
-            )
-            custom_palette = sns.color_palette("tab20", len(plot_data["Parameter"].unique()))
-            sns.lineplot(data=plot_data, x="Time", y="Sensitivity Index", hue="Parameter", ax=ax, palette=custom_palette, hue_order=parameter_order)                
-            ax.set_xlabel("Time (min)")
-            ax.set_ylabel(f"Sensitivity Measure ({selected_sm})")
-            ax.set_title(f"Global SA - {SA_method}")
-            ax.legend(bbox_to_anchor=(1.05, 1), loc="upper left", title_fontsize=8, fontsize=8)
-        elif main_window.analysis_type_dropdown.currentText() == "Local":
-            SA_method = "OAT method"
-            # Prepare the data for seaborn
-            plot_data = pd.DataFrame([
-                {
-                    "Time": main_window.qoi_time_values[time_label],
-                    "Sensitivity Index": main_window.sa_results[selected_qoi][time_label][param],
-                    "Parameter": param
-                }
-                for time_label in main_window.sa_results[selected_qoi].keys()
-                for param in main_window.sa_results[selected_qoi][time_label].keys()
-            ])
-            # print(plot_data)
-            # Sort Parameters by the maximum Sensitivity Index in descending order
-            parameter_order = (
-                plot_data.groupby("Parameter")["Sensitivity Index"]
-                .max()
-                .sort_values(ascending=False)
-                .index
-            )
-            custom_palette = sns.color_palette("tab20", len(plot_data["Parameter"].unique()))
-            sns.lineplot(data=plot_data, x="Time", y="Sensitivity Index", hue="Parameter", ax=ax, palette=custom_palette, hue_order=parameter_order)
-            ax.set_xlabel("Time (min)")
-            ax.set_title(f"Local SA - {SA_method}")
-            ax.legend(bbox_to_anchor=(1.05, 1), loc="upper left", title_fontsize=8, fontsize=8)
-        # Adjust layout and draw the canvas
-        # figure.tight_layout()
-        figure.set_constrained_layout(True)
-        canvas.draw()
+        try:
+            if main_window.analysis_type_dropdown.currentText() == "Global":
+                SA_method = main_window.global_method_combo.currentText()
+                # This is necessary because Sobol method does not return the names of the parameters
+                param_names = [key for key in main_window.global_SA_parameters.keys() if key != "samples"]
+                plot_data = pd.DataFrame([
+                    {
+                        "Time": main_window.qoi_time_values[time_label],
+                        "Sensitivity Index": main_window.sa_results[selected_qoi][time_label][selected_sm][param_id],
+                        "Parameter": param
+                    }
+                    for time_label in main_window.sa_results[selected_qoi].keys()
+                    for param_id, param in enumerate(param_names)
+                ])
+                # print(plot_data)
+                # Sort Parameters by the maximum Sensitivity Index in descending order
+                parameter_order = (
+                    plot_data.groupby("Parameter")["Sensitivity Index"]
+                    .max()
+                    .sort_values(ascending=False)
+                    .index
+                )
+                custom_palette = sns.color_palette("tab20", len(plot_data["Parameter"].unique()))
+                sns.lineplot(data=plot_data, x="Time", y="Sensitivity Index", hue="Parameter", ax=ax, palette=custom_palette, hue_order=parameter_order)                
+                ax.set_xlabel("Time (min)")
+                ax.set_ylabel(f"Sensitivity Measure ({selected_sm})")
+                ax.set_title(f"Global SA - {SA_method}", fontsize=8)
+                ax.legend(bbox_to_anchor=(1.05, 1), loc="upper left", title_fontsize=8, fontsize=8)
+            elif main_window.analysis_type_dropdown.currentText() == "Local":
+                SA_method = "OAT method"
+                # Prepare the data for seaborn
+                plot_data = pd.DataFrame([
+                    {
+                        "Time": main_window.qoi_time_values[time_label],
+                        "Sensitivity Index": main_window.sa_results[selected_qoi][time_label][param],
+                        "Parameter": param
+                    }
+                    for time_label in main_window.sa_results[selected_qoi].keys()
+                    for param in main_window.sa_results[selected_qoi][time_label].keys()
+                ])
+                # print(plot_data)
+                # Sort Parameters by the maximum Sensitivity Index in descending order
+                parameter_order = (
+                    plot_data.groupby("Parameter")["Sensitivity Index"]
+                    .max()
+                    .sort_values(ascending=False)
+                    .index
+                )
+                custom_palette = sns.color_palette("tab20", len(plot_data["Parameter"].unique()))
+                sns.lineplot(data=plot_data, x="Time", y="Sensitivity Index", hue="Parameter", ax=ax, palette=custom_palette, hue_order=parameter_order)
+                ax.set_xlabel("Time (min)")
+                ax.set_title(f"Local SA - {SA_method}")
+                ax.legend(bbox_to_anchor=(1.05, 1), loc="upper left", title_fontsize=8, fontsize=8)
+            # Adjust layout and draw the canvas
+            # figure.tight_layout()
+            figure.set_constrained_layout(True)
+            canvas.draw()
+        except Exception as e:
+            main_window.update_output_tab2(main_window, f"Error plotting SA results: {e}")
+            return
 
     # Connect the combo box to update the plot
     plot_sa_dropdown_qoi.currentIndexChanged.connect(update_plot)
