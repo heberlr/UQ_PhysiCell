@@ -4,7 +4,7 @@ import pandas as pd
 
 from .database import load_structure
 
-def normalize_params(df_params, df_search_space):
+def normalize_params(df_params, df_search_space) -> pd.DataFrame:
     """
     Normalize the parameters values based on the search space.
     Parameters:
@@ -21,42 +21,61 @@ def normalize_params(df_params, df_search_space):
     df_norm = df_merged[['SampleID', 'ParamName', 'ParamValue']]
     return df_norm
 
-def extract_best_parameters(db_file:str) -> dict:
+def extract_best_parameters(df_gp_models: pd.DataFrame, df_samples: pd.DataFrame) -> tuple:
+    """
+    Extract the best parameters from the database file based on the maximum hypervolume.
+    Parameters:
+    - df_gp_models: DataFrame containing the Gaussian Process models.
+    - df_samples: DataFrame containing the samples.
+    Returns:
+    - Dictionary with parameter names as keys and their best values as values.
+    - The sample ID corresponding to the best parameters.
+    """
+    # Find the maximum hypervolume and its corresponding iteration ID (if multiple, take the first)
+    max_hypervolume = df_gp_models['Hypervolume'].max()
+    best_iteration = df_gp_models[df_gp_models['Hypervolume'] == max_hypervolume]['IterationID'].min()
+    best_sample_id = df_samples[df_samples['IterationID'] == best_iteration]['SampleID'].values[0] # Assuming one sample per iteration
+
+    # Get the parameters for the best iteration
+    best_params = df_samples[df_samples['IterationID'] == best_iteration].set_index('ParamName')['ParamValue'].to_dict()
+
+    return best_params, best_sample_id
+
+def extract_best_parameters_db(db_file:str) -> tuple:
     """
     Extract the best parameters from the database file based on the maximum hypervolume.
     Parameters:
     - db_file: Path to the database file.
     Returns:
     - Dictionary with parameter names as keys and their best values as values.
+    - The sample ID corresponding to the best parameters.
     """
     # Load the database structure
     df_metadata, df_param_space, df_qois, df_gp_models, df_samples, df_output = load_structure(db_file)
+    
+    return extract_best_parameters(df_gp_models, df_samples)
 
-    # Find the maximum hypervolume and its corresponding iteration ID (if multiple, take the first)
-    max_hypervolume = df_gp_models['Hypervolume'].max()
-    best_iteration = df_gp_models[df_gp_models['Hypervolume'] == max_hypervolume]['IterationID'].min()
-
-    # Get the parameters for the best iteration
-    best_params = df_samples[df_samples['IterationID'] == best_iteration].set_index('ParamName')['ParamValue'].to_dict()
-
-    return best_params, best_iteration
-
-def plot_parameter_space(db_file:str, best_param:dict=None, real_value:dict=None):
-    """
-    Plot the parameter space from the database file.
+def plot_parameter_space(df_samples:pd.DataFrame, df_param_space:pd.DataFrame, params:dict=None, real_value:dict=None, axis=None):
+    """    Plot the parameter space from the samples DataFrame.
     Parameters:
-    - db_file: Path to the database file.
+    - df_samples: DataFrame containing the samples.
+    - df_param_space: DataFrame defining the search space for each parameter.
+    - params: Dictionary with parameter names as keys and their best values as values (optional).
+    - real_value: Dictionary with real parameter values to plot (optional).
+    - axis: Matplotlib axis to plot on (optional).
+    Returns:
+    - Matplotlib figure and axis if axis is None, otherwise returns the axis.
     """
-    # Load the database structure
-    df_metadata, df_param_space, df_qois, df_gp_models, df_samples, df_output  = load_structure(db_file)
-
     # Normalize the parameter space
     df_plot = normalize_params(df_samples, df_param_space)
 
     # Plotting
-    fig, ax = plt.subplots(figsize=(10, 6))
-    sns.scatterplot(df_plot, y='ParamName', x='ParamValue', hue='SampleID', legend=True)
-    
+    if axis is None:
+        fig, ax = plt.subplots(figsize=(10, 6))
+    else:
+        ax = axis
+    sns.scatterplot(df_plot, y='ParamName', x='ParamValue', hue='SampleID', legend=True, ax=ax)
+
     # Get existing legend handles and labels for Sample ID
     sample_handles, sample_labels = ax.get_legend_handles_labels()
     
@@ -73,14 +92,14 @@ def plot_parameter_space(db_file:str, best_param:dict=None, real_value:dict=None
         special_handles.append(real_scatter)
         special_labels.append('Real Value')
         
-    if best_param:
-        best_param_df = pd.DataFrame(best_param.items(), columns=['ParamName', 'ParamValue'])
-        best_param_df['SampleID'] = 1  # Add SampleID as 1 for best parameters
-        best_param_norm = normalize_params(best_param_df, df_param_space)
-        best_scatter = ax.scatter(best_param_norm['ParamValue'], best_param_norm['ParamName'], 
-                                color='red', label='Max Value', marker='x', s=100, zorder=5)
-        special_handles.append(best_scatter)
-        special_labels.append('Max Value')
+    if params:
+        for key, param in params.items():
+            param_df = pd.DataFrame(param.items(), columns=['ParamName', 'ParamValue'])
+            param_df['SampleID'] = id  # Add SampleID as 1 for best parameters
+            param_norm = normalize_params(param_df, df_param_space)
+            param_scatter = ax.scatter(param_norm['ParamValue'], param_norm['ParamName'], marker='x', s=100, zorder=5)
+            special_handles.append(param_scatter)
+            special_labels.append(key)
     
     # Create legends dynamically based on what's available
     if sample_handles and special_handles:
@@ -102,69 +121,162 @@ def plot_parameter_space(db_file:str, best_param:dict=None, real_value:dict=None
     ax.set_title('Parameter Space')
     ax.set_xlabel('Normalized Parameter Value')
     ax.set_ylabel('')
-    plt.tight_layout()
-    plt.show()
 
-def plot_qoi_param(db_file:str, iteration:int, obs_qoi:dict={},x_vars_dict:dict={}, y_vars_dict:dict={}):
+    if axis is None:
+        plt.tight_layout()
+        return fig, ax
+
+def plot_parameter_space_db(db_file:str, params:dict=None, real_value:dict=None, axis=None):
+    """
+    Plot the parameter space from the database file.
+    Parameters:
+    - db_file: Path to the database file.
+    - params: Dictionary with parameter names as keys and their best values as values (optional).
+    - real_value: Dictionary with real parameter values to plot (optional).
+    - axis: Matplotlib axis to plot on (optional).
+    Returns:
+    - Matplotlib figure and axis if axis is None, otherwise returns the axis.
+    """
+    # Load the database structure
+    df_metadata, df_param_space, df_qois, df_gp_models, df_samples, df_output  = load_structure(db_file)
+    return plot_parameter_space(df_samples, df_param_space, params, real_value, axis)
+
+def plot_parameter_vs_fitness(df_samples:pd.DataFrame, df_output:pd.DataFrame, parameter_name:str, qoi_name:str, axis=None):
+    """
+    Plot the parameter values against the fitness values.
+    Parameters:
+    - df_samples: DataFrame containing the samples.
+    - df_output: DataFrame containing the output of the analysis.
+    - parameter_name: Name of the parameter to plot.
+    - qoi_name: Name of the QoI to plot against the parameter.
+    - axis: Matplotlib axis to plot on (optional).
+    Returns:
+    - Matplotlib figure and axis if axis is None, otherwise returns the axis.
+    """
+    # Sort the parameter values
+    df_sorted_params = df_samples[df_samples['ParamName'] == parameter_name].sort_values(by='ParamValue').reset_index()
+    # Find the corresponding fitness values for the sorted SampleIDs
+    df_sorted_fitness = df_output.set_index('SampleID').loc[df_sorted_params['SampleID']]
+    df_sorted_fitness = df_sorted_fitness.reset_index()
+    for sample_id in df_sorted_fitness['SampleID']:
+        df_sorted_fitness.loc[df_sorted_fitness['SampleID'] == sample_id, 'ObjFunc'] = df_sorted_fitness.loc[df_sorted_fitness['SampleID'] == sample_id, 'ObjFunc'].values[0][qoi_name]
+    # print(f"Sorted Parameters:\n{df_sorted_params}")
+    # print(f"Sorted Objectives:\n{df_sorted_objectives}")
+
+    # Plotting
+    if axis is None:
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.set_title(f"Parameter vs Objective: {parameter_name} vs {qoi_name}")
+    else:
+        ax = axis
+
+    ax.plot(df_sorted_params['ParamValue'], df_sorted_fitness['ObjFunc'], marker='o')
+    ax.set_xlabel(parameter_name)
+    ax.set_ylabel(f"Fitness({qoi_name})")
+
+    if axis is None:
+        plt.tight_layout()
+        return fig, ax
+
+def plot_parameter_vs_fitness_db(db_file:str, parameter_name:str, qoi_name:str, axis=None):
+    """
+    Plot the parameter space against the fitness values from the database file.
+    Parameters:
+    - db_file: Path to the database file.
+    - parameter_name: Name of the parameter to plot.
+    - qoi_name: Name of the QoI to plot against the parameter.
+    - axis: Matplotlib axis to plot on (optional).
+    Returns:
+    - Matplotlib figure and axis if axis is None, otherwise returns the axis.
+    """
+    # Load the database structure
+    df_metadata, df_param_space, df_qois, df_gp_models, df_samples, df_output = load_structure(db_file)
+    return plot_parameter_vs_fitness(df_samples, df_output, parameter_name, qoi_name, axis)
+
+
+def get_observed_qoi(obsDataFile:str, df_qois:pd.DataFrame) -> pd.DataFrame:
+    """
+    Load the observed QoI values from a CSV file and rename the columns to match the QoI names.
+    Parameters:
+    - obsDataFile: Path to the observed QoI data file.
+    - df_qois: DataFrame containing the QoI definitions.
+    Returns:
+    - DataFrame with SampleID as index and observed QoI values as columns.
+    """
+    # Load the Observed QoI values
+    df_obs_qoi = pd.read_csv(obsDataFile)
+    # Rename the columns to match the QoI names
+    dic_columns = df_qois.set_index('ObsData_Column')['QoI_Name'].to_dict()
+    if "Time" in df_obs_qoi.columns:
+        dic_columns["Time"] = "time"
+    df_obs_qoi = df_obs_qoi.rename(columns=dic_columns)
+    return df_obs_qoi
+
+def plot_qoi_param(df_ObsData:pd.DataFrame, df_output:pd.DataFrame, samples_id:list, x_var: str, y_var:str, axis=None):
+    """
+    Plot the QoI parameter space from the database file.
+    Parameters:
+    - df_ObsData: Observed QoI DataFrame.
+    - df_output: Output DataFrame.
+    - samples_id: List of Sample IDs to plot.
+    - x_var: Variable to plot on the x-axis.
+    - y_var: Variable to plot on the y-axis.
+    - axis: Matplotlib axis to plot on (optional).
+    Returns:
+    - Matplotlib figure and axis if axis is None, otherwise returns the axis.
+    """
+    # Load the model results associated with the parameters
+    selected_outputs = df_output[df_output['SampleID'].isin(samples_id)]
+    print(f"Sample ID: {samples_id}")
+    print(f"Objective Function Values:\n{selected_outputs['ObjFunc'].values[0]}")
+    print(f"Noise of Objective Function:\n{selected_outputs['Noise_Std'].values[0]}")
+        
+    if axis is None:
+        fig, ax = plt.subplots(figsize=(10, 6))
+    else:
+        ax = axis
+
+    # Plot observed data if available
+    sns.lineplot(df_ObsData, x=x_var, y=y_var, color='red', label='Observed QoI', ax=ax)
+
+    all_df_data = pd.DataFrame()
+    # Plot each QoI against the model results associated with the dic_param
+    for sample_id in samples_id:
+        dic_data = df_output[df_output['SampleID'] == sample_id]['Data'].values[0]
+        for rep_id, output in dic_data.items():
+            df_data = pd.DataFrame(output, columns=[x_var, y_var])
+            df_data['SampleID'] = sample_id
+            df_data['replicateID'] = rep_id
+            if all_df_data.empty: all_df_data = df_data.copy()
+            else: all_df_data = pd.concat([all_df_data, df_data], ignore_index=True)
+
+    # Plot PhysiCell replicates with only one legend entry using seaborn
+    # Add formatted SampleID for better legend display
+    all_df_data['SampleID_formatted'] = all_df_data['SampleID'].apply(lambda x: f'SampleID: {x}')
+    sns.lineplot(data=all_df_data, x=x_var, y=y_var, ax=ax,
+        hue='SampleID_formatted', units='replicateID', estimator=None)
+
+    ax.set_xlabel(x_var)
+    ax.set_ylabel(y_var)
+    ax.legend()
+    
+    if axis is None:
+        plt.tight_layout()  
+        return fig, ax
+
+def plot_qoi_param_db(db_file:str, samples_id:list, x_var: str=None, y_var:str=None, axis=None):
     """
     Plot the QoI parameter space from the database file.
     Parameters:
     - db_file: Path to the database file.
-    - iteration: The iteration number to plot the QoI parameters for.
+    - samples_id: List of Sample IDs to plot.
+    - x_var: Variable to plot on the x-axis (optional).
+    - y_var: Variable to plot on the y-axis (optional).
+    - axis: Matplotlib axis to plot on (optional).
+    Returns:
+    - Matplotlib figure and axis if axis is None, otherwise returns the axis.
     """
     # Load the database structure
     df_metadata, df_param_space, df_qois, df_gp_models, df_samples, df_output = load_structure(db_file)
-
-
-    # Load the model results associated with the parameters
-    sample_id = df_samples[df_samples['IterationID'] == iteration]['SampleID'].values[0]
-    selected_output = df_output[df_output['SampleID'] == sample_id]
-    print(f"Sample ID: {sample_id}")
-    print(f"Iteration: {iteration}")
-    print(f"Objective Function Values:\n{selected_output['ObjFunc'].values[0]}")
-    print(f"Noise of Objective Function:\n{selected_output['Noise_Std'].values[0]}")
-
-    # Select the x_var_list and y_var_list from the output data
-    if not x_vars_dict and not y_vars_dict:
-        # Load the Observed QoI values
-        df_obs_qoi = pd.read_csv(df_metadata['ObsData_Path'].values[0])
-        dic_columns = df_qois.set_index('ObsData_Column')['QoI_Name'].to_dict()
-        obs_qoi = df_obs_qoi.rename(columns=dic_columns)
-        # Create x_vars_dict and y_vars_dict based on the observed QoI columns
-        x_vars_dict = { 'model': ["Time"]* len(dic_columns), 'data': ["time"]* len(dic_columns)}
-        y_vars_dict = { 'model': [], 'data': []}
-        for qoi_name in dic_columns.values():
-            y_vars_dict['model'].append(qoi_name)
-            y_vars_dict['data'].append(qoi_name)
-
-    # Plot each QoI against the model results associated with the dic_param
-    for model_x_var, model_y_var, data_x_var, data_y_var in zip(x_vars_dict['model'], y_vars_dict['model'], x_vars_dict['data'], y_vars_dict['data']):
-        fig, ax = plt.subplots(figsize=(10, 6))
-        sns.lineplot(x=obs_qoi[data_x_var], y=obs_qoi[data_y_var], ax=ax, color='red', label='Observed QoI')
-
-        # Plot PhysiCell replicates with only one legend entry using seaborn
-        sns.lineplot(data=selected_output['Data'].values[0], x=model_x_var, y=model_y_var, ax=ax,
-                    color='blue', units='replicateID', estimator=None)
-        # Add a single legend entry for PhysiCell manually
-        ax.plot([], [], color='blue', label='PhysiCell')
-
-        ax.set_title(f"QoI: {data_y_var}")
-        ax.set_xlabel(data_x_var)
-        ax.set_ylabel("Value")
-        ax.legend()
-    plt.show()
-
-
-if __name__ == "__main__":
-    # Example usage
-    db_path = "examples/virus-mac-new/BO_calibration.db"  # Path to the database file
-    dic_real_value = {
-        'mac_phag_rate_infected': 1.0,
-        'mac_motility_bias': 0.15,
-        'epi2infected_sat': 0.1,
-        'epi2infected_hfm': 0.4
-    }  # Example real values for the parameters
-    best_param, best_iteration = extract_best_parameters(db_path)
-    print("Best Parameters:", best_param)
-    plot_parameter_space(db_path, best_param=best_param, real_value=dic_real_value)
-    plot_qoi_param(db_path, best_iteration)
+    df_ObsData = get_observed_qoi(df_metadata['ObsData_Path'].values[0], df_qois)
+    return plot_qoi_param(df_ObsData, df_output, samples_id, x_var, y_var, axis)
