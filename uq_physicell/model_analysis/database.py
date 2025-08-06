@@ -4,18 +4,31 @@ import pandas as pd
 import numpy as np
 import pickle
 
-from uq_physicell import PhysiCell_Model
+from uq_physicell.model_analysis.main import PhysiCell_Model
 
-def create_structure(db_file:str):
-    """
-    Create the database structure with five tables:
-    1. Metadata: Stores simulations metadata (sampler, .ini config path, and model structure name).
-    2. ParameterSpace: Stores the parameter space information (ParamName, Lower_Bound, Upper_Bound, ReferenceValue, Perturbation).
-    3. QoIs: Stores the quantities of interest (QoI_Name, QoI_Function).
-    4. Samples: Stores the samples (SampleID, ParamName, ParamValue).
-    5. Output: Stores the output of the simulations (SampleID, ReplicateID, Data).
-    Parameters:
-    - db_file: Path to the database file.
+def create_structure(db_file: str):
+    """Create the SQLite database structure for storing simulation analysis results.
+    
+    This function initializes a SQLite database with five tables designed to store
+    all components of a sensitivity analysis or uncertainty quantification study.
+    
+    Args:
+        db_file (str): Path to the SQLite database file to be created.
+    
+    Tables Created:
+        - Metadata: Stores simulation metadata (sampler, config path, model structure)
+        - ParameterSpace: Stores parameter definitions (name, bounds, reference values)
+        - QoIs: Stores quantities of interest definitions (name, function)
+        - Samples: Stores parameter samples (sample ID, parameter name, value)
+        - Output: Stores simulation results (sample ID, replicate ID, serialized data)
+    
+    Note:
+        If the database file already exists, it will be removed and recreated
+        to ensure a clean structure.
+    
+    Example:
+        >>> create_structure('sensitivity_analysis.db')
+        >>> # Database created with all required tables
     """
     if os.path.exists(db_file):
         try: os.remove(db_file)
@@ -71,14 +84,20 @@ def create_structure(db_file:str):
     except sqlite3.Error as e:
         raise RuntimeError(f"Error generating tables: {e}")
 
-def insert_metadata(db_file: str, sampler:str, ini_file_path: str, strucName: str):
-    """
-    Insert metadata information into the Metadata table.
-    Parameters:
-    - db_file: SQLite cursor object.
-    - sampler: Sampling method.
-    - ini_file_path: Path to the initial file.
-    - strucName: Structure name.
+def insert_metadata(db_file: str, sampler: str, ini_file_path: str, strucName: str):
+    """Insert metadata information into the Metadata table.
+    
+    Args:
+        db_file (str): Path to the SQLite database file.
+        sampler (str): Name of the sampling method used (e.g., 'Sobol', 'LHS', 'Morris').
+        ini_file_path (str): Path to the PhysiCell configuration (.ini) file.
+        strucName (str): Name or identifier of the model structure used.
+    
+    Raises:
+        sqlite3.Error: If database connection or insertion fails.
+    
+    Example:
+        >>> insert_metadata('study.db', 'Sobol', 'config/params.ini', 'tumor_growth')
     """
     conn = sqlite3.connect(db_file)
     cursor = conn.cursor()
@@ -93,11 +112,27 @@ def insert_metadata(db_file: str, sampler:str, ini_file_path: str, strucName: st
         raise RuntimeError(f"Error inserting: {e}")
 
 def insert_param_space(db_file: str, params_dict: dict):
-    """
-    Insert parameter space information into the ParameterSpace table.
-    Parameters:
-    - db_file: Path to the database file.
-    - params_dict: Dictionary containing parameter names and their properties.
+    """Insert parameter space information into the ParameterSpace table.
+    
+    Args:
+        db_file (str): Path to the SQLite database file.
+        params_dict (dict): Dictionary containing parameter names and their properties.
+            Each parameter should have keys: 'lower_bounds', 'upper_bounds', 
+            'ref_value', and 'perturbation'.
+    
+    Raises:
+        RuntimeError: If parameter insertion fails due to database errors.
+    
+    Example:
+        >>> params = {
+        ...     'param1': {
+        ...         'lower_bounds': 0.0,
+        ...         'upper_bounds': 1.0,
+        ...         'ref_value': 0.5,
+        ...         'perturbation': 0.1
+        ...     }
+        ... }
+        >>> insert_param_space('study.db', params)
     """
     conn = sqlite3.connect(db_file)
     cursor = conn.cursor()
@@ -114,12 +149,23 @@ def insert_param_space(db_file: str, params_dict: dict):
     except sqlite3.Error as e:
         raise RuntimeError(f"Error inserting parameter space into the database: {e}")
 
-def insert_qois(db_file: str, qois_dic:dict):
-    """
-    Insert QoIs into the QoIs table.
-    Parameters:
-    - db_file: Path to the database file.
-    - qois_dic: Dictionary of QoIs (keys as names, values as lambda functions or strings).
+def insert_qois(db_file: str, qois_dic: dict):
+    """Insert quantities of interest (QoIs) into the QoIs table.
+    
+    Args:
+        db_file (str): Path to the SQLite database file.
+        qois_dic (dict): Dictionary of QoIs where keys are QoI names and values 
+            are either lambda functions or string representations of functions.
+    
+    Raises:
+        RuntimeError: If QoI insertion fails due to database errors.
+    
+    Example:
+        >>> qois = {
+        ...     'total_cells': lambda data: data['cell_count'].sum(),
+        ...     'max_radius': 'lambda data: data["radius"].max()'
+        ... }
+        >>> insert_qois('study.db', qois)
     """
     conn = sqlite3.connect(db_file)
     cursor = conn.cursor()
@@ -138,12 +184,23 @@ def insert_qois(db_file: str, qois_dic:dict):
     except sqlite3.Error as e:
         raise RuntimeError(f"Error inserting QoIs into the database: {e}")
 
-def insert_samples(db_file: str, dic_samples:dict):
-    """
-    Insert sample parameters into the Samples table.
-    Parameters:
-    - db_file: Path to the database file.
-    - dic_samples: Dictionary of the dictionaries of samples
+def insert_samples(db_file: str, dic_samples: dict):
+    """Insert sample parameters into the Samples table.
+    
+    Args:
+        db_file (str): Path to the SQLite database file.
+        dic_samples (dict): Nested dictionary where outer keys are sample IDs 
+            and inner dictionaries contain parameter names and values.
+    
+    Raises:
+        RuntimeError: If sample insertion fails due to database errors.
+    
+    Example:
+        >>> samples = {
+        ...     0: {'param1': 0.5, 'param2': 1.2},
+        ...     1: {'param1': 0.8, 'param2': 0.9}
+        ... }
+        >>> insert_samples('study.db', samples)
     """
     conn = sqlite3.connect(db_file)
     cursor = conn.cursor()
@@ -156,14 +213,23 @@ def insert_samples(db_file: str, dic_samples:dict):
     except sqlite3.Error as e:
         raise RuntimeError(f"Error inserting samples into the database: {e}")
 
-def insert_output(db_file: str, sample_id:int, replicate_id:int, result_data:bytes):
-    """
-    Insert simulation results into the Output table.
-    Parameters:
-    - db_file: Path to the database file.
-    - sample_id: The sample ID.
-    - replicate_id: The replicate ID.
-    - result_data: The simulation results data (as binary).
+def insert_output(db_file: str, sample_id: int, replicate_id: int, result_data: bytes):
+    """Insert simulation results into the Output table.
+    
+    Args:
+        db_file (str): Path to the SQLite database file.
+        sample_id (int): Unique identifier for the parameter sample.
+        replicate_id (int): Identifier for the simulation replicate.
+        result_data (bytes): Serialized simulation results data.
+    
+    Raises:
+        RuntimeError: If output insertion fails due to database errors.
+    
+    Example:
+        >>> import pickle
+        >>> data = {'cells': [1, 2, 3], 'time': [0, 1, 2]}
+        >>> serialized_data = pickle.dumps(data)
+        >>> insert_output('study.db', 0, 1, serialized_data)
     """
     conn = sqlite3.connect(db_file)
     cursor = conn.cursor()
@@ -175,17 +241,29 @@ def insert_output(db_file: str, sample_id:int, replicate_id:int, result_data:byt
     except sqlite3.Error as e:
         raise RuntimeError(f"Error inserting output into the database: {e}")
     
-def load_structure(db_file:str) -> tuple:
-    """
-    Load the database structure and return the dataframes for metadata, inputs, and results.
-    Parameters:
-    - db_file: Path to the database file.
-    Return:
-    - df_metadata: DataFrame containing metadata information.
-    - df_parameter_space: DataFrame containing parameter space information.
-    - df_qois: DataFrame containing QoIs information.
-    - dic_samples: Dictionary containing samples.
-    - df_results: DataFrame containing simulation results.
+def load_structure(db_file: str) -> tuple:
+    """Load the complete database structure and return all data components.
+    
+    This function retrieves all stored information from the SQLite database
+    including metadata, parameter space, QoIs, samples, and simulation results.
+    
+    Args:
+        db_file (str): Path to the SQLite database file.
+    
+    Returns:
+        tuple: A 5-tuple containing:
+            - df_metadata (pd.DataFrame): Metadata information (sampler, config, structure)
+            - df_parameter_space (pd.DataFrame): Parameter space definitions
+            - df_qois (pd.DataFrame): Quantities of interest definitions
+            - dic_samples (dict): Dictionary of parameter samples by sample ID
+            - df_results (pd.DataFrame): Simulation results with deserialized data
+    
+    Raises:
+        sqlite3.Error: If database connection or data retrieval fails.
+    
+    Example:
+        >>> metadata, params, qois, samples, results = load_structure('study.db')
+        >>> print(f"Loaded {len(samples)} samples with {len(results)} results")
     """
     conn = sqlite3.connect(db_file)
     cursor = conn.cursor()
@@ -242,21 +320,33 @@ def load_structure(db_file:str) -> tuple:
 
     return df_metadata, df_parameter_space, df_qois, dic_samples, df_data_unserialized
 
-def check_simulations_db(PhysiCellModel:PhysiCell_Model, sampler:str, param_dict:dict, dic_samples:dict, qois_dic:dict, db_file:str) -> tuple:
-    """
-    Check if the database file exists and if all simulations have been completed.
-    Parameters:
-    - PhysiCellModel: The PhysiCell model instance.
-    - sampler: The sampler used for sensitivity analysis.
-    - param_dict: Dictionary containing parameter names, reference values, lower bounds, upper bounds, and perturbations.
-    - dic_samples: Dictionary of the dictionaries of samples
-    - qois_dic: Dictionary of QoIs (keys as names, values as lambda functions or strings) - If empty store all data as a list of mcds.
-    - db_file: Path to the database file.
-    Return:
-    - exist_db: Boolean indicating if the database file exists and is valid.
-    - parameters_missing: List of dictionaries of missing parameters.
-    - samples_missing: List of missing samples.
-    - replicates_missing: List of missing replicates.
+def check_simulations_db(PhysiCellModel: PhysiCell_Model, sampler: str, param_dict: dict, 
+                        dic_samples: dict, qois_dic: dict, db_file: str) -> tuple:
+    """Check database existence and identify missing simulations.
+    
+    This function verifies if a database exists and contains all required simulation
+    results. It compares the expected samples against completed simulations to
+    identify any missing runs.
+    
+    Args:
+        PhysiCellModel (PhysiCell_Model): The PhysiCell model instance for simulations.
+        sampler (str): Name of the sampling method used (e.g., 'Sobol', 'LHS').
+        param_dict (dict): Parameter space definition with bounds and reference values.
+        dic_samples (dict): Dictionary of parameter samples to be simulated.
+        qois_dic (dict): Dictionary of quantities of interest definitions.
+        db_file (str): Path to the SQLite database file.
+    
+    Returns:
+        tuple: A 2-tuple containing:
+            - exist_db (bool): True if database exists and contains valid structure
+            - parameters_missing (list): List of dictionaries for missing parameter sets
+    
+    Example:
+        >>> model = PhysiCell_Model('config.ini')
+        >>> exists, missing = check_simulations_db(
+        ...     model, 'Sobol', params, samples, qois, 'study.db'
+        ... )
+        >>> print(f"Database exists: {exists}, Missing: {len(missing)} simulations")
     """
     parameters_missing, samples_missing, replicates_missing = [], [], []
     if not os.path.exists(db_file):
@@ -326,13 +416,25 @@ def check_simulations_db(PhysiCellModel:PhysiCell_Model, sampler:str, param_dict
 
     return True, parameters_missing, samples_missing, replicates_missing
 
-def get_database_type(db_file:str) -> bool:
-    """
-    Check if the database file is a valid Model Analysis or Bayesian Optimization database.
-    Parameters:
-    - db_file: Path to the database file.
-    Return:
-    - Database type: MA, BO, or None if the database is not valid.
+def get_database_type(db_file: str) -> bool:
+    """Determine the type of analysis database (Model Analysis or Bayesian Optimization).
+    
+    This function examines the database structure to identify whether it contains
+    Model Analysis (MA) or Bayesian Optimization (BO) data based on table schemas.
+    
+    Args:
+        db_file (str): Path to the SQLite database file to examine.
+    
+    Returns:
+        str or None: Returns 'MA' for Model Analysis, 'BO' for Bayesian Optimization,
+                    or None if the database type cannot be determined.
+    
+    Example:
+        >>> db_type = get_database_type('analysis.db')
+        >>> if db_type == 'MA':
+        ...     print("This is a Model Analysis database")
+        >>> elif db_type == 'BO':
+        ...     print("This is a Bayesian Optimization database")
     """
     if not os.path.exists(db_file):
         return None

@@ -1,37 +1,50 @@
 import numpy as np
 
 from SALib.sample import fast_sampler, ff, finite_diff, latin, sobol
+from .sensitivity_analysis import _get_SA_problem
 
-def get_SA_problem(params_dict: dict) -> dict:
-    """
-    Create a problem dictionary for SALib based on the provided parameters.
-    Parameters:
-    - params_dict: Dictionary containing parameter names and their properties.
+def run_global_sampler(params_dict: dict, sampler: str, N: int = None, M: int = 4, seed: int = 42) -> dict:
+    """Generate parameter samples using global sampling methods.
+    
+    This function creates parameter samples using various global sampling strategies
+    implemented in SALib, suitable for global sensitivity analysis methods.
+    
+    Args:
+        params_dict (dict): Dictionary containing parameter definitions with
+            'lower_bounds' and 'upper_bounds' for each parameter.
+        sampler (str): Sampling method to use. Supported methods include:
+            - 'Fast': FAST sampling for Fourier Amplitude Sensitivity Test
+            - 'Fractional Factorial': Fractional factorial design
+            - 'Finite Difference': Finite difference sampling
+            - 'Latin hypercube sampling (LHS)': Latin hypercube sampling
+            - 'Sobol': Sobol sequence sampling
+        N (int, optional): Number of samples to generate. If None, method-specific
+            defaults are used. Defaults to None.
+        M (int, optional): Number of harmonics for FAST sampler. Only used with
+            'Fast' method. Defaults to 4.
+        seed (int, optional): Random seed for reproducible sampling. Defaults to 42.
+    
     Returns:
-    - problem: Dictionary formatted for SALib analysis.
-    """
-    param_names = [key for key in params_dict.keys() if key != "samples"]
-    problem = {
-        'num_vars': len(param_names),
-        'names': param_names,
-        'bounds': [(params_dict[key]['lower_bounds'], params_dict[key]['upper_bounds']) for key in param_names]
-    }
-    return problem
-
-def run_global_sampler(params_dict, sampler, N=None, M=4, seed=42):
-    """
-    Run the global sampler based on the specified method.
-    Parameters:
-    - params_dict: Dictionary containing parameter names and their properties.
-    - sampler: String indicating the sampling method to use.
-    - N: Number of samples to generate (default is None, which will be set later).
-    - M: Number of harmonics for the Fast sampler (default is 4).
-    Returns:
-    - global_samples_dict: Dictionary of dictionaries containing the generated samples.
+        dict: Dictionary with sample IDs as keys and parameter dictionaries as values.
+            Each sample dictionary contains parameter names as keys and sampled
+            values as values.
+    
+    Raises:
+        ValueError: If an unsupported sampling method is specified or if
+            required parameters are missing.
+    
+    Example:
+        >>> params = {
+        ...     'param1': {'lower_bounds': 0.0, 'upper_bounds': 1.0},
+        ...     'param2': {'lower_bounds': 0.5, 'upper_bounds': 2.0}
+        ... }
+        >>> samples = run_global_sampler(params, 'LHS', N=100)
+        >>> len(samples)
+        100
     """
 
     # Define the problem for SALib
-    problem = get_SA_problem(params_dict)
+    problem = _get_SA_problem(params_dict)
     if sampler == "Fast":
         # Generate model inputs for extended Fourier Amplitude Sensitivity Test.
         # Returns a NumPy matrix containing the model inputs required by the extended Fourier Amplitude sensitivity test. 
@@ -82,14 +95,40 @@ def run_global_sampler(params_dict, sampler, N=None, M=4, seed=42):
     
     return global_samples_dict
 
-def run_local_sampler(params_dict, sampler='OAT'):
-    """
-    Run the local sampler based on the specified method.
-    Parameters:
-    - params_dict: Dictionary containing parameter names and their properties.
-    - sampler: String indicating the sampling method to use (default is 'OAT' for One-At-A-Time).
+def run_local_sampler(params_dict: dict, sampler: str = 'OAT') -> dict:
+    """Generate parameter samples using local sampling methods for sensitivity analysis.
+    
+    This function creates parameter samples using local sampling strategies,
+    particularly the One-At-a-Time (OAT) method, where parameters are perturbed
+    individually around reference values.
+    
+    Args:
+        params_dict (dict): Dictionary containing parameter definitions. Each
+            parameter should have:
+            - 'ref_value': Reference value for the parameter
+            - 'perturbation': Single value or list of perturbation percentages
+        sampler (str, optional): Local sampling method to use. Currently only
+            'OAT' (One-At-a-Time) is supported. Defaults to 'OAT'.
+    
     Returns:
-    - local_samples: NumPy array containing the generated samples.
+        dict: Dictionary with sample IDs as keys and parameter dictionaries as values.
+            Sample 0 contains the reference values, and subsequent samples contain
+            perturbations of individual parameters.
+    
+    Note:
+        For OAT sampling, the first sample (ID 0) contains all reference values.
+        Subsequent samples perturb one parameter at a time while keeping others
+        at their reference values. If multiple perturbations are specified for
+        a parameter, multiple samples are generated for that parameter.
+    
+    Example:
+        >>> params = {
+        ...     'param1': {'ref_value': 1.0, 'perturbation': [5.0, 10.0]},
+        ...     'param2': {'ref_value': 0.5, 'perturbation': 10.0}
+        ... }
+        >>> samples = run_local_sampler(params, 'OAT')
+        >>> len(samples)  # 1 reference + 2 perturbations for param1 + 1 for param2
+        4
     """
     params_ref = {key: params_dict[key]["ref_value"] for key in params_dict.keys()}
     # First sample is the reference value

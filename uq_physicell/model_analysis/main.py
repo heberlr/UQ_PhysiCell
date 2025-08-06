@@ -20,9 +20,53 @@ except ImportError:
     mpi_available = False
 
 class ModelAnalysisContext:
-    """
-    Context manager for running model analysis simulations.
-    It initializes the PhysiCell model and manages the database structure.
+    """Context manager for running PhysiCell model analysis simulations.
+    
+    This class manages the configuration, database setup, and execution context
+    for running sensitivity analysis and uncertainty quantification simulations
+    on PhysiCell models.
+    
+    Args:
+        db_path (str): Path to the SQLite database file for storing results.
+        model_config (dict): Dictionary containing PhysiCell model configuration.
+            Must include 'ini_path' and 'struc_name' keys.
+        sampler (str): Name of the sampling method to use (e.g., 'LHS', 'Sobol', 'OAT').
+        params_info (dict): Dictionary containing parameter definitions with keys
+            for each parameter name and values containing 'ref_value', 'lower_bounds',
+            'upper_bounds', and 'perturbation' information.
+        qois_info (dict): Dictionary containing Quantities of Interest definitions.
+        parallel_method (str, optional): Parallelization method. Options are:
+            'inter-process' (single node), 'inter-node' (MPI), or 'serial'.
+            Defaults to 'inter-process'.
+        num_workers (int, optional): Number of parallel workers for inter-process
+            execution. Defaults to 1.
+        summary_function (callable, optional): Custom function for summarizing
+            simulation output. Defaults to None.
+    
+    Attributes:
+        db_path (str): Database file path.
+        params_dict (dict): Parameter configuration dictionary.
+        parallel_method (str): Selected parallelization method.
+        qois_dict (dict): Quantities of Interest configuration.
+        num_workers (int): Number of parallel workers.
+        summary_function (callable): Summary function for output processing.
+        dic_metadata (dict): Metadata for database storage.
+    
+    Raises:
+        ImportError: If required parallelization libraries are not available.
+        ValueError: If invalid parallel_method is specified.
+    
+    Example:
+        >>> model_config = {
+        ...     'ini_path': 'model.xml',
+        ...     'struc_name': 'tumor_growth'
+        ... }
+        >>> params = {
+        ...     'param1': {'ref_value': 1.0, 'lower_bounds': 0.5, 'upper_bounds': 1.5}
+        ... }
+        >>> context = ModelAnalysisContext(
+        ...     'analysis.db', model_config, 'LHS', params, {}
+        ... )
     """
     def __init__(self, db_path:str, model_config:dict, sampler:str, params_info:dict, qois_info:dict, parallel_method:str='inter-process', num_workers:int=1, summary_function=None):
         self.db_path = db_path
@@ -52,9 +96,32 @@ class ModelAnalysisContext:
             raise ValueError("Invalid parallel_method. Use 'inter-node' for MPI, 'inter-process' for futures, or 'serial' for single process.") 
 
 def run_simulations(context: ModelAnalysisContext):
-    """ Run simulations based on the provided context.
+    """Run PhysiCell simulations based on the provided analysis context.
+    
+    This function executes sensitivity analysis simulations using the specified
+    parallelization method (serial, inter-process, or MPI). It manages database
+    initialization, parameter sampling, simulation execution, and result storage.
+    
     Args:
-        context (ModelAnalysisContext): The context containing model configuration, sampler, and other parameters.
+        context (ModelAnalysisContext): The analysis context containing model
+            configuration, sampling parameters, parallelization settings, and
+            database information.
+    
+    Raises:
+        ValueError: If there are issues with PhysiCell model initialization,
+            database operations, or simulation execution.
+        ImportError: If required parallelization libraries are missing.
+    
+    Note:
+        This function handles three execution modes:
+        - Serial: Single-threaded execution for small analyses
+        - Inter-process: Multi-processing on a single node using concurrent.futures
+        - Inter-node: Distributed execution across multiple nodes using MPI
+    
+    Example:
+        >>> context = ModelAnalysisContext(db_path, model_config, 'LHS', params, qois)
+        >>> context.dic_samples = run_global_sampler(params, 'LHS', N=100)
+        >>> run_simulations(context)
     """
     # Initialize the parallelization method
     if context.parallel_method == 'inter-node':

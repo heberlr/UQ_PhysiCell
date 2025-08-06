@@ -5,14 +5,30 @@ from typing import Union
 from .database import load_structure
 from uq_physicell.utils.model_wrapper import create_named_function_from_string
 
-def reshape_sa_expanded_data(expanded_data:pd.DataFrame, qoi_columns:list) -> pd.DataFrame:
-    """
-    Reshape the expanded data to create a DataFrame with SampleID, ReplicateID, and time_id as columns.
-    Parameters:
-    - expanded_data: DataFrame containing the expanded data with SampleID, ReplicateID, and time columns.
-    - qoi_columns: List of QoI columns to be reshaped.
-    Return:
-    - reshaped_data: DataFrame with SampleID, ReplicateID, time_id, and QoI columns.
+def reshape_sa_expanded_data(expanded_data: pd.DataFrame, qoi_columns: list) -> pd.DataFrame:
+    """Reshape expanded sensitivity analysis data for pivot table analysis.
+    
+    This function transforms time-series data from long format (multiple rows per sample)
+    to wide format (columns for each time point) to facilitate statistical analysis.
+    
+    Args:
+        expanded_data (pd.DataFrame): DataFrame containing expanded simulation data
+            with SampleID, ReplicateID, time, and QoI columns.
+        qoi_columns (list): List of quantity of interest column names to reshape.
+    
+    Returns:
+        pd.DataFrame: Reshaped DataFrame with multi-level columns where each QoI
+                     and time point becomes a separate column indexed by SampleID
+                     and ReplicateID.
+    
+    Example:
+        >>> data = pd.DataFrame({
+        ...     'SampleID': [0, 0, 1, 1],
+        ...     'ReplicateID': [0, 0, 0, 0],
+        ...     'time': [0, 1, 0, 1],
+        ...     'cell_count': [100, 150, 80, 120]
+        ... })
+        >>> reshaped = reshape_sa_expanded_data(data, ['cell_count'])
     """
     try:
         # Ensure QoI columns are numeric
@@ -40,14 +56,27 @@ def reshape_sa_expanded_data(expanded_data:pd.DataFrame, qoi_columns:list) -> pd
     except Exception as e:
         raise ValueError(f"Error reshaping expanded data: {e}")
 
-def calculate_qoi_from_sa_db(db_file:str, qoi_functions:str) -> pd.DataFrame:
-    """
-    Calculate the QoI values from the database and returns them as a DataFrame.
-    Parameters:
-    - db_file: Path to the database file.
-    - qoi_functions: Dictionary of QoI functions (keys as names, values as lambda functions or strings).
-    Return:
-    - df_qois: DataFrame containing the calculated QoI values.
+def calculate_qoi_from_sa_db(db_file: str, qoi_functions: str) -> pd.DataFrame:
+    """Calculate quantities of interest from sensitivity analysis database results.
+    
+    This function loads simulation results from a database and applies QoI functions
+    to extract meaningful metrics from the time-series data.
+    
+    Args:
+        db_file (str): Path to the SQLite database containing simulation results.
+        qoi_functions (str): Dictionary of QoI functions where keys are QoI names
+                           and values are lambda functions or string representations.
+    
+    Returns:
+        pd.DataFrame: DataFrame with calculated QoI values indexed by SampleID
+                     and ReplicateID, with columns for each QoI.
+    
+    Example:
+        >>> qoi_funcs = {
+        ...     'final_cells': 'lambda data: data[-1]["cell_count"]',
+        ...     'max_growth': 'lambda data: max(d["cell_count"] for d in data)'
+        ... }
+        >>> qoi_df = calculate_qoi_from_sa_db('study.db', qoi_funcs)
     """
     # Load the database structure
     _, _, _, _, df_output = load_structure(db_file)
@@ -79,15 +108,30 @@ def calculate_qoi_from_sa_db(db_file:str, qoi_functions:str) -> pd.DataFrame:
     df_qois = df_qois.reset_index(drop=True)
     return df_qois
  
-def calculate_qoi_statistics(df_qois_data:pd.DataFrame, qoi_funcs:dict, db_file_path:str) -> pd.DataFrame:
-    """
-    Calculate the mean of the QoI values.
-    Parameters:
-    - df_qois: DataFrame containing the extracted QoI values.
-    - qoi_funcs: Dictionary of QoI functions (keys as names, values as lambda functions or None).
-    - db_file_path: Path to the database file.
-    Return:
-    - df_statistics: DataFrame containing the mean and standard deviation of the QoI values.
+def calculate_qoi_statistics(df_qois_data: pd.DataFrame, qoi_funcs: dict, db_file_path: str) -> pd.DataFrame:
+    """Calculate statistical summaries of quantities of interest across replicates.
+    
+    This function computes mean and standard deviation of QoI values across
+    simulation replicates for each parameter sample, enabling uncertainty quantification.
+    
+    Args:
+        df_qois_data (pd.DataFrame): DataFrame containing QoI values with SampleID,
+                                   ReplicateID, and QoI columns.
+        qoi_funcs (dict): Dictionary of QoI functions where keys are QoI names and
+                         values are lambda functions or None.
+        db_file_path (str): Path to the database file for context.
+    
+    Returns:
+        pd.DataFrame: DataFrame with statistical summaries (mean, std) of QoIs
+                     grouped by SampleID, with columns for each QoI statistic.
+    
+    Raises:
+        ValueError: If no QoI functions are defined or data format is invalid.
+    
+    Example:
+        >>> qoi_funcs = {'cell_count': lambda x: x.sum(), 'growth_rate': None}
+        >>> stats_df = calculate_qoi_statistics(qoi_data, qoi_funcs, 'study.db')
+        >>> print(stats_df[['cell_count_mean', 'cell_count_std']])
     """
     qoi_columns = list(qoi_funcs.keys())
     if not qoi_columns:

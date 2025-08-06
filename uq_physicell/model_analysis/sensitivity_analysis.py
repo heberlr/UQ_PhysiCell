@@ -3,8 +3,6 @@ import pandas as pd
 
 from SALib.analyze import fast as fast_analyze, rbd_fast as rbd_fast_analyze, ff as ff_analyze, pawn as pawn_analyze, dgsm as dgsm_analyze, enhanced_hdmr as hdmr_analyze, rsa as rsa_analyze, discrepancy as discrepancy_analyze, delta as delta_analyze, sobol as sobol_analyze
 
-from .samplers import get_SA_problem
-
 # Compatibility of samplers with methods following the SALib library
 # https://salib.readthedocs.io/en/latest/index.html
 # https://salib.readthedocs.io/en/latest/user-guide/analysis.html
@@ -60,14 +58,19 @@ samplers_to_method = {
     ]
 }
 
-def set_time_labels(all_times_label: list, df_qois: pd.DataFrame) -> dict:
-    """
-    Set the time labels for the QoI values.
-    Parameters:
-    - all_times_label: List of all time labels.
-    - df_qois: DataFrame containing the QoI values.
+def _set_time_labels(all_times_label: list, df_qois: pd.DataFrame) -> dict:
+    """Set and validate time labels for QoI values.
+    
+    Args:
+        all_times_label (list): List of all time labels to be processed.
+        df_qois (pd.DataFrame): DataFrame containing the QoI values with time columns.
+    
     Returns:
-    - qoi_time_values: Updated dictionary with time labels.
+        dict: Dictionary with time labels as keys and their corresponding time values
+            as values, sorted by time values.
+    
+    Raises:
+        ValueError: If more than one unique value is found for any time label.
     """
     # Check if qoi_time_values is empty
     qoi_time_values = {}
@@ -84,24 +87,77 @@ def set_time_labels(all_times_label: list, df_qois: pd.DataFrame) -> dict:
     qoi_time_values = dict(sorted(qoi_time_values.items(), key=lambda item: item[1]))
     return qoi_time_values
 
-def run_global_sa(params_dict: dict, method: str, all_times_label: list, all_qois_names:list, df_qois: pd.DataFrame) -> dict:
-    """
-    Run global sensitivity analysis using the selected sampler and method.
-    Parameters:
-    - params_dict: Dictionary containing parameter names and their properties.
-    - method: String indicating the sampling method to use.
-    - all_times_label: List of all time labels.
-    - all_qois_names: List of all QoI names.
-    - df_qois: DataFrame containing the QoI values.
+def _get_SA_problem(params_dict: dict) -> dict:
+    """Create a SALib problem dictionary from parameter definitions.
+    
+    This function converts parameter definitions to the format required by
+    the SALib (Sensitivity Analysis Library) for conducting sensitivity analysis.
+
+    Args:
+        params_dict (dict): Dictionary containing parameter names as keys and
+            parameter properties as values. Each parameter should have
+            'lower_bounds' and 'upper_bounds' keys. The special key 'samples'
+            is excluded from the problem definition.
+
     Returns:
-    - sa_results_dict: Dictionary of results from the sensitivity analysis.
+        dict: SALib-formatted problem dictionary containing:
+            - num_vars (int): Number of parameters
+            - names (list): List of parameter names
+            - bounds (list): List of tuples with (lower, upper) bounds for each parameter
+
+    Example:
+        >>> params = {
+        ...     'param1': {'lower_bounds': 0.0, 'upper_bounds': 1.0},
+        ...     'param2': {'lower_bounds': -1.0, 'upper_bounds': 1.0}
+        ... }
+        >>> problem = _get_SA_problem(params)
+        >>> print(problem['num_vars'])
+        2
+    """
+    param_names = [key for key in params_dict.keys() if key != "samples"]
+    problem = {
+        'num_vars': len(param_names),
+        'names': param_names,
+        'bounds': [(params_dict[key]['lower_bounds'], params_dict[key]['upper_bounds']) for key in param_names]
+    }
+    return problem
+
+def run_global_sa(params_dict: dict, method: str, all_times_label: list, all_qois_names: list, df_qois: pd.DataFrame) -> tuple:
+    """Run global sensitivity analysis using the specified method.
+    
+    Args:
+        params_dict (dict): Dictionary containing parameter names, properties, and sample values.
+            Must include a 'samples' key with parameter sample dictionaries.
+        method (str): Name of the sensitivity analysis method to use. Supported methods
+            include 'FAST - Fourier Amplitude Sensitivity Test', 'Sobol Sensitivity Analysis',
+            'PAWN Sensitivity Analysis', etc.
+        all_times_label (list): List of all time labels present in the QoI data.
+        all_qois_names (list): List of all Quantity of Interest names to analyze.
+        df_qois (pd.DataFrame): DataFrame containing QoI values with columns formatted as
+            '{qoi_name}_{time_index}'.
+    
+    Returns:
+        tuple: A tuple containing:
+            - sa_results_dict (dict): Nested dictionary with sensitivity analysis results.
+              Structure: {qoi_name: {time_label: analysis_results}}
+            - qoi_time_values (dict): Dictionary mapping time labels to their values,
+              sorted by time.
+    
+    Raises:
+        ValueError: If there's a mismatch between number of samples and QoI results,
+            or if the specified method fails during analysis.
+    
+    Example:
+        >>> params = {'param1': {...}, 'samples': {...}}
+        >>> results, times = run_global_sa(params, 'Sobol Sensitivity Analysis', 
+        ...                               ['t_0', 't_24'], ['cell_count'], df_qois)
     """
     # Get the problem definition for SALib
-    problem = get_SA_problem(params_dict)
+    problem = _get_SA_problem(params_dict)
     # Generate params_np - it is sorted by sample ID
     params_np = np.array([[param_sample_dic[param] for param in problem['names']] for param_sample_dic in params_dict["samples"].values()])
     # Set the times labels sorted by time values
-    qoi_time_values = set_time_labels(all_times_label, df_qois)
+    qoi_time_values = _set_time_labels(all_times_label, df_qois)
     # SA results dictionary
     sa_results_dict = { qoi: {} for qoi in all_qois_names }
     for qoi in all_qois_names: 
@@ -139,14 +195,23 @@ def run_global_sa(params_dict: dict, method: str, all_times_label: list, all_qoi
 
     return sa_results_dict, qoi_time_values
 
-def OAT_analyze(dic_samples:dict, dic_qoi: dict) -> dict:
-    """
-    Perform OAT analysis on the results.
-    Parameters:
-    - dic_samples: dictionary of the dictionaries of samples
-    - dic_qoi: dictionary of QoIs
-    Return:
-    - dic_results: dictionary of the results
+def _OAT_analyze(dic_samples: dict, dic_qoi: dict) -> dict:
+    """Perform One-At-a-Time (OAT) analysis on the simulation results.
+    
+    Args:
+        dic_samples (dict): Dictionary of parameter sample dictionaries, where each key
+            is a sample ID and each value is a dictionary of parameter names and values.
+        dic_qoi (dict): Dictionary of Quantities of Interest (QoI) values, where each
+            key is a sample ID and each value is the corresponding QoI result.
+    
+    Returns:
+        dict: Dictionary containing sensitivity indices for each parameter. Keys are 
+            parameter names and values are arrays of sensitivity indices for each
+            perturbation.
+    
+    Note:
+        Sample 0 is treated as the reference sample. All other samples are compared
+        against this reference to compute sensitivity indices.
     """
     # Remove unused variables ref_pars and qoi_ref
     # Extract parameter samples and QoI samples
@@ -168,19 +233,39 @@ def OAT_analyze(dic_samples:dict, dic_qoi: dict) -> dict:
 
     return dic_results
 
-def run_local_sa(params_dict: dict, all_times_label: list, all_qois_names: list, df_qois: pd.DataFrame, method: str="OAT") -> dict:
-    """
-    Run local sensitivity analysis using the One-At-A-Time (OAT) method.
-    Parameters:
-    - params_dict: Dictionary containing parameter names and their properties.
-    - dic_qoi: Dictionary of QoI values.
+def run_local_sa(params_dict: dict, all_times_label: list, all_qois_names: list, df_qois: pd.DataFrame, method: str = "OAT") -> tuple:
+    """Run local sensitivity analysis using the One-At-a-Time (OAT) method.
+    
+    Args:
+        params_dict (dict): Dictionary containing parameter names, properties, and sample values.
+            Must include a 'samples' key with parameter sample dictionaries.
+        all_times_label (list): List of all time labels present in the QoI data.
+        all_qois_names (list): List of all Quantity of Interest names to analyze.
+        df_qois (pd.DataFrame): DataFrame containing QoI values with columns formatted as
+            '{qoi_name}_{time_index}'.
+        method (str, optional): Local sensitivity analysis method. Currently only 'OAT'
+            (One-At-a-Time) is supported. Defaults to "OAT".
+    
     Returns:
-    - sa_results_dict: Dictionary of results from the OAT analysis.
+        tuple: A tuple containing:
+            - sa_results_dict (dict): Nested dictionary with sensitivity analysis results.
+              Structure: {qoi_name: {time_label: {param_name: sensitivity_index}}}
+            - qoi_time_values (dict): Dictionary mapping time labels to their values,
+              sorted by time.
+    
+    Note:
+        The OAT method computes sensitivity indices by comparing parameter perturbations
+        against a reference sample (sample 0). Results are summed across all perturbations
+        for each parameter.
+    
+    Example:
+        >>> params = {'param1': {...}, 'samples': {...}}
+        >>> results, times = run_local_sa(params, ['t_0', 't_24'], ['cell_count'], df_qois)
     """
     # Get parameter names
     param_names = [key for key in params_dict.keys() if key != "samples"]
     # Set the times labels sorted by time values
-    qoi_time_values = set_time_labels(all_times_label, df_qois)
+    qoi_time_values = _set_time_labels(all_times_label, df_qois)
     # SA results dictionary
     sa_results_dict = { qoi: {} for qoi in all_qois_names }
     for qoi in all_qois_names:
@@ -188,7 +273,7 @@ def run_local_sa(params_dict: dict, all_times_label: list, all_qois_names: list,
             qoi_result_dict = df_qois[f"{qoi}_{id_time}"].to_dict()
             print(f"Running {method} for QoI: {qoi} and time: {qoi_time_values[time_label]}")
             # Return a dictionary of sensitivity indices for each perturbation
-            sa_results_dict[qoi][time_label] = OAT_analyze(params_dict["samples"], qoi_result_dict)
+            sa_results_dict[qoi][time_label] = _OAT_analyze(params_dict["samples"], qoi_result_dict)
             # Overwrite the results for perturbations by summing them up
             for key in sa_results_dict[qoi][time_label]: sa_results_dict[qoi][time_label][key] = np.sum(sa_results_dict[qoi][time_label][key])
 
