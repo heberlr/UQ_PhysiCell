@@ -401,6 +401,7 @@ def load_ma_database(main_window):
         # Load the database structure
         main_window.update_output_tab2(main_window, f"Loading database file {main_window.ma_file_path} ...")
         df_metadata, df_parameter_space, df_qois, dic_input, main_window.df_output = load_structure(main_window.ma_file_path)
+
         # Load the .ini file
         main_window.load_ini_file(main_window, df_metadata['Ini_File_Path'].iloc[0], df_metadata['StructureName'].iloc[0])
         print(df_metadata)
@@ -429,8 +430,8 @@ def load_ma_database(main_window):
             main_window.global_SA_parameters = {}
             main_window.global_SA_parameters["samples"] = dic_input
             for id, param in enumerate(df_parameter_space['ParamName']):
-                main_window.global_SA_parameters[param] = {"lower_bounds": [df_parameter_space['Lower_Bound'].iloc[id]],
-                                                            "upper_bounds": [df_parameter_space['Upper_Bound'].iloc[id]],
+                main_window.global_SA_parameters[param] = {"lower_bounds": df_parameter_space['Lower_Bound'].iloc[id],
+                                                            "upper_bounds": df_parameter_space['Upper_Bound'].iloc[id],
                                                             "ref_value": df_parameter_space['ReferenceValue'].iloc[id], 
                                                             "perturbation": float(df_parameter_space['Perturbation'].iloc[id])}
             # Update the global parameters

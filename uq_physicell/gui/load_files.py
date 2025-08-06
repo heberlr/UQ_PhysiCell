@@ -93,6 +93,8 @@ def load_ini_file(main_window, filePath=None, strucName=None):
     if filePath is None:
         options = QFileDialog.Options()
         main_window.ini_file_path, _ = QFileDialog.getOpenFileName(main_window, "Select .ini File", "", "INI Files (*.ini);;All Files (*)", options=options)
+        # Switch the selected tab to Tab 2
+        main_window.tabs.setCurrentIndex(1)
     else:
         main_window.ini_file_path = filePath
     if main_window.ini_file_path:
@@ -221,10 +223,14 @@ def load_db_file(main_window, filePath=None):
                 if db_type == 'MA':
                     main_window.ma_file_path = db_file_path
                     main_window.load_ma_database(main_window)
+                    # Switch the selected tab to Tab 2 - Model Analysis
+                    main_window.tabs.setCurrentIndex(1)
                 # Bayesian Optimization database
                 elif db_type == 'BO':
                     main_window.bo_file_path = db_file_path
                     main_window.load_bo_database(main_window)
+                    # Switch the selected tab to Tab 3 - Bayesian Optimization
+                    main_window.tabs.setCurrentIndex(2)
                 else:
                     error_message = "The selected file is not a valid MA or BO database."
                     main_window.update_output_tab2(main_window, error_message)

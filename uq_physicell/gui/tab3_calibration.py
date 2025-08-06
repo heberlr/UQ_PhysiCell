@@ -7,9 +7,15 @@ from matplotlib.figure import Figure
 import pandas as pd
 import seaborn as sns
 
+from uq_physicell.bo.database import load_structure
+from uq_physicell.bo.plot import (
+    extract_best_parameters, get_observed_qoi, plot_parameter_space, plot_qoi_param, plot_parameter_vs_fitness
+)
+
 def create_tab3(main_window):
     # Add methods to the main_window instance
     main_window.load_obs_data = load_obs_data
+    main_window.load_bo_database = load_bo_database
     main_window.match_qois = match_qois
     main_window.run_calibration = run_calibration
     main_window.plot_calibration_results = plot_calibration_results
@@ -168,6 +174,38 @@ def load_obs_data(main_window):
         except Exception as e:
             main_window.output_text_tab3.append(f"Error loading observational data: {e}")
 
+def load_bo_database(main_window):
+    # Missing implementation for loading Bayesian Optimization database
+    print("Loading Bayesian Optimization database is not implemented yet.")
+    try:
+        # Load the database structure
+        main_window.output_text_tab3.append(f"Loading Bayesian Optimization database {main_window.bo_file_path} ...")
+        df_metadata, df_param_space, df_qois, df_gp_models, df_samples, df_output = load_structure(main_window.bo_file_path)
+
+        # Load the .ini file if it exists
+        main_window.load_ini_file(main_window, df_metadata['Ini_File_Path'].values[0], df_metadata['StructureName'].values[0])
+        print(df_metadata)
+        # Set the widgets accordingly
+        main_window.ini_file_name_input.setText(df_metadata['Ini_File_Path'].values[0])
+        main_window.ini_file_name_input.setEnabled(False)
+        main_window.obs_file_name_input.setText(df_metadata['ObsData_Path'].values[0])
+        main_window.obs_file_name_input.setEnabled(False)
+        main_window.calibration_file_input.setText(main_window.bo_file_path)  # Store the path of the
+        main_window.calibration_file_input.setEnabled(False)
+        # Activate plot results button
+        main_window.plot_calibration_button.setEnabled(True)
+
+        # Save the loaded data to the main_window
+        main_window.df_obs_data = get_observed_qoi(df_metadata['ObsData_Path'].values[0], df_qois)
+        main_window.df_metadata = df_metadata
+        main_window.df_param_space = df_param_space
+        main_window.df_qois = df_qois
+        main_window.df_gp_models = df_gp_models
+        main_window.df_samples = df_samples
+        main_window.df_output = df_output
+
+    except Exception as e:
+        main_window.output_text_tab3.append(f"Error loading Bayesian Optimization database: {e}")
 
 def match_qois(main_window):
     # Define QoIs and correlate them with observational data
@@ -234,5 +272,90 @@ def run_calibration(main_window):
 
 
 def plot_calibration_results(main_window):
-    # Placeholder for plotting calibration results
-    main_window.output_text_tab3.append("Plotting calibration results... (this is a placeholder)")
+    main_window.output_text_tab3.append("Plot Bayesian Optimization Results...")
+    # Create a dialog window for plotting QoIs
+    plot_bo_window = QDialog(main_window)
+    plot_bo_window.setWindowTitle("Bayesian Optimization Results")
+    plot_bo_window.setGeometry(100, 100, 800, 600)
+    # Create a layout for the dialog
+    layout = QVBoxLayout(plot_bo_window)
+    # Add plot mode combo box
+    plot_mode_hbox = QHBoxLayout()
+    plot_mode_label = QLabel("Select Plot Mode:")
+    plot_mode_combo = QComboBox()
+    plot_mode_combo.addItems(["Parameter Space", "Parameter vs Fitness", "QoI"])
+    plot_mode_hbox.addWidget(plot_mode_label)
+    plot_mode_hbox.addWidget(plot_mode_combo)
+    layout.addLayout(plot_mode_hbox)
+    # Add input for parameter to plot
+    plot_param_hbox = QHBoxLayout()
+    plot_param_label = QLabel("Select Parameter to plot:")
+    plot_param_combo = QComboBox()
+    plot_param_combo.addItems(main_window.df_param_space['ParamName'].tolist())
+    plot_param_hbox.addWidget(plot_param_label)
+    plot_param_hbox.addWidget(plot_param_combo)
+    layout.addLayout(plot_param_hbox)
+    # Add input for the QoI to plot
+    plot_qoi_hbox = QHBoxLayout()
+    plot_qoi_label = QLabel("Select QoI to plot:")
+    plot_qoi_combo = QComboBox()
+    plot_qoi_combo.addItems(list(main_window.df_qois['QoI_Name'].tolist()))
+    plot_qoi_hbox.addWidget(plot_qoi_label)
+    plot_qoi_hbox.addWidget(plot_qoi_combo)
+    layout.addLayout(plot_qoi_hbox)
+    
+    # Create a new figure and canvas for the plot
+    figure = Figure(figsize=(5, 3))
+    canvas = FigureCanvas(figure)
+    layout.addWidget(canvas)
+
+    def update_plot_bo():
+        # Clear the previous plot
+        figure.clear()
+        selected_mode = plot_mode_combo.currentText()
+        try:
+            ax = figure.add_subplot(111)
+            if selected_mode == "Parameter Space":
+                plot_param_combo.setEnabled(False)
+                plot_qoi_combo.setEnabled(False)
+                best_param, best_sample_id = extract_best_parameters(main_window.df_gp_models, main_window.df_samples)
+                print("Best Parameters:", best_param)
+                plot_parameter_space(main_window.df_samples, main_window.df_param_space, params={f"SampleID: {best_sample_id}": best_param}, axis=ax)
+            elif selected_mode == "Parameter vs Fitness":
+                plot_param_combo.setEnabled(True)
+                plot_qoi_combo.setEnabled(True)
+                selected_param = plot_param_combo.currentText()
+                selected_qoi = plot_qoi_combo.currentText()
+                plot_parameter_vs_fitness(main_window.df_samples, main_window.df_output, 
+                                            parameter_name=selected_param, qoi_name=selected_qoi, axis=ax)
+            elif selected_mode == "QoI":
+                plot_param_combo.setEnabled(False)
+                plot_qoi_combo.setEnabled(True)
+                selected_qoi = plot_qoi_combo.currentText()
+                best_param, best_sample_id = extract_best_parameters(main_window.df_gp_models, main_window.df_samples)
+                plot_qoi_param(main_window.df_obs_data, main_window.df_output, samples_id=[best_sample_id], x_var='time', y_var=selected_qoi, axis=ax)
+            # Set the layout to be constrained
+            figure.set_constrained_layout(True)
+            canvas.draw()
+        except Exception as e:
+            main_window.output_text_tab3.append(f"Error updating plot: {e}")
+            # Create a simple error plot
+            try:
+                ax = figure.add_subplot(111)
+                ax.text(0.5, 0.5, f'Error: {str(e)}', ha='center', va='center', transform=ax.transAxes)
+                canvas.draw()
+            except:
+                pass
+
+    # Connect the combo box to update the plot
+    plot_mode_combo.currentIndexChanged.connect(update_plot_bo)
+    plot_param_combo.currentIndexChanged.connect(update_plot_bo)
+    plot_qoi_combo.currentIndexChanged.connect(update_plot_bo)
+    # Set the default selected qoi and update the plot
+    plot_mode_combo.setCurrentIndex(0)
+    update_plot_bo()
+    # Show the dialog
+    plot_bo_window.exec_()
+
+
+    
