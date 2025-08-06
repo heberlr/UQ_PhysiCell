@@ -1,0 +1,6 @@
+# Documentation dependencies
+sphinx>=5.0
+sphinx-rtd-theme>=1.0
+myst-parser>=0.18
+sphinx-autobuild>=2021.3.14
+linkify-it-py>=2.0

@@ -1,10 +1,55 @@
-# Installation
-Install the package using pip:
-```
-pip install uq_physicell
+# UQ-PhysiCell
+
+Uncertainty quantification and Bayesian optimization framework for PhysiCell models.
+
+## Overview
+
+UQ-PhysiCell provides comprehensive tools for:
+- Multi-objective Bayesian optimization for model calibration
+- Parameter sensitivity analysis
+- Uncertainty quantification of PhysiCell models
+- Handling parameter non-identifiability issues
+
+## Documentation
+
+📖 **Full documentation is available in the [`doc/`](doc/) folder.**
+
+To build the documentation locally:
+
+```bash
+cd doc
+pip install -r requirements.txt
+make html
 ```
 
-# Examples
+Or install with optional documentation dependencies:
+
+```bash
+pip install "uq-physicell[docs]"
+cd doc
+make html
+```
+
+The documentation includes:
+- [Installation Guide](doc/installation.md)
+- [Model Analysis](doc/model_analysis.md)
+- [Bayesian Optimization Tutorial](doc/bayesian_optimization.md) 
+- [API Reference](doc/api_reference.md)
+- [Examples](doc/examples.md)
+
+## Installation
+
+Install the package using pip:
+```bash
+pip install uq-physicell
+```
+
+For development with documentation tools:
+```bash
+pip install "uq-physicell[docs,bo]"
+```
+
+## Quick Start
 Here are some examples to help you get started with the package:
 
 ## Example 1: Basic Usage
