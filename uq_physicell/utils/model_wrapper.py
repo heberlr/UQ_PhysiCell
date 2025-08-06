@@ -56,22 +56,38 @@ def summary_function(outputPath:str, summaryFile:str, dic_params:dict, SampleID:
     except Exception as e:
         raise RuntimeError(f"Error in summary function: {e}")
 
-def run_replicate(PhysiCellModel:PhysiCell_Model, sample_id:int, replicate_id:int, ParametersXML:dict, ParametersRules:dict, qoi_functions:dict, return_binary_output:bool=True, drop_columns:Union[list, None]=None) -> tuple:
-    """
-    Run a single replicate of the simulation and return the results.
-    Parameters:
-    - PhysiCellModel: The PhysiCell model instance.
-    - sample_id: The sample ID.
-    - replicate_id: The replicate ID.
-    - ParametersXML: The parameters for the XML.
-    - ParametersRules: The parameters for the rules.
-    - qoi_functions: The QoI functions (strings) or None.
-    - results_binary: If True, return results as binary (default is True).
-    - drop_columns: List of columns to drop from the DataFrame (optional).
-    Return:
-    - sampleID, replicateID, result_data
-        - if qoi_functions: result_data = QoIs of the simulation.
-        - if qoi_functions==None: result_data = list of mcds from pcdl.
+def run_replicate(PhysiCellModel: PhysiCell_Model, sample_id: int, replicate_id: int, 
+                 ParametersXML: dict, ParametersRules: dict, qoi_functions: dict, 
+                 return_binary_output: bool = True, drop_columns: Union[list, None] = None) -> tuple:
+    """Run a single replicate of the PhysiCell simulation.
+    
+    This function executes one simulation replicate with specified parameters and
+    returns either processed QoI results or raw simulation data.
+    
+    Args:
+        PhysiCellModel (PhysiCell_Model): The PhysiCell model instance to run.
+        sample_id (int): Unique identifier for the parameter sample.
+        replicate_id (int): Identifier for the simulation replicate.
+        ParametersXML (dict): Parameters to modify in the XML configuration.
+        ParametersRules (dict): Parameters for custom rules modifications.
+        qoi_functions (dict): Dictionary of QoI functions (keys as names, values as strings).
+                             If None, returns raw simulation data.
+        return_binary_output (bool, optional): Whether to return results as binary data. 
+                                             Defaults to True.
+        drop_columns (Union[list, None], optional): List of columns to drop from DataFrame. 
+                                                   Defaults to None.
+    
+    Returns:
+        tuple: A 3-tuple containing (sample_id, replicate_id, result_data) where:
+            - If qoi_functions provided: result_data contains calculated QoI values
+            - If qoi_functions is None: result_data contains list of MCDS objects
+    
+    Example:
+        >>> model = PhysiCell_Model('config.ini')
+        >>> qois = {'final_count': 'lambda df: len(df)'}
+        >>> sample_id, rep_id, data = run_replicate(
+        ...     model, 0, 1, {}, {}, qois, True
+        ... )
     """
     # Check if qoi_functions is not None
     if qoi_functions:
