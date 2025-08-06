@@ -81,7 +81,7 @@ from .database import (
     create_structure, insert_metadata, insert_param_space, insert_qois, 
     insert_gp_models, insert_samples, insert_output, load_structure
 )
-from .distances import SumSquaredDifferences, Manhattan, Chebyshev, test_volume
+from .distances import SumSquaredDifferences, Manhattan, Chebyshev
 from .utils import unnormalize_params, tensor_to_param_dict, normalize_params, param_dict_to_tensor
 
 # Valid enhancement strategies

@@ -8,10 +8,10 @@ from botorch.models.model_list_gp_regression import ModelListGP
 def create_structure(db_path:str):
     """
     Create the Bayesian Optimization (BO) database structure with six tables:
-    1. Metadata: Stores information about the calibration (method, number of start points, maximum number of iterations, observed data path, hyperparameters, .ini config path, and model structure name).
+    1. Metadata: Stores information about the calibration (method, observed data path, enhancement strategy parameters, .ini config path, and model structure name).
     2. ParameterSpace: Stores the parameter space information (ParamName, Type, Lower_Bound, Upper_Bound, Regulates).
     3. QoIs: Stores the quantities of interest (QoI_Name, QoI_Function, ObsData_Column, QoI_distanceFunction, QoI_distanceWeight).
-    4. GP_Models: Stores the Gaussian Process models (IterationID, GP_Model).
+    4. GP_Models: Stores the Gaussian Process models (IterationID, GP_Model, Hypervolume).
     5. Samples: Stores the samples (IterationID, SampleID, ParamName, ParamValue).
     6. Output: Stores the output of the simulations (SampleID, Objective_Function, Noise_Std, and Data).
     """
@@ -25,9 +25,10 @@ def create_structure(db_path:str):
             CREATE TABLE IF NOT EXISTS Metadata (
                 BO_Method TEXT PRIMARY KEY,
                 ObsData_Path TEXT,
-                HyperParam_l1 DOUBLE DEFAULT 0.0,
-                HyperParam_l2 DOUBLE DEFAULT 0.0,
-                Scale_Factor DOUBLE,
+                Enhancement_Strategy TEXT DEFAULT 'none',
+                Diversity_Weight DOUBLE DEFAULT 0.0,
+                Uncertainty_Weight DOUBLE DEFAULT 0.0,
+                Constraint_Strength DOUBLE DEFAULT 0.0,
                 Ini_File_Path TEXT,
                 StructureName TEXT
             )
@@ -92,13 +93,16 @@ def insert_metadata(db_path:str, metadata:dict):
         conn = sqlite3.connect(db_path, timeout=30.0)
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT OR REPLACE INTO Metadata (BO_Method, ObsData_Path, HyperParam_l1, HyperParam_l2, Scale_Factor, Ini_File_Path, StructureName)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO Metadata (BO_Method, ObsData_Path, Enhancement_Strategy, Diversity_Weight, Uncertainty_Weight, Constraint_Strength, Ini_File_Path, StructureName)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, (metadata['BO_Method'], 
               metadata['ObsData_Path'], 
-              metadata.get("HyperParam_l1", 0.0), metadata.get("HyperParam_l2", 0.0), 
-              metadata["Scale_Factor"],
-              metadata['Ini_File_Path'], metadata['StructureName']))
+              metadata.get("Enhancement_Strategy", "none"), 
+              metadata.get("Diversity_Weight", 0.0), 
+              metadata.get("Uncertainty_Weight", 0.0),
+              metadata.get("Constraint_Strength", 0.0),
+              metadata['Ini_File_Path'], 
+              metadata['StructureName']))
         conn.commit()
         conn.close()
     except sqlite3.Error as e:
@@ -227,19 +231,30 @@ def load_structure(db_file:str) -> tuple:
     - db_file: Path to the database file.
     Return:
     - df_metadata: DataFrame containing metadata.
-    - param_space: List of tuples containing parameter space information.
-    - qois: List of tuples containing QoIs.
-    - gp_models: List of tuples containing GP models.
-    - samples: List of tuples containing samples.
-    - output: List of tuples containing output data.
+    - param_space: DataFrame containing parameter space information.
+    - qois: DataFrame containing QoIs.
+    - gp_models: DataFrame containing GP models.
+    - samples: DataFrame containing samples.
+    - output: DataFrame containing output data.
     """
+    
     conn = sqlite3.connect(db_file)
     cursor = conn.cursor()
     
-    # Load Metadata
+    # Load Metadata with flexible column handling
+    cursor.execute("PRAGMA table_info(Metadata)")
+    metadata_columns_info = cursor.fetchall()
+    metadata_column_names = [col[1] for col in metadata_columns_info]
+    
     cursor.execute('SELECT * FROM Metadata')
     metadata = cursor.fetchall()
-    df_metadata = pd.DataFrame(metadata, columns=['BO_Method', 'ObsData_Path', 'HyperParam_l1', 'HyperParam_l2', 'Ini_File_Path', 'StructureName', 'Scale_Factor'])
+    
+    # Create DataFrame with available columns
+    if metadata:
+        df_metadata = pd.DataFrame(metadata, columns=metadata_column_names)
+    else:
+        # Create empty DataFrame with new schema
+        df_metadata = pd.DataFrame(columns=['BO_Method', 'ObsData_Path', 'Enhancement_Strategy', 'Diversity_Weight', 'Uncertainty_Weight', 'Constraint_Strength', 'Ini_File_Path', 'StructureName'])
     
     # Load Parameter Space
     cursor.execute('SELECT * FROM ParameterSpace')
