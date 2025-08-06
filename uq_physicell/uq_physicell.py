@@ -14,6 +14,14 @@ import time
 import copy
 
 class PhysiCell_Model:
+    """ A class to manage PhysiCell model configurations and executions.
+    This class handles the setup of PhysiCell models, including reading configuration files,
+    generating XML files, and running simulations with specified parameters.
+    Parameters:
+    - configFilePath: Path to the configuration file (INI format).
+    - keyModel: Key in the configuration file to identify the model.
+    - verbose: If True, prints detailed information during execution.
+    """
     def __init__(self, configFilePath: str, keyModel: str, verbose: bool = False) -> None:
         self.configFilePath = configFilePath
         self.keyModel = keyModel
