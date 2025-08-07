@@ -8,7 +8,6 @@ with enhanced strategies for handling parameter non-identifiability.
 from .optimize import (
     CalibrationContext,
     run_bayesian_optimization,
-    diagnose_identification_issues
 )
 
 from .database import (
@@ -31,7 +30,6 @@ from .distances import (
 __all__ = [
     'CalibrationContext',
     'run_bayesian_optimization',
-    'diagnose_identification_issues',
     'create_structure',
     'insert_metadata',
     'insert_param_space',
