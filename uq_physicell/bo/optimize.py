@@ -65,6 +65,7 @@ import numpy as np
 import pandas as pd
 import torch
 
+import torch
 from botorch import fit_gpytorch_mll
 from botorch.acquisition.multi_objective.logei import qLogNoisyExpectedHypervolumeImprovement
 from botorch.models.gp_regression import SingleTaskGP
@@ -73,6 +74,8 @@ from botorch.optim.optimize import optimize_acqf
 from botorch.sampling.normal import SobolQMCNormalSampler
 from botorch.utils.sampling import draw_sobol_samples
 from botorch.utils.multi_objective.hypervolume import Hypervolume
+from botorch.utils.multi_objective.pareto import is_non_dominated
+from botorch.acquisition.multi_objective.utils import prune_inferior_points_multi_objective
 from gpytorch.mlls.sum_marginal_log_likelihood import SumMarginalLogLikelihood
 
 from uq_physicell import PhysiCell_Model
@@ -548,9 +551,6 @@ class CalibrationContext:
                 obj_values.append(objectives[qoi])
                 std_values.append(noise_std[qoi])
             
-            # NOTE: No longer adding enhancement strategy objectives since enhanced strategies 
-            # are now handled directly in the acquisition function
-            
             obj_tensor = torch.tensor(obj_values, dtype=torch.float64)
             std_tensor = torch.tensor(std_values, dtype=torch.float64)
             
@@ -807,7 +807,9 @@ class CalibrationContext:
     
     def _analyze_pareto_front(self, fitness_values):
         """
-        Analyze the quality of the Pareto front.
+        Analyze the quality of the Pareto front using BoTorch's optimized implementations.
+        
+        OPTIMIZATION: Use cached data from acquisition function when available to avoid recomputation.
         
         Args:
             fitness_values (np.ndarray): Fitness values with shape (n_samples, n_objectives)
@@ -815,48 +817,52 @@ class CalibrationContext:
         Returns:
             dict: Dictionary containing Pareto front analysis
         """
+        
+        # Check if we have cached Pareto data from the acquisition function
+        if hasattr(self, '_cached_pareto_data') and self._cached_pareto_data is not None:
+            cached_data = self._cached_pareto_data
+            self.logger.debug("🚀 Using cached Pareto analysis from acquisition function")
+            
+            # Clear the cache after use and return cached result
+            self._cached_pareto_data = None
+            return {
+                "pareto_ratio": cached_data["pareto_ratio"],
+                "pareto_quality": cached_data["pareto_quality"], 
+                "pareto_spread": cached_data["pareto_spread"],
+                "n_pareto_points": cached_data["n_pareto_points"]
+            }
+        
+        # Fallback: Compute from fitness values
+        self.logger.debug("🔄 Computing Pareto analysis from fitness values")
+        
         n_samples, n_objectives = fitness_values.shape
+        fitness_tensor = torch.tensor(fitness_values, dtype=torch.float64)
         
-        # Find Pareto optimal points
-        pareto_mask = np.ones(n_samples, dtype=bool)
-        for i in range(n_samples):
-            if pareto_mask[i]:
-                # Check if any other point dominates this point
-                dominated = np.all(fitness_values[i] <= fitness_values, axis=1) & \
-                           np.any(fitness_values[i] < fitness_values, axis=1)
-                pareto_mask[dominated] = False
-        
-        pareto_points = fitness_values[pareto_mask]
+        # Find Pareto-optimal points
+        pareto_mask = is_non_dominated(fitness_tensor, maximize=True, deduplicate=True)
+        pareto_points = fitness_tensor[pareto_mask].numpy()
         n_pareto = len(pareto_points)
         
-        # Calculate quality metrics
+        # Calculate metrics
         pareto_ratio = n_pareto / n_samples
         
-        # Pareto front quality: Focus on the actual Pareto-optimal points
-        if n_pareto > 0:
-            # Option 1: Average fitness of Pareto points only
+        if n_pareto > 1:
+            # Quality: average fitness + distance to ideal point
             pareto_avg_fitness = np.mean(pareto_points)
-            
-            # Option 2: Distance from ideal point (1.0 for each objective)
-            ideal_point = np.ones(n_objectives)  # Perfect fitness = 1.0 for each objective
+            ideal_point = np.ones(n_objectives)
             distances_to_ideal = np.sqrt(np.sum((pareto_points - ideal_point)**2, axis=1))
             avg_distance_to_ideal = np.mean(distances_to_ideal)
-            max_possible_distance = np.sqrt(n_objectives)  # Distance from origin to ideal
+            max_possible_distance = np.sqrt(n_objectives)
             
-            # Combine both measures (higher is better)
             pareto_quality = 0.7 * pareto_avg_fitness + 0.3 * (1.0 - avg_distance_to_ideal / max_possible_distance)
-            pareto_quality = np.clip(pareto_quality, 0.0, 1.0)  # Ensure [0,1] range
-        else:
-            # No Pareto points found - use overall average as fallback
-            pareto_quality = np.mean(fitness_values)
-            logging.warning("Just ONE Pareto point found! This may indicate correlation between objectives or poor exploration.")
-
-        # Pareto front spread (diversity)
-        if n_pareto > 1:
+            pareto_quality = np.clip(pareto_quality, 0.0, 1.0)
             pareto_spread = np.std(pareto_points, axis=0).mean()
         else:
+            pareto_quality = np.mean(fitness_values)
             pareto_spread = 0.0
-        
+            if n_pareto <= 1:
+                self.logger.warning("Only one Pareto point found - may indicate poor exploration")
+
         return {
             "pareto_ratio": pareto_ratio,
             "pareto_quality": pareto_quality,
@@ -1041,7 +1047,15 @@ def run_bayesian_optimization(calib_context: CalibrationContext, additional_iter
             
             # 5. Compute hypervolume
             logger.info("📈 Computing hypervolume...")
-            current_hv = _compute_hypervolume(train_obj_true, calib_context.ref_point)
+            
+            # OPTIMIZATION: Try to use cached hypervolume from acquisition function
+            try:
+                cached_hv = calib_context._cached_pareto_data.get('hypervolume', None)
+                current_hv = cached_hv
+                logger.debug("🚀 Using cached hypervolume from acquisition function")
+            except Exception:
+                raise ValueError("Failed to compute hypervolume - check acquisition function or Pareto data")
+                
             hvs_list.append(current_hv)
             
             # Save GP model and hypervolume to database
@@ -1158,6 +1172,9 @@ def _optimize_acquisition_function(model: ModelListGP, train_x: torch.Tensor, tr
     # Apply acquisition function enhancement strategies
     enhanced_acq_func = _enhance_acquisition_function(acq_func, train_x, calib_context)
     
+    # Extract Pareto data from acquisition function to avoid recomputation
+    extracted_data = _extract_pareto_and_hypervolume_from_acqf(acq_func, calib_context)
+    
     # Optimize acquisition function
     candidates, acq_values = optimize_acqf(
         acq_function=enhanced_acq_func,
@@ -1168,8 +1185,11 @@ def _optimize_acquisition_function(model: ModelListGP, train_x: torch.Tensor, tr
         options={"batch_limit": 5, "maxiter": 200},
         sequential=True,  # Use sequential optimization for batch
     )
-    
-    calib_context.logger.debug(f"Acquisition optimization: best value = {acq_values.max():.6f}")
+
+    calib_context.logger.debug(f"Acquisition optimization with {extracted_data['n_pareto_points']} Pareto points: best value = {acq_values.max():.6f}")
+
+    # Store extracted data for use in convergence analysis
+    calib_context._cached_pareto_data = extracted_data
     
     return candidates
 
@@ -1266,61 +1286,83 @@ def _enhance_acquisition_function(base_acq_func, train_x: torch.Tensor, calib_co
     return EnhancedAcquisition(base_acq_func, strategy, train_x, calib_context.bo_options)
 
 
-def _compute_hypervolume(train_obj_true: torch.Tensor, ref_point: torch.Tensor) -> float:
+def _extract_pareto_and_hypervolume_from_acqf(acq_func, calib_context: CalibrationContext) -> dict:
     """
-    Compute hypervolume for multi-objective optimization.
+    Extract Pareto front points and hypervolume from BoTorch acquisition function.
+    
+    This avoids recomputing the same values that BoTorch already calculated internally.
     
     Args:
-        train_obj_true (torch.Tensor): True objective values
-        ref_point (torch.Tensor): Reference point for hypervolume computation
+        acq_func: BoTorch acquisition function (qLogNoisyExpectedHypervolumeImprovement)
+        calib_context: Calibration context for logging
         
     Returns:
-        float: Hypervolume value
+        dict: Contains pareto_points, hypervolume, and related metrics, or None if extraction fails
     """
     try:
-        from botorch.utils.multi_objective.hypervolume import Hypervolume
+        # Extract Pareto points from the acquisition function's partitioning
+        if not (hasattr(acq_func, 'partitioning') and acq_func.partitioning is not None and 
+                hasattr(acq_func.partitioning, 'pareto_Y')):
+            return None
+            
+        # Get Pareto points tensor
+        pareto_y = acq_func.partitioning.pareto_Y
+        if isinstance(pareto_y, list):
+            pareto_points_tensor = pareto_y[0]  # Take first sample for analysis
+        else:
+            pareto_points_tensor = pareto_y
+            
+        # Handle extra dimensions
+        if len(pareto_points_tensor.shape) > 2:
+            pareto_points_tensor = pareto_points_tensor[0]
+            
+        pareto_points = pareto_points_tensor.detach().cpu().numpy()
+        n_pareto = len(pareto_points)
         
-        # Ensure we have the right shapes and types
-        objectives = train_obj_true.detach().clone().to(torch.float64)
-        ref_pt = ref_point.detach().clone().to(torch.float64)
+        # Validate shape
+        if len(pareto_points.shape) != 2:
+            return None
+            
+        # Extract hypervolume
+        mean_hypervolume = None
+        try:
+            if hasattr(acq_func, '_hypervolumes'):
+                hypervolumes_tensor = acq_func._hypervolumes
+                if hypervolumes_tensor.numel() > 1:
+                    mean_hypervolume = float(hypervolumes_tensor.mean().detach().cpu())
+                else:
+                    mean_hypervolume = float(hypervolumes_tensor.detach().cpu())
+        except Exception:
+            raise ValueError("Failed to extract hypervolume from acquisition function.")
+    
+            
+        # Calculate Pareto quality metrics
+        n_objectives = pareto_points.shape[1]
         
-        # Create hypervolume calculator
-        hv = Hypervolume(ref_point=ref_pt)
+        if n_pareto > 1:
+            # Average fitness and distance to ideal point
+            pareto_avg_fitness = np.mean(pareto_points)
+            ideal_point = np.ones(n_objectives)
+            distances_to_ideal = np.sqrt(np.sum((pareto_points - ideal_point)**2, axis=1))
+            avg_distance_to_ideal = np.mean(distances_to_ideal)
+            max_possible_distance = np.sqrt(n_objectives)
+            
+            # Combined quality measure (higher is better)
+            pareto_quality = 0.7 * pareto_avg_fitness + 0.3 * (1.0 - avg_distance_to_ideal / max_possible_distance)
+            pareto_quality = np.clip(pareto_quality, 0.0, 1.0)
+            pareto_spread = np.std(pareto_points, axis=0).mean()
+        else:
+            pareto_quality = np.mean(pareto_points) if n_pareto == 1 else 0.0
+            pareto_spread = 0.0
         
-        # Compute hypervolume (only for non-dominated points)
-        hypervolume = hv.compute(objectives)
-        
-        return float(hypervolume)
+        return {
+            "n_pareto_points": n_pareto,
+            "pareto_ratio": n_pareto / max(n_pareto, 1),  # Safe division
+            "pareto_quality": pareto_quality,
+            "pareto_spread": pareto_spread,
+            "hypervolume": mean_hypervolume,
+        }
         
     except Exception as e:
-        # Fallback: simple volume calculation
-        # This is a simplified approximation
-        volume = torch.prod(torch.max(train_obj_true, dim=0)[0] - ref_point)
-        return float(volume)
-
-
-def diagnose_identification_issues(calib_context: CalibrationContext) -> dict:
-    """
-    Diagnose parameter identification issues in the optimization.
-    
-    Args:
-        calib_context (CalibrationContext): The calibration context
-        
-    Returns:
-        dict: Diagnostic results and recommendations
-    """
-    logger = calib_context.logger
-    
-    # TODO: Implement identification diagnostics
-    # This would include:
-    # 1. Parameter correlation analysis
-    # 2. Sensitivity analysis
-    # 3. Identifiability metrics
-    # 4. Recommendations for improvement
-    
-    logger.warning("⚠️  Identification diagnostics not implemented yet")
-    
-    return {
-        "status": "not_implemented",
-        "message": "Identification diagnostics are not yet implemented"
-    }
+        calib_context.logger.debug(f"⚠️ Failed to extract from acquisition function: {e}")
+        return None
