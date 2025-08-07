@@ -55,6 +55,105 @@ def extract_best_parameters_db(db_file:str) -> tuple:
     
     return extract_best_parameters(df_gp_models, df_samples)
 
+def extract_all_pareto_points(df_qois: pd.DataFrame, df_samples: pd.DataFrame, df_output: pd.DataFrame) -> dict:
+    """
+    Extract all Pareto points from the optimization database.
+    
+    Args:
+        db_path (str): Path to the database file
+        
+    Returns:
+        dict: Contains all Pareto points and their corresponding sample IDs and parameters
+    """
+    import torch
+    import numpy as np
+    from botorch.utils.multi_objective.pareto import is_non_dominated
+    
+    # Extract all fitness values (objectives) to compute Pareto points
+    all_fitness_values = []
+    sample_ids = []
+    parameter_values = []
+    
+    if not df_output.empty:
+        for _, row in df_output.iterrows():
+            sample_id = row['SampleID']
+            objectives = row['ObjFunc']  # This is a pickled dictionary
+            
+            # Convert objectives dict to list (maintain order)
+            qoi_names = df_qois['QoI_Name'].tolist()
+            fitness_vals = [objectives[qoi] for qoi in qoi_names]
+            
+            all_fitness_values.append(fitness_vals)
+            sample_ids.append(sample_id)
+            
+            # Get corresponding parameters
+            sample_params = df_samples[df_samples['SampleID'] == sample_id]
+            param_dict = {}
+            for _, param_row in sample_params.iterrows():
+                param_dict[param_row['ParamName']] = param_row['ParamValue']
+            parameter_values.append(param_dict)
+    
+    # Convert to numpy array for Pareto analysis
+    if all_fitness_values:
+        fitness_array = np.array(all_fitness_values)
+        
+        # Use BoTorch to find Pareto points
+        fitness_tensor = torch.tensor(fitness_array, dtype=torch.float64)
+        pareto_mask = is_non_dominated(fitness_tensor, maximize=True, deduplicate=True)
+        
+        # Extract Pareto optimal data
+        pareto_indices = torch.where(pareto_mask)[0].numpy()
+        pareto_fitness_values = fitness_array[pareto_indices]
+        pareto_sample_ids = [sample_ids[i] for i in pareto_indices]
+        pareto_parameters = [parameter_values[i] for i in pareto_indices]
+        
+    else:
+        pareto_fitness_values = np.array([])
+        pareto_sample_ids = []
+        pareto_parameters = []
+    
+    return {
+        "pareto_front": {
+            "fitness_values": pareto_fitness_values,
+            "sample_ids": pareto_sample_ids,
+            "parameters": pareto_parameters,
+            "n_points": len(pareto_sample_ids)}
+        }
+
+def analyze_pareto_results(df_qois, df_samples, df_output):
+    """
+    Comprehensive analysis of Pareto results from the optimization.
+    """
+    print("=" * 60)
+    print("🔍 COMPREHENSIVE PARETO ANALYSIS")
+    print("=" * 60)
+    
+    # Extract all Pareto points
+    print("\n📊 Extracting all Pareto points ...")
+    all_data = extract_all_pareto_points(df_qois, df_samples, df_output)
+    
+    print(f"🎯 Current Pareto front size: {all_data['pareto_front']['n_points']}")
+    
+    # Display current Pareto front
+    print("\n🎯 CURRENT PARETO FRONT:")
+    if all_data['pareto_front']['n_points'] > 0:
+        print(f"   Number of Pareto optimal points: {all_data['pareto_front']['n_points']}")
+        print("   Sample IDs:", all_data['pareto_front']['sample_ids'])
+        
+        print("\n   📋 Pareto Front Details:")
+        for i, (sample_id, fitness, params) in enumerate(zip(
+            all_data['pareto_front']['sample_ids'],
+            all_data['pareto_front']['fitness_values'],
+            all_data['pareto_front']['parameters']
+        )):
+            print(f"   Point {i+1} (Sample {sample_id}):")
+            print(f"      Fitness: {dict(zip(df_qois['QoI_Name'], fitness))}")
+            print(f"      Parameters: {params}")
+    else:
+        print("   ⚠️ No Pareto points found!")
+    
+    return all_data
+
 def plot_parameter_space(df_samples:pd.DataFrame, df_param_space:pd.DataFrame, params:dict=None, real_value:dict=None, axis=None):
     """    Plot the parameter space from the samples DataFrame.
     Parameters:
@@ -141,7 +240,7 @@ def plot_parameter_space_db(db_file:str, params:dict=None, real_value:dict=None,
     df_metadata, df_param_space, df_qois, df_gp_models, df_samples, df_output  = load_structure(db_file)
     return plot_parameter_space(df_samples, df_param_space, params, real_value, axis)
 
-def plot_parameter_vs_fitness(df_samples:pd.DataFrame, df_output:pd.DataFrame, parameter_name:str, qoi_name:str, axis=None):
+def plot_parameter_vs_fitness(df_samples:pd.DataFrame, df_output:pd.DataFrame, parameter_name:str, qoi_name:str, samples_id=None, axis=None):
     """
     Plot the parameter values against the fitness values.
     Parameters:
@@ -170,7 +269,10 @@ def plot_parameter_vs_fitness(df_samples:pd.DataFrame, df_output:pd.DataFrame, p
     else:
         ax = axis
 
-    ax.plot(df_sorted_params['ParamValue'], df_sorted_fitness['ObjFunc'], marker='o')
+    ax.plot(df_sorted_params['ParamValue'], df_sorted_fitness['ObjFunc'], marker='o', zorder=1)
+    if samples_id:
+        ax.scatter(df_sorted_params.loc[df_sorted_params['SampleID'].isin(samples_id)]['ParamValue'], 
+                   df_sorted_fitness.loc[df_sorted_fitness['SampleID'].isin(samples_id), 'ObjFunc'], c='red', label='Selected Samples', marker='x', zorder=2)
     ax.set_xlabel(parameter_name)
     ax.set_ylabel(f"Fitness({qoi_name})")
 
@@ -237,7 +339,7 @@ def plot_qoi_param(df_ObsData:pd.DataFrame, df_output:pd.DataFrame, samples_id:l
         ax = axis
 
     # Plot observed data if available
-    sns.lineplot(df_ObsData, x=x_var, y=y_var, color='red', label='Observed QoI', ax=ax)
+    sns.lineplot(df_ObsData, x=x_var, y=y_var, color='red', label='Observed QoI', linewidth=3, ax=ax)
 
     all_df_data = pd.DataFrame()
     # Plot each QoI against the model results associated with the dic_param
@@ -254,7 +356,7 @@ def plot_qoi_param(df_ObsData:pd.DataFrame, df_output:pd.DataFrame, samples_id:l
     # Add formatted SampleID for better legend display
     all_df_data['SampleID_formatted'] = all_df_data['SampleID'].apply(lambda x: f'SampleID: {x}')
     sns.lineplot(data=all_df_data, x=x_var, y=y_var, ax=ax,
-        hue='SampleID_formatted', units='replicateID', estimator=None)
+        hue='SampleID_formatted', units='replicateID', dashes=(4,2), estimator=None)
 
     ax.set_xlabel(x_var)
     ax.set_ylabel(y_var)
