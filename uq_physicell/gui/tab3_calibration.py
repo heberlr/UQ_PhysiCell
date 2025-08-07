@@ -9,7 +9,7 @@ import seaborn as sns
 
 from uq_physicell.bo.database import load_structure
 from uq_physicell.bo.plot import (
-    extract_best_parameters, get_observed_qoi, plot_parameter_space, plot_qoi_param, plot_parameter_vs_fitness
+    analyze_pareto_results, get_observed_qoi, plot_parameter_space, plot_qoi_param, plot_parameter_vs_fitness
 )
 
 def create_tab3(main_window):
@@ -313,27 +313,29 @@ def plot_calibration_results(main_window):
         # Clear the previous plot
         figure.clear()
         selected_mode = plot_mode_combo.currentText()
+        # Comprehensive Pareto analysis
+        pareto_data = analyze_pareto_results(main_window.df_qois, main_window.df_samples, main_window.df_output)
         try:
             ax = figure.add_subplot(111)
             if selected_mode == "Parameter Space":
                 plot_param_combo.setEnabled(False)
                 plot_qoi_combo.setEnabled(False)
-                best_param, best_sample_id = extract_best_parameters(main_window.df_gp_models, main_window.df_samples)
-                print("Best Parameters:", best_param)
-                plot_parameter_space(main_window.df_samples, main_window.df_param_space, params={f"SampleID: {best_sample_id}": best_param}, axis=ax)
+                pareto_points = {f"Pareto Point {i}": param for i, param in enumerate(pareto_data['pareto_front']['parameters'])}
+                plot_parameter_space(main_window.df_samples, main_window.df_param_space, params=pareto_points, axis=ax)
             elif selected_mode == "Parameter vs Fitness":
                 plot_param_combo.setEnabled(True)
                 plot_qoi_combo.setEnabled(True)
                 selected_param = plot_param_combo.currentText()
                 selected_qoi = plot_qoi_combo.currentText()
                 plot_parameter_vs_fitness(main_window.df_samples, main_window.df_output, 
-                                            parameter_name=selected_param, qoi_name=selected_qoi, axis=ax)
+                                            parameter_name=selected_param, qoi_name=selected_qoi, 
+                                            samples_id=pareto_data['pareto_front']['sample_ids'], axis=ax)
             elif selected_mode == "QoI":
                 plot_param_combo.setEnabled(False)
                 plot_qoi_combo.setEnabled(True)
                 selected_qoi = plot_qoi_combo.currentText()
-                best_param, best_sample_id = extract_best_parameters(main_window.df_gp_models, main_window.df_samples)
-                plot_qoi_param(main_window.df_obs_data, main_window.df_output, samples_id=[best_sample_id], x_var='time', y_var=selected_qoi, axis=ax)
+                plot_qoi_param(main_window.df_obs_data, main_window.df_output, 
+                               samples_id=pareto_data['pareto_front']['sample_ids'], x_var='time', y_var=selected_qoi, axis=ax)
             # Set the layout to be constrained
             figure.set_constrained_layout(True)
             canvas.draw()
