@@ -169,7 +169,7 @@ class CalibrationContext:
                         self.dic_obsData[qoi] = np.array(self.dic_obsData.pop(column_name), dtype=np.float64)
                     else:
                         raise ValueError(f"Column '{column_name}' not found in observed data.")
-                self.logger.info(f"Successfully loaded observed data from {obsData}")
+                self.logger.debug(f"Successfully loaded observed data from {obsData}")
             except Exception as e:
                 self.logger.error(f"Error reading observed data from {obsData}: {e}")
                 sys.exit(1)
@@ -233,7 +233,7 @@ class CalibrationContext:
             "QoI_distanceWeight": [self.distance_functions[key]['weight'] for key in self.distance_functions.keys()],
         }
 
-        self.logger.info(f"CalibrationContext initialized with {self.max_workers} max workers, {self.workers_inner} inner workers, and {self.workers_out} outer workers.")
+        self.logger.info(f"🔧 CalibrationContext initialized with {self.max_workers} max workers, {self.workers_inner} inner workers, and {self.workers_out} outer workers.")
 
     def _validate_acquisition_strategy(self) -> None:
         """
@@ -252,11 +252,11 @@ class CalibrationContext:
         
         # Log the strategy being used
         if acq_func_strategy != "none":
-            self.logger.info(f"✅ Using enhanced identification strategy: {acq_func_strategy}")
+            self.logger.debug(f"✅ Using enhanced identification strategy: {acq_func_strategy}")
             if acq_func_strategy == "combined":
-                self.logger.info("   - Combining diversity bonus + uncertainty weighting for balanced exploration")
+                self.logger.debug("   - Combining diversity bonus + uncertainty weighting for balanced exploration")
         else:
-            self.logger.info("ℹ️  Using pure BoTorch acquisition (no enhancement strategy)")
+            self.logger.debug("ℹ️  Using pure BoTorch acquisition (no enhancement strategy)")
 
     def default_run_single_replicate(self, sample_id: int, replicate_id: int, params: dict) -> dict:
         """
@@ -324,7 +324,8 @@ class CalibrationContext:
                     fitness = 1.0 / (1.0 + distance)
                     # Standard clamping for inverse transformation
                     min_fitness = 1e-3
-                    fitness = max(fitness, min_fitness)
+                    max_fitness = 1.0   # Cap maximum to prevent extreme values
+                    fitness = np.clip(fitness, min_fitness, max_fitness)
                 
                 # Check for problematic values
                 if fitness < min_fitness or np.isnan(fitness):
@@ -334,7 +335,7 @@ class CalibrationContext:
                 replicate_objectives[qoi] = fitness
                 # Debug: log distance and fitness values
                 if sample_id < 3:  # Only for first few samples to avoid log spam
-                    self.logger.info(f"\t sampleID: {sample_id} replicateID: {replicate_id} - QoI '{qoi}': distance={distance:.3f}, fitness={fitness:.6f}")
+                    self.logger.debug(f"\t sampleID: {sample_id} replicateID: {replicate_id} - QoI '{qoi}': distance={distance:.3f}, fitness={fitness:.6f}")
             objectives_per_replicate.append(replicate_objectives)
 
         # Compute mean and std of objectives across replicates
@@ -358,7 +359,7 @@ class CalibrationContext:
                    obj_noise (dict) containing the standard deviation of objectives across replicates,
                    dic_results (dict) containing the results from all replicates.
         """
-        self.logger.info(f"Evaluating sample {sample_index} with params: {params}")
+        self.logger.debug(f"Sample {sample_index} with params: {params}")
         # Check if using default run_single_replicate function
         if not self.custom_run_single_replicate_func:
             with concurrent.futures.ProcessPoolExecutor(max_workers=self.workers_inner) as executor:
@@ -405,7 +406,7 @@ class CalibrationContext:
             binary_noise_std = pickle.dumps(noise_std)  # Convert dict to binary format
             binary_df = pickle.dumps(dic_results)  # Convert dict to binary format
             insert_output(self.db_path, sample_index, binary_objectives, binary_noise_std, binary_df)
-            self.logger.info(f"Successfully saved results for sample {sample_index} to database.")
+            self.logger.debug(f"Successfully saved results for sample {sample_index} to database.")
         except Exception as e:
             self.logger.error(f"Error saving results for sample {sample_index} to database: {e}")
             raise
@@ -429,7 +430,7 @@ class CalibrationContext:
         bounds = torch.stack([torch.zeros(num_params), torch.ones(num_params)]) # 0 to 1 bounds for each parameter
         
         sample_ids = np.arange(start_sample_id, start_sample_id + num_samples, dtype=int)
-        self.logger.info(f"Generating {num_samples} samples with IDs {start_sample_id} to {start_sample_id + num_samples - 1}")
+        self.logger.debug(f"Generating {num_samples} samples with IDs {start_sample_id} to {start_sample_id + num_samples - 1}")
         train_x = draw_sobol_samples(bounds, n=num_samples, q=1).squeeze(1).to(torch.float64)  # Convert to float64 and squeeze q dimension
         train_x_dic_params = []
         for i in range(num_samples):
@@ -439,7 +440,7 @@ class CalibrationContext:
             insert_samples(self.db_path, iteration_id, {sample_ids[i]: dic_params_i})
             train_x_dic_params.append(dic_params_i)
 
-        self.logger.info(f"Evaluating {num_samples} samples with model...")
+        self.logger.debug(f"Evaluating {num_samples} samples with model...")
         with concurrent.futures.ProcessPoolExecutor(max_workers=self.workers_out) as outer_executor:
             list_output_tuples = list(outer_executor.map(self.evaluate_params, train_x_dic_params, sample_ids))
 
@@ -469,7 +470,7 @@ class CalibrationContext:
         Returns:
             tuple: A tuple containing training data tensors, latest iteration, and hypervolume.
         """
-        self.logger.info("Loading existing data from database...")
+        self.logger.debug("Loading existing data from database...")
         
         # Load all data from the database
         df_metadata, df_param_space, df_qois, df_gp_models, df_samples, df_output = load_structure(self.db_path)
@@ -487,10 +488,9 @@ class CalibrationContext:
         else:
             latest_iteration = -1
             latest_hypervolume = 0.0
-            
-        self.logger.info(f"Loaded {len(train_x)} samples from {latest_iteration + 1} iterations")
-        self.logger.info(f"Latest hypervolume: {latest_hypervolume}")
-        
+        self.logger.debug(f"Loaded {len(train_x)} samples from {latest_iteration + 1} iterations")
+        self.logger.debug(f"Latest hypervolume: {latest_hypervolume}")
+
         # Return without the model - we'll recreate it from the training data
         return train_x, train_obj, train_obj_true, train_obj_std, latest_iteration, latest_hypervolume
 
@@ -510,7 +510,7 @@ class CalibrationContext:
         if loaded_qois != current_qois:
             raise ValueError(f"QoI mismatch. Loaded: {loaded_qois}, Current: {current_qois}")
             
-        self.logger.info("Loaded data validation passed")
+        self.logger.debug("Loaded data validation passed")
 
     def _reconstruct_training_data(self, df_samples, df_output) -> tuple:
         """
@@ -576,7 +576,7 @@ class CalibrationContext:
         """
         original_iterations = self.batch_size_bo
         self.batch_size_bo += additional_iterations
-        self.logger.info(f"Updated max iterations from {original_iterations} to {self.batch_size_bo} (added {additional_iterations} iterations)")
+        self.logger.debug(f"Updated max iterations from {original_iterations} to {self.batch_size_bo} (added {additional_iterations} iterations)")
 
     def load_existing_data(self) -> tuple:
         """
@@ -584,7 +584,7 @@ class CalibrationContext:
         Returns:
             tuple: A tuple containing training data tensors, latest iteration, and hypervolume.
         """
-        self.logger.info("Loading existing data from database...")
+        self.logger.debug("Loading existing data from database...")
         
         # Load all data from the database
         df_metadata, df_param_space, df_qois, df_gp_models, df_samples, df_output = load_structure(self.db_path)
@@ -603,8 +603,8 @@ class CalibrationContext:
             latest_iteration = -1
             latest_hypervolume = 0.0
             
-        self.logger.info(f"Loaded {len(train_x)} samples from {latest_iteration + 1} iterations")
-        self.logger.info(f"Latest hypervolume: {latest_hypervolume}")
+        self.logger.debug(f"Loaded {len(train_x)} samples from {latest_iteration + 1} iterations")
+        self.logger.debug(f"Latest hypervolume: {latest_hypervolume}")
         
         # Return without the model - we'll recreate it from the training data
         return train_x, train_obj, train_obj_true, train_obj_std, latest_iteration, latest_hypervolume
@@ -625,7 +625,7 @@ class CalibrationContext:
         if loaded_qois != current_qois:
             raise ValueError(f"QoI mismatch. Loaded: {loaded_qois}, Current: {current_qois}")
             
-        self.logger.info("Loaded data validation passed")
+        self.logger.debug("Loaded data validation passed")
 
     def analyze_convergence(self, hvs_list: list, train_obj_true: torch.Tensor, train_x: torch.Tensor, iteration: int) -> dict:
         """
@@ -1060,33 +1060,32 @@ def run_bayesian_optimization(calib_context: CalibrationContext, additional_iter
             
             # Save GP model and hypervolume to database
             insert_gp_models(calib_context.db_path, iteration, model, current_hv)
-            
-            logger.info(f"📊 Iteration {iteration}: Hypervolume = {current_hv:.6f}")
-            
+
+            logger.info(f"📊 Iteration {iteration} Sample(s) {next_sample_ids} : Hypervolume = {current_hv:.6f}")
+
             # 6. Check convergence
             if len(hvs_list) >= 10:  # Need sufficient history for convergence analysis
                 logger.info("🔍 Analyzing convergence...")
                 convergence_result = calib_context.analyze_convergence(hvs_list, train_obj_true, train_x, iteration)
                 
-                logger.info(f"📋 Convergence Status: {convergence_result['status']}")
-                logger.info(f"💡 Reason: {convergence_result['reason']}")
-                logger.info(f"🎯 Confidence: {convergence_result['convergence_confidence']:.2%}")
+                logger.info(f"\t📋 Convergence Status: {convergence_result['status']}")
+                logger.info(f"\t💡 Reason: {convergence_result['reason']}")
+                logger.info(f"\t🎯 Confidence: {convergence_result['convergence_confidence']:.2%}")
                 
                 if convergence_result["suggestion"]:
-                    logger.info(f"💡 Suggestion: {convergence_result['suggestion']}")
+                    logger.info(f"\t💡 Suggestion: {convergence_result['suggestion']}")
                 
                 # Check if we should stop early
                 if convergence_result["converged"] and convergence_result["convergence_confidence"] > 0.8:
-                    logger.info("🎉 Convergence detected with high confidence - stopping optimization")
+                    logger.info("\t🎉 Convergence detected with high confidence - stopping optimization")
                     break
                 elif convergence_result["needs_restart"]:
-                    logger.warning("⚠️  Suboptimal stagnation detected - consider restarting with different settings")
+                    logger.warning("\t⚠️  Suboptimal stagnation detected - consider restarting with different settings")
             
             # Progress update
-            logger.info(f"✅ Completed iteration {iteration}/{calib_context.batch_size_bo}")
-            logger.info(f"📊 Total samples evaluated: {len(train_x)}")
-            logger.info(f"🎯 Best fitness values: {torch.max(train_obj_true, dim=0)[0].tolist()}")
-            
+            logger.info(f"✅ Completed iteration {iteration}/{calib_context.batch_size_bo} - Total samples: {len(train_x)}")
+            logger.info(f"🎯 Best fitness values: {[f'{qoi}: {fitness:.6f}' for qoi, fitness in zip(calib_context.qoi_names, torch.max(train_obj_true, dim=0)[0].tolist())]}")
+
         logger.info("✅ Bayesian optimization completed successfully!")
         
     except Exception as e:
