@@ -269,7 +269,7 @@ def plot_parameter_vs_fitness(df_samples:pd.DataFrame, df_output:pd.DataFrame, p
     else:
         ax = axis
 
-    ax.plot(df_sorted_params['ParamValue'], df_sorted_fitness['ObjFunc'], marker='o', zorder=1)
+    ax.scatter(df_sorted_params['ParamValue'], df_sorted_fitness['ObjFunc'], marker='o', c='gray', zorder=1)
     if samples_id:
         ax.scatter(df_sorted_params.loc[df_sorted_params['SampleID'].isin(samples_id)]['ParamValue'], 
                    df_sorted_fitness.loc[df_sorted_fitness['SampleID'].isin(samples_id), 'ObjFunc'], c='red', label='Selected Samples', marker='x', zorder=2)
