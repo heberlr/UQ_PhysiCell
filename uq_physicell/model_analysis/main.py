@@ -1,6 +1,7 @@
 import numpy as np
 import os
 import pickle
+import traceback
 
 from uq_physicell import PhysiCell_Model
 from uq_physicell.model_analysis.samplers import run_local_sampler
@@ -169,7 +170,9 @@ def run_simulations(context: ModelAnalysisContext):
                 insert_param_space(context.db_path, context.params_dict)
                 insert_qois(context.db_path, context.qois_dict)
             except Exception as e:
-                raise ValueError(f"Error inserting metadata into the database: {e}")
+                # Print traceback for debugging
+                traceback.print_exc()
+                raise ValueError(f"Error inserting data into the database: {e}")
             # Populate Samples table
             print(f"Inserting samples into the database")
             insert_samples(context.db_path, context.dic_samples)
@@ -215,7 +218,7 @@ def run_simulations(context: ModelAnalysisContext):
                     futures.append(executor.submit(
                         run_replicate_serializable, context.dic_metadata['IniFilePath'], context.dic_metadata['StrucName'],
                         All_Samples[ind_sim], All_Replicates[ind_sim],
-                        ParametersXML, ParametersRules, custom_summary_function=context.summary_function,
+                        ParametersXML, ParametersRules, custom_summary_function=context.summary_function
                     ))
                 else:
                     futures.append(executor.submit(
@@ -229,7 +232,7 @@ def run_simulations(context: ModelAnalysisContext):
                 sample_id, replicate_id, result_data = future.result()
                 print(f"Writing to the database for Sample: {sample_id}, Replicate: {replicate_id}")
                 try:
-                    insert_output(context.db_path, sample_id, replicate_id, pickle.dumps(result_data))
+                    insert_output(context.db_path, sample_id, replicate_id, result_data)
                 except Exception as e:
                     print(f"Error writing to the database: {e}")
     
@@ -259,7 +262,7 @@ def run_simulations(context: ModelAnalysisContext):
                 comm.recv(source=rank - 1, tag=0)
             print(f"Rank {rank} writing to the database for Sample: {All_Samples[ind_sim]}, Replicate: {All_Replicates[ind_sim]}")
             try:
-                insert_output(context.db_path, All_Samples[ind_sim], All_Replicates[ind_sim],  pickle.dumps(result_data))
+                insert_output(context.db_path, All_Samples[ind_sim], All_Replicates[ind_sim], result_data)
                 print(f"Rank {rank} finished writing to the database for Sample: {All_Samples[ind_sim]}, Replicate: {All_Replicates[ind_sim]}")
             except Exception as e:
                 print(f"Rank {rank}: Error writing to the database: {e}")
@@ -281,8 +284,9 @@ def run_simulations(context: ModelAnalysisContext):
             ParametersXML = {key: All_Parameters[ind_sim][key] for key in params_xml} if params_xml else np.array([])
             ParametersRules = {key: All_Parameters[ind_sim][key] for key in params_rules} if params_rules else np.array([])
             if context.summary_function:
-                result_data = PhysiCellModel.RunModel(
+                result_data_nonserialized = PhysiCellModel.RunModel(
                     All_Samples[ind_sim], All_Replicates[ind_sim], ParametersXML, ParametersRules, RemoveConfigFile=True, SummaryFunction=context.summary_function)
+                result_data = pickle.dumps(result_data_nonserialized)
             else:
                 _, _, result_data = run_replicate(PhysiCellModel, All_Samples[ind_sim], All_Replicates[ind_sim], ParametersXML,
                                         ParametersRules, context.qois_dict if context.qois_dict else None)
