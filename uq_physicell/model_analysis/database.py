@@ -6,6 +6,59 @@ import pickle
 
 from uq_physicell.model_analysis.main import PhysiCell_Model
 
+def safe_pickle_loads(data):
+    """Safely deserialize pickled data from SQLite BLOB storage.
+    
+    This function handles different data types that might be returned from SQLite
+    when retrieving BLOB data, including bytes, buffer objects, and memoryview.
+    
+    Args:
+        data: The data to deserialize, which can be bytes, buffer, memoryview, or already deserialized.
+    
+    Returns:
+        The deserialized Python object, or raises an error if deserialization fails.
+    
+    Raises:
+        RuntimeError: If data remains in binary format after deserialization attempts.
+    
+    Example:
+        >>> import pickle
+        >>> original_data = {'key': 'value'}
+        >>> serialized = pickle.dumps(original_data)
+        >>> result = safe_pickle_loads(serialized)
+        >>> print(result)  # {'key': 'value'}
+    """
+    # If data is None or empty, return as-is
+    if data is None or data == b'':
+        return data
+    
+    try:
+        # Handle different SQLite BLOB return types
+        if isinstance(data, bytes):
+            result = pickle.loads(data)
+        elif isinstance(data, memoryview):
+            result = pickle.loads(bytes(data))
+        elif hasattr(data, 'tobytes'):
+            result = pickle.loads(data.tobytes())
+        elif hasattr(data, '__bytes__'):
+            result = pickle.loads(bytes(data))
+        # Handle SQLite3.Row or other database-specific types
+        elif hasattr(data, 'keys') and hasattr(data, '__getitem__'):
+            return data
+        else:
+            result = data
+        
+        # Check if result is still binary data
+        if isinstance(result, bytes) and len(result) > 0:
+            raise RuntimeError(f"Data remains in binary format after deserialization: {str(result)[:50]}...")
+        
+        return result
+            
+    except Exception as e:
+        if "remains in binary format" in str(e):
+            raise  # Re-raise our custom error
+        raise RuntimeError(f"Error deserializing data: {e}, data type: {type(data)}")
+
 def create_structure(db_file: str):
     """Create the SQLite database structure for storing simulation analysis results.
     
@@ -138,8 +191,14 @@ def insert_param_space(db_file: str, params_dict: dict):
     cursor = conn.cursor()
     try:
         for param_name, properties in params_dict.items():
+            if param_name == "samples": continue
+            properties['perturbation'] = properties.get('perturbation', None)  # If 'perturbation' key does not exist, then it will be None
+            properties['lower_bounds'] = properties.get('lower_bounds', None)  # If 'lower_bounds' key does not exist, then it will be None
+            properties['upper_bounds'] = properties.get('upper_bounds', None)  # If 'upper_bounds' key does not exist, then it will be None
+            # Convert list to string if it's a list
             if type(properties['perturbation']) == list:
                 properties['perturbation'] = str(properties['perturbation'])
+            print(f"Inserting parameter: {param_name} with properties: {properties}")
             cursor.execute('''
                 INSERT INTO ParameterSpace (ParamName, Lower_Bound, Upper_Bound, ReferenceValue, Perturbation)
                 VALUES (?, ?, ?, ?, ?)
@@ -170,8 +229,9 @@ def insert_qois(db_file: str, qois_dic: dict):
     conn = sqlite3.connect(db_file)
     cursor = conn.cursor()
     try:
-        # If qois_dic is empty, insert a placeholder
-        if not qois_dic:
+        print(f"Inserting {qois_dic} QoIs into the database")
+        # If qois_dic is None or empty, insert a placeholder
+        if qois_dic is not None:
             cursor.execute('INSERT INTO QoIs (QOI_Name, QOI_Function) VALUES (?, ?)', (None, None))
             conn.commit()
             conn.close()
@@ -298,8 +358,13 @@ def load_structure(db_file: str) -> tuple:
     output = cursor.fetchall()
     conn.close()
     df_output = pd.DataFrame(output, columns=['SampleID', 'ReplicateID', 'Data'])
-    # Deserialize the Data column
-    df_output['Data'] = df_output['Data'].apply(pickle.loads)
+    
+    # Deserialize the Data column using the external safe_pickle_loads function
+    df_output['Data'] = df_output['Data'].apply(safe_pickle_loads)
+    
+    # Initialize df_data_unserialized as a copy of df_output
+    df_data_unserialized = df_output.copy()
+    
     # If QoIs are not None - converts df_output['Data'] to qois columns
     print("df_qois['QOI_Name'].values[0]:", df_qois['QOI_Name'].values[0])
     if df_qois['QOI_Name'].values[0] != None: 
