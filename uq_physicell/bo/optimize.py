@@ -1084,7 +1084,7 @@ def run_bayesian_optimization(calib_context: CalibrationContext, additional_iter
             
             # Progress update
             logger.info(f"✅ Completed iteration {iteration}/{calib_context.batch_size_bo} - Total samples: {len(train_x)}")
-            logger.info(f"🎯 Best fitness values: {[f'{qoi}: {fitness:.6f}' for qoi, fitness in zip(calib_context.qoi_names, torch.max(train_obj_true, dim=0)[0].tolist())]}")
+            logger.info(f"🎯 Best fitness values: {[f'{qoi}: {fitness:.6f}' for qoi, fitness in zip(calib_context.qoi_details['QOI_Name'], torch.max(train_obj_true, dim=0)[0].tolist())]}")
 
         logger.info("✅ Bayesian optimization completed successfully!")
         
