@@ -1,5 +1,6 @@
 import os, sys
-from PyQt5.QtWidgets import QVBoxLayout, QLabel, QHBoxLayout, QPushButton, QComboBox, QLineEdit, QTextEdit, QDialog, QFileDialog, QInputDialog, QListWidget, QMessageBox, QSizePolicy
+import logging
+from PyQt5.QtWidgets import QVBoxLayout, QLabel, QHBoxLayout, QPushButton, QComboBox, QLineEdit, QTextEdit, QDialog, QFileDialog, QInputDialog, QListWidget, QMessageBox, QSizePolicy, QApplication
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QIntValidator, QDoubleValidator
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -15,6 +16,39 @@ from uq_physicell.model_analysis.sensitivity_analysis import run_global_sa, run_
 from uq_physicell.model_analysis.main import ModelAnalysisContext, run_simulations
 from uq_physicell.model_analysis.utils import calculate_qoi_statistics
 from uq_physicell.model_analysis.database import load_structure
+
+class QtTextEditLogHandler(logging.Handler):
+    """Custom logging handler that writes to a QTextEdit widget."""
+    
+    def __init__(self, text_edit_widget):
+        super().__init__()
+        self.text_edit = text_edit_widget
+    
+    def emit(self, record):
+        """Emit a log record to the QTextEdit widget."""
+        try:
+            msg = self.format(record)
+            # Use the QTextEdit's append method to add the message
+            self.text_edit.append(msg)
+            # Force immediate GUI update for real-time display
+            self.text_edit.repaint()
+            # Process any pending events to ensure immediate display
+            QApplication.processEvents()
+        except Exception:
+            self.handleError(record)
+
+class NonZeroDoubleValidator(QDoubleValidator):
+    """Custom validator that accepts double values but excludes zero"""
+    def validate(self, input_str, pos):
+        state, input_str, pos = super().validate(input_str, pos)
+        if state == QDoubleValidator.Acceptable:
+            try:
+                value = float(input_str)
+                if value == 0.0:
+                    return (QDoubleValidator.Invalid, input_str, pos)
+            except ValueError:
+                pass
+        return (state, input_str, pos)
 
 def create_tab2(main_window):
     # Add the following methods to the main_window instance
@@ -70,7 +104,7 @@ def create_tab2(main_window):
     main_window.local_ref_value_label.setVisible(False)
     main_window.localSA_param_hbox.addWidget(main_window.local_ref_value_label)
     main_window.local_ref_value_input = QLineEdit()
-    main_window.local_ref_value_input.setValidator(QDoubleValidator())
+    main_window.local_ref_value_input.setValidator(NonZeroDoubleValidator())
     main_window.local_ref_value_input.setVisible(False)
     main_window.localSA_param_hbox.addWidget(main_window.local_ref_value_input)
     # Percentage perturbations input
@@ -132,7 +166,7 @@ def create_tab2(main_window):
     main_window.global_ref_value_label.setVisible(False)
     main_window.globalSA_parameters_hbox.addWidget(main_window.global_ref_value_label)
     main_window.global_ref_value_input = QLineEdit()
-    main_window.global_ref_value_input.setValidator(QDoubleValidator())
+    main_window.global_ref_value_input.setValidator(NonZeroDoubleValidator())
     main_window.global_ref_value_input.setVisible(False)
     main_window.globalSA_parameters_hbox.addWidget(main_window.global_ref_value_input)
     # Percentage of range of parameters input
@@ -271,7 +305,7 @@ def open_qoi_definition_window(main_window):
         }
 
     # Reset the qois
-    main_window.df_qois = pd.DataFrame()
+    main_window.df_summary_qois = pd.DataFrame()
     
     # Predefined QoIs section
     predefined_qoi_label = QLabel("<b>Select Predefined QoIs</b>")
@@ -476,7 +510,7 @@ def load_ma_database(main_window):
 
         # Reset the qois
         main_window.qoi_funcs = {}
-        main_window.df_qois = pd.DataFrame()
+        main_window.df_summary_qois = pd.DataFrame()
         
         # print a message in the output fields of Tab 2
         message = f"Database file loaded: {main_window.ma_file_path}"
@@ -662,7 +696,7 @@ def update_global_SA_range_percentage(main_window):
     if selected_param in main_window.global_SA_parameters:
         try:
             new_range_percentage = float(main_window.global_range_percentage.text())
-            main_window.global_SA_parameters[selected_param]["range_percentage"] = new_range_percentage
+            main_window.global_SA_parameters[selected_param]["perturbation"] = new_range_percentage
         except ValueError:
             main_window.update_output_tab2(main_window, "Error: Invalid range percentage.")
 
@@ -670,7 +704,11 @@ def sample_parameters(main_window):
     # Sample parameters based on the selected SA
     analysis_type = main_window.analysis_type_dropdown.currentText()
     if analysis_type == "Local":
-        main_window.update_output_tab2(main_window, f"Sampling parameters from One-At-A-Time approach...")
+        # Check the validator for the reference value and perturbation inputs
+        if not main_window.local_ref_value_input.hasAcceptableInput():
+            QMessageBox.warning(main_window, "Invalid Input", "Reference value must be a non-zero number.")
+            return
+        main_window.update_output_tab2(main_window, f"Sampling parameters using One-At-A-Time approach...")
         # Check if samples already exist, if so, delete them
         if 'samples' in main_window.local_SA_parameters.keys():
             del main_window.local_SA_parameters["samples"]
@@ -681,8 +719,12 @@ def sample_parameters(main_window):
             main_window.update_output_tab2(main_window, f"Error in local sampler: {e}")
             return
     elif analysis_type == "Global":
+        # Check the validator for the reference value and range percentage inputs
+        if not main_window.global_ref_value_input.hasAcceptableInput():
+            QMessageBox.warning(main_window, "Invalid Input", "Reference value must be a non-zero number.")
+            return
         sampler = main_window.global_sampler_combo.currentText()
-        main_window.update_output_tab2(main_window, f"Sampling parameters from sampler: {sampler}...")
+        main_window.update_output_tab2(main_window, f"Sampling parameters using {sampler}...")
         # Check if samples already exist, if so, delete them
         if 'samples' in main_window.global_SA_parameters.keys():
             del main_window.global_SA_parameters["samples"]
@@ -697,7 +739,7 @@ def sample_parameters(main_window):
         except ValueError as e:
             main_window.update_output_tab2(main_window, f"Error in global sampler: {e}")
             return
-
+    main_window.update_output_tab2(main_window, f"Sampling parameters completed.")
     # Make the define_qoi, DB file name field and "Run Simulations" button visible
     main_window.db_file_name_input.setEnabled(True)
     main_window.define_qoi_button.setEnabled(True)
@@ -723,101 +765,111 @@ def plot_samples(main_window):
     def update_plot():
         figure.clear()
         ax = figure.add_subplot(111)
-        try:
-            if main_window.analysis_type_dropdown.currentText() == "Local":
-                perturbations_df = pd.DataFrame(main_window.local_SA_parameters["samples"]).T
-                for col in perturbations_df.columns:
-                    perturbations_df[col] = 100.0 * (
-                        perturbations_df[col] - main_window.local_SA_parameters[col]["ref_value"]
-                    ) / main_window.local_SA_parameters[col]["ref_value"]
-                perturbations_df = perturbations_df.reset_index().melt(
-                    id_vars="index", var_name="Parameter", value_name="Perturbation"
+        if main_window.analysis_type_dropdown.currentText() == "Local":
+            # print(main_window.local_SA_parameters)
+            perturbations_df = pd.DataFrame(main_window.local_SA_parameters["samples"]).T
+            for col in perturbations_df.columns:
+                perturbations_df[col] = 100.0 * (
+                    perturbations_df[col] - main_window.local_SA_parameters[col]["ref_value"]
+                ) / main_window.local_SA_parameters[col]["ref_value"]
+            perturbations_df = perturbations_df.reset_index().melt(
+                id_vars="index", var_name="Parameter", value_name="Perturbation"
+            )
+            perturbations_df = perturbations_df.rename(columns={"index": "SampleID"})
+            perturbations_df['Frequency'] = perturbations_df.groupby(
+                ['Perturbation', 'Parameter']
+            )['SampleID'].transform('count')
+            scatter_plot = sns.scatterplot(
+                data=perturbations_df,
+                x="Perturbation",
+                y="Parameter",
+                hue="SampleID",
+                size="Frequency",
+                palette="viridis",
+                ax=ax,
+                alpha=0.7,
+            )
+            ax.tick_params(axis='x', labelsize=8)
+            ax.tick_params(axis='y', labelsize=8)
+            scatter_plot.set_title(
+                f"One-At-A-Time (OAT) sampling - Total Samples: {len(main_window.local_SA_parameters['samples'])}",
+                fontsize=8,
+            )
+            scatter_plot.set_xlabel("Perturbations (%)", fontsize=8)
+            scatter_plot.set_ylabel("")
+            handles, labels = scatter_plot.get_legend_handles_labels()
+            new_handles = [h for h, l in zip(handles, labels) if l not in ["SampleID", "Frequency"]]
+            new_labels = [l for l in labels if l not in ["SampleID", "Frequency"]]
+            scatter_plot.legend(
+                handles=new_handles,
+                labels=new_labels,
+                title="Sample Index",
+                bbox_to_anchor=(1.05, 1),
+                loc="upper left",
+                title_fontsize=8,
+                fontsize=8,
+                ncol=2
+            )
+        elif main_window.analysis_type_dropdown.currentText() == "Global":
+            # print(main_window.global_SA_parameters)
+            normalized_df = pd.DataFrame(main_window.global_SA_parameters["samples"]).T
+            for col in normalized_df.columns:
+                normalized_df[col] = (
+                    normalized_df[col] - main_window.global_SA_parameters[col]["lower_bounds"]
+                ) / (
+                    main_window.global_SA_parameters[col]["upper_bounds"] - main_window.global_SA_parameters[col]["lower_bounds"]
                 )
-                perturbations_df = perturbations_df.rename(columns={"index": "SampleID"})
-                perturbations_df['Frequency'] = perturbations_df.groupby(
-                    ['Perturbation', 'Parameter']
-                )['SampleID'].transform('count')
-                scatter_plot = sns.scatterplot(
-                    data=perturbations_df,
-                    x="Perturbation",
-                    y="Parameter",
-                    hue="SampleID",
-                    size="Frequency",
-                    palette="viridis",
-                    ax=ax,
-                    alpha=0.7,
-                )
-                ax.tick_params(axis='x', labelsize=8)
-                ax.tick_params(axis='y', labelsize=8)
-                scatter_plot.set_title(
-                    f"One-At-A-Time (OAT) sampling - Total Samples: {len(main_window.local_SA_parameters['samples'])}",
-                    fontsize=8,
-                )
-                scatter_plot.set_xlabel("Perturbations (%)", fontsize=8)
-                scatter_plot.set_ylabel("")
-                handles, labels = scatter_plot.get_legend_handles_labels()
-                new_handles = [h for h, l in zip(handles, labels) if l not in ["SampleID", "Frequency"]]
-                new_labels = [l for l in labels if l not in ["SampleID", "Frequency"]]
+            normalized_df = normalized_df.reset_index().melt(
+                id_vars="index", var_name="Parameter", value_name="Normalized Value"
+            )
+            scatter_plot = sns.scatterplot(
+                data=normalized_df,
+                x="Normalized Value",
+                y="Parameter",
+                hue="index",
+                palette="viridis",
+                s=50,
+                ax=ax,
+                alpha=0.7,
+            )
+            ax.tick_params(axis='x', labelsize=8)
+            ax.tick_params(axis='y', labelsize=8)
+            scatter_plot.set_title(
+                f"Global Sampling - Total Samples: {len(main_window.global_SA_parameters['samples'])}",
+                fontsize=8,
+            )
+            scatter_plot.set_xlabel("")
+            scatter_plot.set_ylabel("")
+            # Only add legend if there are labeled artists
+            handles, labels = scatter_plot.get_legend_handles_labels()
+            if handles and labels:
                 scatter_plot.legend(
-                    handles=new_handles,
-                    labels=new_labels,
                     title="Sample Index",
                     bbox_to_anchor=(1.05, 1),
                     loc="upper left",
                     title_fontsize=8,
                     fontsize=8,
-                    ncol=2
                 )
-            elif main_window.analysis_type_dropdown.currentText() == "Global":
-                normalized_df = pd.DataFrame(main_window.global_SA_parameters["samples"]).T
-                for col in normalized_df.columns:
-                    normalized_df[col] = (
-                        normalized_df[col] - main_window.global_SA_parameters[col]["lower_bounds"]
-                    ) / (
-                        main_window.global_SA_parameters[col]["upper_bounds"] - main_window.global_SA_parameters[col]["lower_bounds"]
-                    )
-                normalized_df = normalized_df.reset_index().melt(
-                    id_vars="index", var_name="Parameter", value_name="Normalized Value"
-                )
-                scatter_plot = sns.scatterplot(
-                    data=normalized_df,
-                    x="Normalized Value",
-                    y="Parameter",
-                    hue="index",
-                    palette="viridis",
-                    s=50,
-                    ax=ax,
-                    alpha=0.7,
-                )
-                ax.tick_params(axis='x', labelsize=8)
-                ax.tick_params(axis='y', labelsize=8)
-                scatter_plot.set_title(
-                    f"Global Sampling - Total Samples: {len(main_window.global_SA_parameters['samples'])}",
-                    fontsize=8,
-                )
-                scatter_plot.set_xlabel("")
-                scatter_plot.set_ylabel("")
-                scatter_plot.legend(
-                    title="Sample Index",
-                    bbox_to_anchor=(1.05, 1),
-                    loc="upper left",
-                    title_fontsize=8,
-                    fontsize=8,
-                )
-            figure.set_constrained_layout(True)
-            canvas.draw()
-        except Exception as e:
-            QMessageBox.warning(plot_samples_window, "Plot Error", f"Error plotting samples: {e}")
+        figure.set_constrained_layout(True)
+        canvas.draw()
 
-    update_plot()
+    try:
+        update_plot()
+         # Add a close button
+        close_button = QPushButton("Close")
+        close_button.setStyleSheet("background-color: lightgreen; color: black")
+        close_button.clicked.connect(plot_samples_window.accept)
+        layout.addWidget(close_button)
 
-    # Add a close button
-    close_button = QPushButton("Close")
-    close_button.setStyleSheet("background-color: lightgreen; color: black")
-    close_button.clicked.connect(plot_samples_window.accept)
-    layout.addWidget(close_button)
+        plot_samples_window.exec_()
+    except Exception as e:
+        traceback.print_exc()
+        print(f"Error plotting samples: {e}")
+        main_window.update_output_tab2(main_window, f"Error plotting samples: {e}")
+        QMessageBox.warning(plot_samples_window, "Plot Error", f"Error plotting samples: check the parameters ranges. ")
 
-    plot_samples_window.exec_()
+
+   
 
 def update_global_sampler_options(main_window):
     # FAST - Fourier Amplitude Sensitivity Test: combatible with Fast sampler
@@ -890,11 +942,17 @@ def run_simulations_function(main_window):
 
         # Display the number of OpenMP threads
         xml_path_omp_threads = ".//parallel/omp_num_threads"
+        num_replicates = main_window.num_replicates_input.text().strip()
         omp_threads = main_window.xml_tree.find(xml_path_omp_threads).text.strip()
         # Check if the parameter is set in the .ini file
         if xml_path_omp_threads in list(main_window.fixed_parameters.keys()): omp_threads = main_window.fixed_parameters[xml_path_omp_threads]
-        total_threads_label = QLabel(f"OpenMP Threads per worker: {omp_threads}")
+        total_threads_label = QLabel(f"OpenMP Threads per Model: {omp_threads}")
         layout.addWidget(total_threads_label)
+        number_of_replicates_label = QLabel(f"Number of Replicates: {num_replicates}")
+        layout.addWidget(number_of_replicates_label)
+        number_of_samples = len(main_window.local_SA_parameters.get("samples")) if main_window.analysis_type_dropdown.currentText() == "Local" else len(main_window.global_SA_parameters.get("samples"))
+        number_of_samples_label = QLabel(f"Number of Samples: {number_of_samples}")
+        layout.addWidget(number_of_samples_label)
 
         # Add buttons for confirmation
         button_layout = QHBoxLayout()
@@ -994,16 +1052,35 @@ def run_simulations_function(main_window):
         model_config = {"ini_path": main_window.ini_file_path, "struc_name": main_window.struc_name_input.text().strip()}
         # Determine the samples to use according to the analysis type
         SA_type = main_window.analysis_type_dropdown.currentText()
-        # Simulatethe model with the selected samples
+        # Setup logging
+        # Create custom handler that writes to the GUI output text area
+        gui_handler = QtTextEditLogHandler(main_window.output_text_tab2)
+        gui_handler.setLevel(logging.INFO)
+        gui_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+        
+        # Create console handler for stdout
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setLevel(logging.DEBUG)
+        console_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+        
+        # Configure logging
+        logging.basicConfig(
+            level=logging.INFO, 
+            handlers=[gui_handler, console_handler]
+        )
+        main_window.logger_tab2 = logging.getLogger(__name__)
+        # Simulate the model with the selected samples
         if "Local" == SA_type:
             sampler = "OAT"
             # Model Analysis context
-            context = ModelAnalysisContext(db_file_name, model_config, sampler, main_window.local_SA_parameters, qoi_str, num_workers=int(num_workers))
+            context = ModelAnalysisContext(db_file_name, model_config, sampler, main_window.local_SA_parameters, qoi_str, num_workers=int(num_workers), logger=main_window.logger_tab2)
+            context.dic_samples = SA_samples
             run_simulations(context)
         elif "Global" == SA_type:
             sampler = main_window.global_sampler_combo.currentText()
             # Model Analysis context
-            context = ModelAnalysisContext(db_file_name, model_config, sampler, main_window.global_SA_parameters, qoi_str, num_workers=int(num_workers))
+            context = ModelAnalysisContext(db_file_name, model_config, sampler, main_window.global_SA_parameters, qoi_str, num_workers=int(num_workers), logger=main_window.logger_tab2)
+            context.dic_samples = SA_samples
             run_simulations(context)
     except Exception as e:
         main_window.update_output_tab2(main_window, f"Error: Running simulations with {sampler} failed: {e}")
@@ -1013,7 +1090,8 @@ def run_simulations_function(main_window):
     # Simulate saving the samples to the database (replace with actual simulation logic)
     main_window.update_output_tab2(main_window, f"Simulations completed and saved to {db_file_name} with QoIs: {', '.join(main_window.qoi_funcs.keys())}.")
     # Load the database file to display results
-    main_window.load_db_file(main_window, db_file_name)
+    main_window.ma_file_path = db_file_name
+    main_window.load_ma_database(main_window)
     
 
 def plot_qois(main_window):
@@ -1037,8 +1115,8 @@ def plot_qois(main_window):
     canvas = FigureCanvas(figure)
     layout.addWidget(canvas)
     # Calculate the QoIs if not already done
-    if main_window.df_qois.empty:
-        try: main_window.df_qois = calculate_qoi_statistics(main_window.df_output, main_window.qoi_funcs, db_file_path = main_window.db_file_name_input.text().strip())
+    if main_window.df_summary_qois.empty:
+        try: main_window.df_summary_qois = calculate_qoi_statistics(main_window.df_output, main_window.qoi_funcs, db_file_path = main_window.db_file_name_input.text().strip())
         except Exception as e:
             main_window.update_output_tab2(main_window, f"Error calculating QoIs: {e}")
             return
@@ -1050,19 +1128,23 @@ def plot_qois(main_window):
         selected_qoi = plot_qoi_combo.currentText()
         # Plot the selected QoI
         if selected_qoi in main_window.qoi_funcs.keys():
-            qoi_columns = sorted([col for col in main_window.df_qois.columns if col.startswith(selected_qoi)])
-            time_columns = sorted([col for col in main_window.df_qois.columns if col.startswith("time_")])
+            print(f"Columns: {main_window.df_summary_qois.columns}")
+            qoi_columns = sorted([col for col in main_window.df_summary_qois.columns if col.startswith(selected_qoi)])
+            time_columns = sorted([col for col in main_window.df_summary_qois.columns if col.startswith("time_")])
             # Prepare the data for seaborn
             plot_data = pd.DataFrame({
-                "Time": main_window.df_qois[time_columns].values.flatten(),
-                selected_qoi: main_window.df_qois[qoi_columns].values.flatten(),
-                "SampleID": main_window.df_qois.index.repeat(len(qoi_columns))
+                "Time": main_window.df_summary_qois[time_columns].values.flatten(),
+                selected_qoi: main_window.df_summary_qois[qoi_columns].values.flatten(),
+                "SampleID": main_window.df_summary_qois.index.repeat(len(qoi_columns))
             })
             # Plot using seaborn
             sns.lineplot(data=plot_data, x="Time", y=selected_qoi, hue="SampleID", ax=ax)
             ax.set_xlabel("Time (min)")
             ax.set_ylabel(selected_qoi)
-            ax.legend(title="Sample Index")
+            # Only add legend if there are labeled artists
+            handles, labels = ax.get_legend_handles_labels()
+            if handles and labels:
+                ax.legend(title="Sample Index")
             canvas.draw()
         else:
             main_window.update_output_tab2(main_window, f"Error: {selected_qoi} not found in the output data.")
@@ -1070,31 +1152,37 @@ def plot_qois(main_window):
         # figure.tight_layout()
         figure.set_constrained_layout(True)
         canvas.draw()
-
-    # Connect the combo box to update the plot
-    plot_qoi_combo.currentIndexChanged.connect(update_plot_qoi)
-    # Set the default selected qoi and update the plot
-    plot_qoi_combo.setCurrentIndex(0)
-    update_plot_qoi()
-    # Show the dialog
-    plot_qoi_window.exec_()
+    
+    try:
+        # Connect the combo box to update the plot
+        plot_qoi_combo.currentIndexChanged.connect(update_plot_qoi)
+        # Set the default selected qoi and update the plot
+        plot_qoi_combo.setCurrentIndex(0)
+        update_plot_qoi()
+        # Show the dialog
+        plot_qoi_window.exec_()
+    except Exception as e:
+        traceback.print_exc()
+        print(f"Error plotting QoIs: {e}")
+        main_window.update_output_tab2(main_window, f"Error plotting QoIs: {e}")
+        QMessageBox.warning(plot_qoi_window, "Plot Error", f"Error plotting QoIs: {e}")
 
 def run_analysis(main_window):
     main_window.update_output_tab2(main_window, "Running sensitivity analysis...")
      # Calculate the QoIs if not already done
-    if main_window.df_qois.empty:
-        try: main_window.df_qois = calculate_qoi_statistics(main_window.df_output, main_window.qoi_funcs, db_file_path = main_window.db_file_name_input.text().strip())
+    if main_window.df_summary_qois.empty:
+        try: main_window.df_summary_qois = calculate_qoi_statistics(main_window.df_output, main_window.qoi_funcs, db_file_path = main_window.db_file_name_input.text().strip())
         except Exception as e:
             main_window.update_output_tab2(main_window, f"Error calculating QoIs: {e}")
             return
     # Prepare the QoIs for analysis
     all_qois_names = list(main_window.qoi_funcs.keys())
-    all_times_label = [col for col in main_window.df_qois.columns if col.startswith("time")]
+    all_times_label = [col for col in main_window.df_summary_qois.columns if col.startswith("time")]
     print(f"all_qois: {all_qois_names} and all_times: {all_times_label}")
     if main_window.analysis_type_dropdown.currentText() == "Global":
         global_method = main_window.global_method_combo.currentText()
         try:
-            main_window.sa_results, main_window.qoi_time_values = run_global_sa(main_window.global_SA_parameters, global_method, all_times_label, all_qois_names, main_window.df_qois)
+            main_window.sa_results, main_window.qoi_time_values = run_global_sa(main_window.global_SA_parameters, global_method, all_times_label, all_qois_names, main_window.df_summary_qois)
         except Exception as e:
             main_window.update_output_tab2(main_window, f"Error running global sensitivity analysis: {e}")
             return
@@ -1104,7 +1192,7 @@ def run_analysis(main_window):
         main_window.plot_sa_results(main_window)
     elif main_window.analysis_type_dropdown.currentText() == "Local":
         try:
-            main_window.sa_results, main_window.qoi_time_values = run_local_sa(main_window.local_SA_parameters, all_times_label, all_qois_names, main_window.df_qois)
+            main_window.sa_results, main_window.qoi_time_values = run_local_sa(main_window.local_SA_parameters, all_times_label, all_qois_names, main_window.df_summary_qois)
         except Exception as e:
             main_window.update_output_tab2(main_window, f"Error running local sensitivity analysis: {e}")
             return
@@ -1194,7 +1282,10 @@ def plot_sa_results(main_window):
                 ax.set_xlabel("Time (min)")
                 ax.set_ylabel(f"Sensitivity Measure ({selected_sm})")
                 ax.set_title(f"Global SA - {SA_method}", fontsize=8)
-                ax.legend(bbox_to_anchor=(1.05, 1), loc="upper left", title_fontsize=8, fontsize=8)
+                # Only add legend if there are labeled artists
+                handles, labels = ax.get_legend_handles_labels()
+                if handles and labels:
+                    ax.legend(bbox_to_anchor=(1.05, 1), loc="upper left", title_fontsize=8, fontsize=8)
             elif main_window.analysis_type_dropdown.currentText() == "Local":
                 SA_method = "OAT method"
                 # Prepare the data for seaborn
@@ -1219,7 +1310,10 @@ def plot_sa_results(main_window):
                 sns.lineplot(data=plot_data, x="Time", y="Sensitivity Index", hue="Parameter", ax=ax, palette=custom_palette, hue_order=parameter_order)
                 ax.set_xlabel("Time (min)")
                 ax.set_title(f"Local SA - {SA_method}")
-                ax.legend(bbox_to_anchor=(1.05, 1), loc="upper left", title_fontsize=8, fontsize=8)
+                # Only add legend if there are labeled artists
+                handles, labels = ax.get_legend_handles_labels()
+                if handles and labels:
+                    ax.legend(bbox_to_anchor=(1.05, 1), loc="upper left", title_fontsize=8, fontsize=8)
             # Adjust layout and draw the canvas
             # figure.tight_layout()
             figure.set_constrained_layout(True)
