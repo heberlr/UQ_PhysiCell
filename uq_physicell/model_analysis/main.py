@@ -1,7 +1,9 @@
 import numpy as np
-import os
+import os, sys, io
+import logging
 import pickle
 import traceback
+from contextlib import redirect_stdout
 
 from uq_physicell import PhysiCell_Model
 from uq_physicell.model_analysis.samplers import run_local_sampler
@@ -69,13 +71,24 @@ class ModelAnalysisContext:
         ...     'analysis.db', model_config, 'LHS', params, {}
         ... )
     """
-    def __init__(self, db_path:str, model_config:dict, sampler:str, params_info:dict, qois_info:dict, parallel_method:str='inter-process', num_workers:int=1, summary_function=None):
+    def __init__(
+            self, 
+            db_path:str, 
+            model_config:dict, 
+            sampler:str, 
+            params_info:dict, 
+            qois_info:dict, 
+            parallel_method:str='inter-process', 
+            num_workers:int=1, 
+            summary_function=None,
+            logger: logging.Logger=None):
         self.db_path = db_path
         self.params_dict = params_info  # Dictionary with parameter names, ref value, ranges, and perturbations.
         self.parallel_method = parallel_method # inter-process (single node) or inter-node (mpi)
         self.qois_dict = qois_info
         self.num_workers = num_workers
         self.summary_function = summary_function
+        self.logger = logger if logger is not None else logging.getLogger(__name__)
 
         # Initialize metadata for database
         self.dic_metadata = {
@@ -144,27 +157,37 @@ def run_simulations(context: ModelAnalysisContext):
     try:
         PhysiCellModel = PhysiCell_Model(context.dic_metadata['IniFilePath'], context.dic_metadata['StrucName'])
     except Exception as e:
-        raise ValueError(f"Error initializing PhysiCell model: {e}")
+        context.logger.error(f"Error initializing PhysiCell model: {e}")
+        raise
 
     # Initialize or load the database structure
     if rank == 0:
-        PhysiCellModel.info()
+        # Capture PhysiCell model info output and log it
+        info_buffer = io.StringIO()
+        with redirect_stdout(info_buffer):
+            PhysiCellModel.info()
+        info_output = info_buffer.getvalue().strip()
+        if info_output:
+            context.logger.info(f"PhysiCell Model Information:\n{info_output}")
+        
         # Check if the sensitivity analysis already exists
         try:
             exist_db, All_Parameters, All_Samples, All_Replicates = check_simulations_db(PhysiCellModel, context.dic_metadata['Sampler'], context.params_dict, context.dic_samples, context.qois_dict, context.db_path)
         except Exception as e: 
-            raise ValueError(f"Error checking existing database {context.db_path}: {e}")
+            context.logger.error(f"Error checking existing database {context.db_path}: {e}")
+            raise
         # Remove the output folder - to avoid overwriting
         if os.path.exists(PhysiCellModel.output_folder):
             os.system('rm -rf ' + PhysiCellModel.output_folder)
         if not exist_db:
             # Initialize database structure
-            print(f"Creating database structure in {context.db_path}")
+            context.logger.info(f"Creating database structure in {context.db_path}")
             try: create_structure(context.db_path)
             except Exception as e:
-                raise ValueError(f"Error creating database structure: {e}")
+                context.logger.error(f"Error creating database structure: {e}")
+                raise
             # Insert metadata
-            print(f"Inserting metadata, parameter space, and QoIs into the database")
+            context.logger.info(f"Inserting metadata, parameter space, and QoIs into the database")
             try:
                 insert_metadata(context.db_path, context.dic_metadata['Sampler'], context.dic_metadata['IniFilePath'], context.dic_metadata['StrucName'])
                 insert_param_space(context.db_path, context.params_dict)
@@ -172,9 +195,10 @@ def run_simulations(context: ModelAnalysisContext):
             except Exception as e:
                 # Print traceback for debugging
                 traceback.print_exc()
-                raise ValueError(f"Error inserting data into the database: {e}")
+                context.logger.error(f"Error inserting data into the database: {e}")
+                raise
             # Populate Samples table
-            print(f"Inserting samples into the database")
+            context.logger.info(f"Inserting samples into the database")
             insert_samples(context.db_path, context.dic_samples)
     else:
         exist_db = None
@@ -194,7 +218,7 @@ def run_simulations(context: ModelAnalysisContext):
 
     # Generate a three list with size NumSimulations
     if not exist_db:
-        if rank == 0: print(f"Generating {len(context.dic_samples)*PhysiCellModel.numReplicates} simulations")
+        if rank == 0: context.logger.info(f"Generating {len(context.dic_samples)*PhysiCellModel.numReplicates} simulations")
         for sampleID in context.dic_samples.keys():
             for replicateID in np.arange(PhysiCellModel.numReplicates):
                 All_Parameters.append(context.dic_samples[sampleID])
@@ -202,7 +226,7 @@ def run_simulations(context: ModelAnalysisContext):
                 All_Replicates.append(replicateID)
     else:
         # Three lists with size NumSimulations from check_existing_sa
-        if rank == 0: print(f"Generating {len(All_Samples)} simulations")
+        if rank == 0: context.logger.info(f"Generating {len(All_Samples)} simulations")
     
     ###################################
     # Running using concurrent.futures
@@ -230,11 +254,11 @@ def run_simulations(context: ModelAnalysisContext):
             # Collect results and write to the database
             for future in futures:
                 sample_id, replicate_id, result_data = future.result()
-                print(f"Writing to the database for Sample: {sample_id}, Replicate: {replicate_id}")
+                context.logger.info(f"Writing to the database for Sample: {sample_id}, Replicate: {replicate_id}")
                 try:
                     insert_output(context.db_path, sample_id, replicate_id, result_data)
                 except Exception as e:
-                    print(f"Error writing to the database: {e}")
+                    context.logger.info(f"Error writing to the database: {e}")
     
     ###################################
     # Running using MPI
@@ -242,7 +266,7 @@ def run_simulations(context: ModelAnalysisContext):
     elif use_mpi:
         # Split simulations into ranks
         SplitIndexes = np.array_split(np.arange(len(All_Samples)), size, axis=0)
-        print(f"Rank {rank} assigned {len(SplitIndexes[rank])} simulations.")
+        context.logger.info(f"Rank {rank} assigned {len(SplitIndexes[rank])} simulations.")
 
         # Run simulations (MPI)
         for ind_sim in SplitIndexes[rank]:
@@ -260,12 +284,13 @@ def run_simulations(context: ModelAnalysisContext):
             if rank > 0:
                 # Wait for the token from the previous rank
                 comm.recv(source=rank - 1, tag=0)
-            print(f"Rank {rank} writing to the database for Sample: {All_Samples[ind_sim]}, Replicate: {All_Replicates[ind_sim]}")
+            context.logger.info(f"Rank {rank} writing to the database for Sample: {All_Samples[ind_sim]}, Replicate: {All_Replicates[ind_sim]}")
             try:
                 insert_output(context.db_path, All_Samples[ind_sim], All_Replicates[ind_sim], result_data)
-                print(f"Rank {rank} finished writing to the database for Sample: {All_Samples[ind_sim]}, Replicate: {All_Replicates[ind_sim]}")
+                context.logger.info(f"Rank {rank} finished writing to the database for Sample: {All_Samples[ind_sim]}, Replicate: {All_Replicates[ind_sim]}")
             except Exception as e:
-                print(f"Rank {rank}: Error writing to the database: {e}")
+                context.logger.error(f"Rank {rank}: Error writing to the database: {e}")
+                raise  # Re-raise to stop execution and prevent data corruption
 
             # Pass the token to the next rank
             if rank < size - 1:
@@ -278,7 +303,7 @@ def run_simulations(context: ModelAnalysisContext):
     # Running sequentially
     ###################################
     else:
-        print(f"Rank {rank} assigned {len(All_Samples)} simulations.")
+        context.logger.info(f"Rank {rank} assigned {len(All_Samples)} simulations.")
         # Run simulations sequentially
         for ind_sim in range(len(All_Samples)):
             ParametersXML = {key: All_Parameters[ind_sim][key] for key in params_xml} if params_xml else np.array([])
@@ -292,12 +317,13 @@ def run_simulations(context: ModelAnalysisContext):
                                         ParametersRules, context.qois_dict if context.qois_dict else None)
 
             # Write to the database directly (no locks or MPI synchronization needed)
-            print(f"Rank {rank} writing to the database for Sample: {All_Samples[ind_sim]}, Replicate: {All_Replicates[ind_sim]}")
+            context.logger.info(f"Rank {rank} writing to the database for Sample: {All_Samples[ind_sim]}, Replicate: {All_Replicates[ind_sim]}")
             try:
                 insert_output(context.db_path, All_Samples[ind_sim], All_Replicates[ind_sim], pickle.dumps(result_data))
-                print(f"Rank {rank} finished writing to the database for Sample: {All_Samples[ind_sim]}, Replicate: {All_Replicates[ind_sim]}")
+                context.logger.info(f"Rank {rank} finished writing to the database for Sample: {All_Samples[ind_sim]}, Replicate: {All_Replicates[ind_sim]}")
             except Exception as e:
-                raise ValueError(f"Error inserting output into the database: {e}")
+                context.logger.error(f"Error inserting output into the database: {e}")
+                raise
             
 if __name__ == "__main__":
     # Example usage
