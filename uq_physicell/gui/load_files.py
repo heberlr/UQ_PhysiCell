@@ -9,18 +9,18 @@ from PyQt5.QtWidgets import QFileDialog, QInputDialog
 from uq_physicell.model_analysis.database import get_database_type
 
 def load_xml_file(main_window, filePath=None):
+     # Clear parameters, .ini File Preview, and output
+    main_window.analysis_parameters.clear()
+    main_window.fixed_parameters.clear()
+    main_window.analysis_rules_parameters.clear()
+    main_window.fixed_rules_parameters.clear()
+    main_window.ini_preview_text.clear()
+    main_window.output_text.clear()
     # Load the XML file and parse it
     if filePath is None:
         # Open file dialog to select XML file
         options = QFileDialog.Options()
         main_window.xml_file_path, _ = QFileDialog.getOpenFileName(main_window, "Select PhysiCell XML File", "", "XML Files (*.xml);;All Files (*)", options=options)
-        # Clear parameters, .ini File Preview, and output
-        main_window.analysis_parameters.clear()
-        main_window.fixed_parameters.clear()
-        main_window.analysis_rules_parameters.clear()
-        main_window.fixed_rules_parameters.clear()
-        main_window.ini_preview_text.clear()
-        main_window.output_text.clear()
     else:
         main_window.xml_file_path = filePath
 
@@ -160,6 +160,12 @@ def load_ini_file(main_window, filePath=None, strucName=None):
 
             # Update the preview of the .ini file
             main_window.update_ini_preview(main_window)
+
+            # Clean the parameter samples
+            if hasattr(main_window, 'local_SA_parameters'):
+                main_window.local_SA_parameters.clear()
+            if hasattr(main_window, 'global_SA_parameters'):
+                main_window.global_SA_parameters.clear()
 
             # Write a message in the output fields of Tab 1 and Tab 2
             message = f".ini file loaded: {main_window.ini_file_path} - structure name: {struc_name}"
