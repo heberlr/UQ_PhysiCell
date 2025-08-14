@@ -366,7 +366,7 @@ def load_structure(db_file: str) -> tuple:
     df_data_unserialized = df_output.copy()
     
     # If QoIs are not None - converts df_output['Data'] to qois columns
-    print("df_qois['QOI_Name'].values[0]:", df_qois['QOI_Name'].values[0])
+    # print("df_qois['QOI_Name'].values[0]:", df_qois['QOI_Name'].values[0])
     if df_qois['QOI_Name'].values[0] != None: 
         # Convert Data column to qois
         df_data_unserialized.drop(columns=['Data'], inplace=True)
