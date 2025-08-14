@@ -172,7 +172,7 @@ class CalibrationContext:
                 self.logger.debug(f"Successfully loaded observed data from {obsData}")
             except Exception as e:
                 self.logger.error(f"Error reading observed data from {obsData}: {e}")
-                sys.exit(1)
+                raise
         
         # Validate acquisition strategy early to catch configuration issues
         self._validate_acquisition_strategy()
@@ -248,7 +248,7 @@ class CalibrationContext:
         
         if acq_func_strategy not in valid_strategies:
             self.logger.error(f"❌ Invalid acquisition strategy '{acq_func_strategy}'. Valid strategies: {valid_strategies}")
-            raise ValueError(f"Invalid acquisition strategy '{acq_func_strategy}'. Valid options: {valid_strategies}")
+            raise
         
         # Log the strategy being used
         if acq_func_strategy != "none":
