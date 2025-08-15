@@ -53,17 +53,15 @@ Authors: UQ PhysiCell Development Team
 Version: 2.0.0
 """
 
-import sys
 import os
 import logging
 import concurrent.futures
 import pickle
-import time
-from typing import Union, Dict, List, Tuple, Optional
+from typing import Union, Optional
 
 import numpy as np
 import pandas as pd
-import torch
+from scipy.spatial.distance import pdist
 
 import torch
 from botorch import fit_gpytorch_mll
@@ -75,8 +73,9 @@ from botorch.sampling.normal import SobolQMCNormalSampler
 from botorch.utils.sampling import draw_sobol_samples
 from botorch.utils.multi_objective.hypervolume import Hypervolume
 from botorch.utils.multi_objective.pareto import is_non_dominated
-from botorch.acquisition.multi_objective.utils import prune_inferior_points_multi_objective
 from gpytorch.mlls.sum_marginal_log_likelihood import SumMarginalLogLikelihood
+from gpytorch.mlls import ExactMarginalLogLikelihood
+from botorch.acquisition.logei import qLogExpectedImprovement
 
 from uq_physicell import PhysiCell_Model
 from uq_physicell.utils.model_wrapper import run_replicate_serializable
@@ -902,7 +901,6 @@ class CalibrationContext:
         
         # Uniformity measure (lower is more uniform)
         # Calculate pairwise distances and check for clustering
-        from scipy.spatial.distance import pdist
         if n_samples > 1:
             distances = pdist(train_x_np)
             uniformity = 1.0 / (1.0 + np.std(distances))  # Higher is more uniform
@@ -936,7 +934,6 @@ class CalibrationContext:
         recent_samples = train_x_np[-recent_count:]
         
         # Calculate average distance between recent samples
-        from scipy.spatial.distance import pdist
         if len(recent_samples) > 1:
             recent_distances = pdist(recent_samples)
             avg_distance = np.mean(recent_distances)
@@ -953,11 +950,135 @@ class CalibrationContext:
 
 def single_objective_bayesian_optimization(calib_context, train_x, train_obj, train_obj_true, train_obj_std, start_iteration):
     """Single-objective Bayesian optimization loop."""
-    pass
+    logger = calib_context.logger
+    batch_size_bo = calib_context.batch_size_bo
+    batch_size_per_iteration = calib_context.batch_size_per_iteration
+    num_restarts = calib_context.num_restarts_act_func
+    raw_samples = calib_context.raw_samples_act_func
+    samples_per_batch = calib_context.samples_per_batch_act_func
+    search_space = calib_context.search_space
+    db_path = calib_context.db_path
+    qoi_name = calib_context.qoi_details['QOI_Name'][0]
+    hvs_list = []
+    best_fitness_list = [torch.max(train_obj_true).item()]
+    for iteration in range(start_iteration, batch_size_bo + 1):
+        logger.info(f"{'='*60}")
+        logger.info(f"🔄 Single-Objective BO Iteration {iteration}/{batch_size_bo}")
+        logger.info(f"{'='*60}")
+        # Fit GP model
+        logger.info("🔧 Fitting Gaussian Process model...")
+        train_y = train_obj[:, 0:1]
+        train_yvar = train_obj_std[:, 0:1] ** 2
+        train_yvar = torch.clamp(train_yvar, min=1e-6)
+        model = SingleTaskGP(train_x, train_y, train_yvar)
+        mll = ExactMarginalLogLikelihood(model.likelihood, model)
+        fit_gpytorch_mll(mll)
+        # Acquisition function: qLogExpectedImprovement
+        sampler = SobolQMCNormalSampler(sample_shape=torch.Size([samples_per_batch]))
+        acq_func = qLogExpectedImprovement(model=model, best_f=train_yvar.max().item(), sampler=sampler)
+        num_params = len(search_space)
+        bounds = torch.stack([torch.zeros(num_params), torch.ones(num_params)]).to(torch.float64)
+        candidates, acq_values = optimize_acqf(
+            acq_function=acq_func,
+            bounds=bounds,
+            q=batch_size_per_iteration,
+            num_restarts=num_restarts,
+            raw_samples=raw_samples,
+            options={"batch_limit": 5, "maxiter": 200},
+            sequential=True,
+        )
+        logger.info(f"🎯 Optimized acquisition function, best value = {acq_values.max():.6f}")
+        next_sample_ids = [len(train_x) + i for i in range(len(candidates))]
+        next_params_list = []
+        for i, x in enumerate(candidates):
+            x_unnorm = unnormalize_params(x, search_space)
+            params_dict = tensor_to_param_dict(x_unnorm, search_space)
+            next_params_list.append(params_dict)
+            insert_samples(db_path, iteration, {next_sample_ids[i]: params_dict})
+        with concurrent.futures.ProcessPoolExecutor(max_workers=calib_context.workers_out) as executor:
+            new_results = list(executor.map(calib_context.evaluate_params, next_params_list, next_sample_ids))
+        for i, (objectives, obj_noise, dic_results) in enumerate(new_results):
+            calib_context.save_results_to_db(next_sample_ids[i], objectives, obj_noise, dic_results)
+        new_obj_true = torch.tensor([list(result[0].values()) for result in new_results], dtype=torch.float64)
+        new_obj_std = torch.tensor([list(result[1].values()) for result in new_results], dtype=torch.float64)
+        new_obj = new_obj_true + torch.randn_like(new_obj_true) * new_obj_std
+        new_obj = torch.clamp(new_obj, min=1e-3)
+        train_x = torch.cat([train_x, candidates])
+        train_obj = torch.cat([train_obj, new_obj])
+        train_obj_true = torch.cat([train_obj_true, new_obj_true])
+        train_obj_std = torch.cat([train_obj_std, new_obj_std])
+        best_fitness = torch.max(train_obj_true).item()
+        best_fitness_list.append(best_fitness)
+        logger.info(f"✅ Completed iteration {iteration}/{batch_size_bo} - Total samples: {len(train_x)}")
+        logger.info(f"🎯 Best fitness value for {qoi_name}: {best_fitness:.6f}")
+    logger.info("✅ Single-objective Bayesian optimization completed successfully!")
 
 def multi_objective_bayesian_optimization(calib_context, train_x, train_obj, train_obj_true, train_obj_std, start_iteration, latest_hypervolume, resume_from_db):
     """Multi-objective Bayesian optimization loop."""
-    pass
+    logger = calib_context.logger
+    batch_size_bo = calib_context.batch_size_bo
+    batch_size_per_iteration = calib_context.batch_size_per_iteration
+    num_restarts = calib_context.num_restarts_act_func
+    raw_samples = calib_context.raw_samples_act_func
+    samples_per_batch = calib_context.samples_per_batch_act_func
+    search_space = calib_context.search_space
+    db_path = calib_context.db_path
+    qoi_names = calib_context.qoi_details['QOI_Name']
+    hvs_list = [latest_hypervolume] if resume_from_db else []
+    for iteration in range(start_iteration, batch_size_bo + 1):
+        logger.info(f"{'='*60}")
+        logger.info(f"🔄 Multi-Objective BO Iteration {iteration}/{batch_size_bo}")
+        logger.info(f"{'='*60}")
+        logger.info("🔧 Fitting Gaussian Process models...")
+        model = _fit_gp_models(train_x, train_obj, train_obj_std, calib_context)
+        logger.info("🎯 Optimizing acquisition function...")
+        next_x = _optimize_acquisition_function(model, train_x, train_obj_true, calib_context)
+        logger.info(f"📊 Evaluating {len(next_x)} new candidate(s)...")
+        next_sample_ids = [len(train_x) + i for i in range(len(next_x))]
+        next_params_list = []
+        for i, x in enumerate(next_x):
+            x_unnorm = unnormalize_params(x, search_space)
+            params_dict = tensor_to_param_dict(x_unnorm, search_space)
+            next_params_list.append(params_dict)
+            insert_samples(db_path, iteration, {next_sample_ids[i]: params_dict})
+        with concurrent.futures.ProcessPoolExecutor(max_workers=calib_context.workers_out) as executor:
+            new_results = list(executor.map(calib_context.evaluate_params, next_params_list, next_sample_ids))
+        for i, (objectives, obj_noise, dic_results) in enumerate(new_results):
+            calib_context.save_results_to_db(next_sample_ids[i], objectives, obj_noise, dic_results)
+        new_obj_true = torch.tensor([list(result[0].values()) for result in new_results], dtype=torch.float64)
+        new_obj_std = torch.tensor([list(result[1].values()) for result in new_results], dtype=torch.float64)
+        new_obj = new_obj_true + torch.randn_like(new_obj_true) * new_obj_std
+        new_obj = torch.clamp(new_obj, min=1e-3)
+        train_x = torch.cat([train_x, next_x])
+        train_obj = torch.cat([train_obj, new_obj])
+        train_obj_true = torch.cat([train_obj_true, new_obj_true])
+        train_obj_std = torch.cat([train_obj_std, new_obj_std])
+        try:
+            cached_hv = calib_context._cached_pareto_data.get('hypervolume', None)
+            current_hv = cached_hv
+            logger.debug("🚀 Using cached hypervolume from acquisition function")
+        except Exception:
+            current_hv = None
+            logger.warning("Could not retrieve hypervolume from acquisition function")
+        hvs_list.append(current_hv)
+        insert_gp_models(db_path, iteration, model, current_hv)
+        logger.info(f"📊 Iteration {iteration} Sample(s) {next_sample_ids} : Hypervolume = {current_hv}")
+        if len(hvs_list) >= 10:
+            logger.info("🔍 Analyzing convergence...")
+            convergence_result = calib_context.analyze_convergence(hvs_list, train_obj_true, train_x, iteration)
+            logger.info(f"\t📋 Convergence Status: {convergence_result['status']}")
+            logger.info(f"\t💡 Reason: {convergence_result['reason']}")
+            logger.info(f"\t🎯 Confidence: {convergence_result['convergence_confidence']:.2%}")
+            if convergence_result["suggestion"]:
+                logger.info(f"\t💡 Suggestion: {convergence_result['suggestion']}")
+            if convergence_result["converged"] and convergence_result["convergence_confidence"] > 0.8:
+                logger.info("\t🎉 Convergence detected with high confidence - stopping optimization")
+                break
+            elif convergence_result["needs_restart"]:
+                logger.warning("\t⚠️  Suboptimal stagnation detected - consider restarting with different settings")
+        logger.info(f"✅ Completed iteration {iteration}/{batch_size_bo} - Total samples: {len(train_x)}")
+        logger.info(f"🎯 Best fitness values: {[f'{qoi}: {fitness:.6f}' for qoi, fitness in zip(qoi_names, torch.max(train_obj_true, dim=0)[0].tolist())]}")
+    logger.info("✅ Multi-objective Bayesian optimization completed successfully!")
 
 
 def run_bayesian_optimization(calib_context: CalibrationContext, additional_iterations: Optional[int] = None):
@@ -969,141 +1090,37 @@ def run_bayesian_optimization(calib_context: CalibrationContext, additional_iter
         additional_iterations (Optional[int]): Additional iterations for resume functionality
     """
     logger = calib_context.logger
-    
     try:
-        # Check if we're resuming from existing database
         resume_from_db = os.path.exists(calib_context.db_path)
         single_qoi = len(calib_context.qoi_details['QOI_Name']) == 1
-        
         if resume_from_db:
             logger.info(f"🔄 Resuming optimization from existing database: {calib_context.db_path}")
-            
-            # Update iterations if additional_iterations is provided
             if additional_iterations is not None:
                 calib_context.update_bo_iterations(additional_iterations)
-            
-            # Load existing data
             train_x, train_obj, train_obj_true, train_obj_std, latest_iteration, latest_hypervolume = calib_context.load_existing_data()
             start_iteration = latest_iteration + 1
-            
         else:
             logger.info(f"🆕 Starting fresh optimization with database: {calib_context.db_path}")
-            
-            # Create database structure
             create_structure(calib_context.db_path)
-            
-            # Insert metadata
             insert_metadata(calib_context.db_path, calib_context.dic_metadata)
-            
-            # Insert parameter space
             insert_param_space(calib_context.db_path, calib_context.search_space)
-            
-            # Insert QoIs
             insert_qois(calib_context.db_path, calib_context.qoi_details)
-            
-            # Generate initial samples
             logger.info(f"🎲 Generating {calib_context.num_initial_samples} initial samples...")
             train_x, train_obj, train_obj_true, train_obj_std = calib_context.generate_and_evaluate_samples(
                 calib_context.num_initial_samples, start_sample_id=0, iteration_id=0
             )
             start_iteration = 1
             latest_hypervolume = 0.0
-        
-        # Main Bayesian Optimization loop
-        logger.info(f"🔍 Starting BO iterations from {start_iteration} to {calib_context.batch_size_bo}")
-        
-        hvs_list = [latest_hypervolume] if resume_from_db else []
-        
-        for iteration in range(start_iteration, calib_context.batch_size_bo + 1):
-            logger.info(f"{'='*60}")
-            logger.info(f"🔄 BO Iteration {iteration}/{calib_context.batch_size_bo}")
-            logger.info(f"{'='*60}")
-            
-            # 1. Fit GP models to current data
-            logger.info("🔧 Fitting Gaussian Process models...")
-            model = _fit_gp_models(train_x, train_obj, train_obj_std, calib_context)
-            
-            # 2. Optimize acquisition function to find next candidate(s)
-            logger.info("🎯 Optimizing acquisition function...")
-            next_x = _optimize_acquisition_function(model, train_x, train_obj_true, calib_context)
-            
-            # 3. Evaluate new candidates
-            logger.info(f"📊 Evaluating {len(next_x)} new candidate(s)...")
-            next_sample_ids = [len(train_x) + i for i in range(len(next_x))]
-            
-            # Convert normalized parameters to parameter dictionaries
-            next_params_list = []
-            for i, x in enumerate(next_x):
-                x_unnorm = unnormalize_params(x, calib_context.search_space)
-                params_dict = tensor_to_param_dict(x_unnorm, calib_context.search_space)
-                next_params_list.append(params_dict)
-                # Save parameters to database
-                insert_samples(calib_context.db_path, iteration, {next_sample_ids[i]: params_dict})
-            
-            # Evaluate new candidates
-            with concurrent.futures.ProcessPoolExecutor(max_workers=calib_context.workers_out) as executor:
-                new_results = list(executor.map(calib_context.evaluate_params, next_params_list, next_sample_ids))
-            
-            # Save results to database
-            for i, (objectives, obj_noise, dic_results) in enumerate(new_results):
-                calib_context.save_results_to_db(next_sample_ids[i], objectives, obj_noise, dic_results)
-            
-            # 4. Update training data
-            logger.info("🔄 Updating training data...")
-            new_obj_true = torch.tensor([list(result[0].values()) for result in new_results], dtype=torch.float64)
-            new_obj_std = torch.tensor([list(result[1].values()) for result in new_results], dtype=torch.float64)
-            new_obj = new_obj_true + torch.randn_like(new_obj_true) * new_obj_std
-            new_obj = torch.clamp(new_obj, min=1e-3)  # Ensure positive fitness
-            
-            # Concatenate new data with existing
-            train_x = torch.cat([train_x, next_x])
-            train_obj = torch.cat([train_obj, new_obj])
-            train_obj_true = torch.cat([train_obj_true, new_obj_true])
-            train_obj_std = torch.cat([train_obj_std, new_obj_std])
-            
-            # 5. Compute hypervolume
-            logger.info("📈 Computing hypervolume...")
-            
-            # OPTIMIZATION: Try to use cached hypervolume from acquisition function
-            try:
-                cached_hv = calib_context._cached_pareto_data.get('hypervolume', None)
-                current_hv = cached_hv
-                logger.debug("🚀 Using cached hypervolume from acquisition function")
-            except Exception:
-                raise ValueError("Failed to compute hypervolume - check acquisition function or Pareto data")
-                
-            hvs_list.append(current_hv)
-            
-            # Save GP model and hypervolume to database
-            insert_gp_models(calib_context.db_path, iteration, model, current_hv)
-
-            logger.info(f"📊 Iteration {iteration} Sample(s) {next_sample_ids} : Hypervolume = {current_hv:.6f}")
-
-            # 6. Check convergence
-            if len(hvs_list) >= 10:  # Need sufficient history for convergence analysis
-                logger.info("🔍 Analyzing convergence...")
-                convergence_result = calib_context.analyze_convergence(hvs_list, train_obj_true, train_x, iteration)
-                
-                logger.info(f"\t📋 Convergence Status: {convergence_result['status']}")
-                logger.info(f"\t💡 Reason: {convergence_result['reason']}")
-                logger.info(f"\t🎯 Confidence: {convergence_result['convergence_confidence']:.2%}")
-                
-                if convergence_result["suggestion"]:
-                    logger.info(f"\t💡 Suggestion: {convergence_result['suggestion']}")
-                
-                # Check if we should stop early
-                if convergence_result["converged"] and convergence_result["convergence_confidence"] > 0.8:
-                    logger.info("\t🎉 Convergence detected with high confidence - stopping optimization")
-                    break
-                elif convergence_result["needs_restart"]:
-                    logger.warning("\t⚠️  Suboptimal stagnation detected - consider restarting with different settings")
-            
-            # Progress update
-            logger.info(f"✅ Completed iteration {iteration}/{calib_context.batch_size_bo} - Total samples: {len(train_x)}")
-            logger.info(f"🎯 Best fitness values: {[f'{qoi}: {fitness:.6f}' for qoi, fitness in zip(calib_context.qoi_details['QOI_Name'], torch.max(train_obj_true, dim=0)[0].tolist())]}")
-
-        logger.info("✅ Bayesian optimization completed successfully!")
-        
+        if single_qoi:
+            logger.info("🔬 Detected single QoI - using single-objective Bayesian optimization loop.")
+            single_objective_bayesian_optimization(
+                calib_context, train_x, train_obj, train_obj_true, train_obj_std, start_iteration
+            )
+        else:
+            logger.info("🔬 Detected multiple QoIs - using multi-objective Bayesian optimization loop.")
+            multi_objective_bayesian_optimization(
+                calib_context, train_x, train_obj, train_obj_true, train_obj_std, start_iteration, latest_hypervolume, resume_from_db
+            )
     except Exception as e:
         logger.error(f"❌ Error during Bayesian optimization: {e}")
         raise
