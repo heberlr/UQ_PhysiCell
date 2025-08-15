@@ -12,6 +12,9 @@ from SALib.analyze import fast as fast_analyze, rbd_fast as rbd_fast_analyze, ff
 # Discrepancy Sensitivity Indices: Error Bounds are not consistent 'l_bounds' < 'u_bounds'
 # Delta Moment-Independent Measure: Error module 'numpy' has no attribute 'trapezoid' (outdated numpy version)
 samplers_to_method = {
+    "OAT": [
+        "OAT - One-At-A-Time",
+    ],
     "Fast": [
         "FAST - Fourier Amplitude Sensitivity Test",
         "RBD-FAST - Random Balance Designs Fourier Amplitude Sensitivity Test",
