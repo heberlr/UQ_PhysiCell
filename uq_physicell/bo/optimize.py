@@ -229,7 +229,10 @@ class CalibrationContext:
             "QOI_Name": list(self.qoi_functions.keys()),
             "QOI_Function": [self.qoi_functions[key] for key in self.qoi_functions.keys()],
             "ObsData_Column": [obsData_columns[key] for key in self.qoi_functions.keys()],
-            "QoI_distanceFunction": [self.distance_functions[key]['function'].__name__ for key in self.distance_functions.keys()],
+            "QoI_distanceFunction": [
+                (func.__name__ if callable(func) else eval(func).__name__)
+                for func in [self.distance_functions[key]['function'] for key in self.distance_functions.keys()]
+            ],
             "QoI_distanceWeight": [self.distance_functions[key]['weight'] for key in self.distance_functions.keys()],
         }
 
@@ -312,7 +315,10 @@ class CalibrationContext:
             for qoi, dist_info in self.distance_functions.items():
                 dicObsData = {'time': self.dic_obsData['time'], 'value': self.dic_obsData[qoi]}
                 dicModel = {'time': replicate_result['time'], 'value': replicate_result[qoi]}
-                distance = dist_info["weight"] * dist_info["function"](dicObsData, dicModel)
+                if callable(dist_info["function"]):
+                    distance = dist_info["weight"] * dist_info["function"](dicObsData, dicModel)
+                else:
+                    distance = dist_info["weight"] * eval(dist_info["function"]).__call__(dicObsData, dicModel)
                 # Convert distance to fitness
                 if self.use_exponential_fitness: # Use exponential fitness transformation
                     fitness = np.exp(-distance)
@@ -945,6 +951,15 @@ class CalibrationContext:
         return min(diversity, 1.0)  # Cap at 1.0
 
 
+def single_objective_bayesian_optimization(calib_context, train_x, train_obj, train_obj_true, train_obj_std, start_iteration):
+    """Single-objective Bayesian optimization loop."""
+    pass
+
+def multi_objective_bayesian_optimization(calib_context, train_x, train_obj, train_obj_true, train_obj_std, start_iteration, latest_hypervolume, resume_from_db):
+    """Multi-objective Bayesian optimization loop."""
+    pass
+
+
 def run_bayesian_optimization(calib_context: CalibrationContext, additional_iterations: Optional[int] = None):
     """
     Execute the complete Bayesian optimization process.
@@ -958,6 +973,7 @@ def run_bayesian_optimization(calib_context: CalibrationContext, additional_iter
     try:
         # Check if we're resuming from existing database
         resume_from_db = os.path.exists(calib_context.db_path)
+        single_qoi = len(calib_context.qoi_details['QOI_Name']) == 1
         
         if resume_from_db:
             logger.info(f"🔄 Resuming optimization from existing database: {calib_context.db_path}")
