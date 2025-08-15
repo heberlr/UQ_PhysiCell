@@ -1,6 +1,6 @@
 import os, sys
 import logging
-from PyQt5.QtWidgets import QVBoxLayout, QLabel, QHBoxLayout, QPushButton, QComboBox, QLineEdit, QTextEdit, QDialog, QFileDialog, QInputDialog, QListWidget, QMessageBox, QSizePolicy, QApplication
+from PyQt5.QtWidgets import QVBoxLayout, QLabel, QHBoxLayout, QPushButton, QComboBox, QLineEdit, QTextEdit, QDialog, QFileDialog, QInputDialog, QListWidget, QMessageBox, QSizePolicy, QApplication, QSpacerItem
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QIntValidator, QDoubleValidator
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -54,7 +54,7 @@ def create_tab2(main_window):
     # Add the following methods to the main_window instance
     main_window.update_output_tab2 = update_output_tab2
     main_window.load_ma_database = load_ma_database
-    main_window.update_analysis_type = update_analysis_type
+    main_window.update_sampling_type = update_sampling_type
     main_window.update_local_inputs = update_local_inputs
     main_window.update_local_SA_reference = update_local_SA_reference
     main_window.update_local_SA_perturbations = update_local_SA_perturbations
@@ -63,8 +63,9 @@ def create_tab2(main_window):
     main_window.update_global_SA_range_percentage = update_global_SA_range_percentage
     main_window.sample_parameters = sample_parameters
     main_window.plot_samples = plot_samples
-    main_window.update_global_sampler_options = update_global_sampler_options
+    main_window.update_sampler_options = update_sampler_options
     main_window.run_simulations_function = run_simulations_function
+    main_window.open_qoi_definition_window = open_qoi_definition_window
     main_window.run_analysis = run_analysis
     main_window.plot_sa_results = plot_sa_results
     main_window.plot_qois = plot_qois
@@ -72,123 +73,93 @@ def create_tab2(main_window):
     layout_tab2 = QVBoxLayout()
 
     ###########################################
-    # Dropdown for sensitivity analysis type
+    # Dropdown for sampling type
     ###########################################
-    main_window.analysis_sample_label = QLabel("<b>Sensitivity Analysis Type and Parameter Sampling</b>")
-    main_window.analysis_sample_label.setAlignment(Qt.AlignCenter)
-    layout_tab2.addWidget(main_window.analysis_sample_label)
-    main_window.analysis_type_hbox = QHBoxLayout()
-    main_window.analysis_type_label = QLabel("Select Sensitivity Analysis Type:")
-    main_window.analysis_type_hbox.addWidget(main_window.analysis_type_label)
-    main_window.analysis_type_dropdown = QComboBox()
-    main_window.analysis_type_dropdown.addItems(["Local", "Global"])
-    main_window.analysis_type_dropdown.setEnabled(False)
-    main_window.analysis_type_dropdown.currentIndexChanged.connect(lambda: main_window.update_analysis_type(main_window))
-    main_window.analysis_type_hbox.addWidget(main_window.analysis_type_dropdown)
-    main_window.analysis_type_hbox.addStretch()
-    layout_tab2.addLayout(main_window.analysis_type_hbox)
+    main_window.sampling_title_label = QLabel("<b>Parameter Sampling</b>")
+    main_window.sampling_title_label.setAlignment(Qt.AlignCenter)
+    layout_tab2.addWidget(main_window.sampling_title_label)
+    main_window.sampling_type_hbox = QHBoxLayout()
+    main_window.sampling_type_label = QLabel("Parameter Sampling Type:")
+    main_window.sampling_type_dropdown = QComboBox()
+    main_window.sampling_type_dropdown.addItems(["Local", "Global"])
+    main_window.sampling_type_dropdown.currentIndexChanged.connect(lambda: main_window.update_sampling_type(main_window))
+    main_window.sampling_type_hbox.addWidget(main_window.sampling_type_label)
+    main_window.sampling_type_hbox.addWidget(main_window.sampling_type_dropdown)
+    main_window.sampling_type_hbox.addSpacing(20)  # Space between the two blocks
+    # Sampler options
+    main_window.sampler_label = QLabel("Sampler:")
+    main_window.sampler_combo = QComboBox()
+    main_window.sampling_type_hbox.addWidget(main_window.sampler_label)
+    main_window.sampling_type_hbox.addWidget(main_window.sampler_combo)
+    main_window.sampling_type_hbox.addStretch()  # Push everything to the left
+    layout_tab2.addLayout(main_window.sampling_type_hbox)
 
     ###########################################
-    # Hbox for LOCAL sentivity analysis method
+    # Hbox for LOCAL sampling method
     ###########################################
-    main_window.localSA_param_hbox = QHBoxLayout()
+    main_window.local_param_hbox = QHBoxLayout()
     # Select parameter for local SA
     main_window.local_param_label = QLabel("Select Parameter:")
     main_window.local_param_label.setVisible(False)
-    layout_tab2.addWidget(main_window.local_param_label)
+    main_window.local_param_hbox.addWidget(main_window.local_param_label)
     main_window.local_param_combo = QComboBox()
     main_window.local_param_combo.setVisible(False)
-    main_window.localSA_param_hbox.addWidget(main_window.local_param_combo)
+    main_window.local_param_hbox.addWidget(main_window.local_param_combo)
     # Reference value input
     main_window.local_ref_value_label = QLabel("Reference Value:")
     main_window.local_ref_value_label.setVisible(False)
-    main_window.localSA_param_hbox.addWidget(main_window.local_ref_value_label)
+    main_window.local_param_hbox.addWidget(main_window.local_ref_value_label)
     main_window.local_ref_value_input = QLineEdit()
     main_window.local_ref_value_input.setValidator(NonZeroDoubleValidator())
     main_window.local_ref_value_input.setVisible(False)
-    main_window.localSA_param_hbox.addWidget(main_window.local_ref_value_input)
+    main_window.local_param_hbox.addWidget(main_window.local_ref_value_input)
     # Percentage perturbations input
     main_window.local_perturb_label = QLabel("Percentage Perturbation(s) (+/-):")
     main_window.local_perturb_label.setVisible(False)
-    main_window.localSA_param_hbox.addWidget(main_window.local_perturb_label)
+    main_window.local_param_hbox.addWidget(main_window.local_perturb_label)
     main_window.local_perturb_input = QLineEdit()
     main_window.local_perturb_input.setVisible(False)
-    main_window.localSA_param_hbox.addWidget(main_window.local_perturb_input)
-    layout_tab2.addLayout(main_window.localSA_param_hbox)
+    main_window.local_param_hbox.addWidget(main_window.local_perturb_input)
+    layout_tab2.addLayout(main_window.local_param_hbox)
 
     ###########################################
-    # Vbox for GLOBAL sentivity analysis method
+    # Hbox for GLOBAL sampling method
     ###########################################
-    main_window.globalSA_vbox = QVBoxLayout()
-    main_window.globalSA_method_hbox = QHBoxLayout()
-    # Global SA method options
-    main_window.global_method_label = QLabel("Method:")
-    main_window.global_method_label.setVisible(False)
-    main_window.globalSA_method_hbox.addWidget(main_window.global_method_label)
-    main_window.global_method_combo = QComboBox()
-    main_window.global_method_combo.addItems([
-        "FAST - Fourier Amplitude Sensitivity Test",
-        "RBD-FAST - Random Balance Designs Fourier Amplitude Sensitivity Test",
-        "Sobol Sensitivity Analysis",
-        "Delta Moment-Independent Measure",
-        "Derivative-based Global Sensitivity Measure (DGSM)",
-        "Fractional Factorial",
-        "PAWN Sensitivity Analysis",
-        "High-Dimensional Model Representation",
-        "Regional Sensitivity Analysis",
-        "Discrepancy Sensitivity Indices"
-    ])
-    main_window.global_method_combo.setVisible(False)
-    main_window.global_method_combo.currentIndexChanged.connect(lambda: main_window.update_global_sampler_options(main_window))
-    main_window.globalSA_method_hbox.addWidget(main_window.global_method_combo)
-    main_window.globalSA_method_hbox.addStretch()
-    main_window.globalSA_method_hbox.addSpacing(10)
-    # Sampler options
-    main_window.global_sampler_label = QLabel("Sampler:")
-    main_window.global_sampler_label.setVisible(False)
-    main_window.globalSA_method_hbox.addWidget(main_window.global_sampler_label)
-    main_window.global_sampler_combo = QComboBox()
-    main_window.global_sampler_combo.setVisible(False)
-    main_window.globalSA_method_hbox.addWidget(main_window.global_sampler_combo)
-    main_window.globalSA_vbox.addLayout(main_window.globalSA_method_hbox)
-    main_window.globalSA_method_hbox.addStretch()
-    # Hbox of parameters
-    main_window.globalSA_parameters_hbox = QHBoxLayout()
+    main_window.global_parameters_hbox = QHBoxLayout()
     # Select parameter for global SA
     main_window.global_param_label = QLabel("Select Parameter:")
     main_window.global_param_label.setVisible(False)
-    main_window.globalSA_parameters_hbox.addWidget(main_window.global_param_label)
+    main_window.global_parameters_hbox.addWidget(main_window.global_param_label)
     main_window.global_param_combo = QComboBox()
     main_window.global_param_combo.setVisible(False)
-    main_window.globalSA_parameters_hbox.addWidget(main_window.global_param_combo)
+    main_window.global_parameters_hbox.addWidget(main_window.global_param_combo)
     # Reference value input
     main_window.global_ref_value_label = QLabel("Ref. Value:")
     main_window.global_ref_value_label.setVisible(False)
-    main_window.globalSA_parameters_hbox.addWidget(main_window.global_ref_value_label)
+    main_window.global_parameters_hbox.addWidget(main_window.global_ref_value_label)
     main_window.global_ref_value_input = QLineEdit()
     main_window.global_ref_value_input.setValidator(NonZeroDoubleValidator())
     main_window.global_ref_value_input.setVisible(False)
-    main_window.globalSA_parameters_hbox.addWidget(main_window.global_ref_value_input)
+    main_window.global_parameters_hbox.addWidget(main_window.global_ref_value_input)
     # Percentage of range of parameters input
     main_window.global_range_percentage_label = QLabel("Range (%):")
     main_window.global_range_percentage_label.setVisible(False)
-    main_window.globalSA_parameters_hbox.addWidget(main_window.global_range_percentage_label)
+    main_window.global_parameters_hbox.addWidget(main_window.global_range_percentage_label)
     main_window.global_range_percentage = QLineEdit()
     main_window.global_range_percentage.setVisible(False)
-    main_window.globalSA_parameters_hbox.addWidget(main_window.global_range_percentage)
+    main_window.global_parameters_hbox.addWidget(main_window.global_range_percentage)
     # bounds of the range - (min, max) float
     main_window.global_bounds_label = QLabel("Bounds (min, max):")
     main_window.global_bounds_label.setVisible(False)
-    main_window.globalSA_parameters_hbox.addWidget(main_window.global_bounds_label)
+    main_window.global_parameters_hbox.addWidget(main_window.global_bounds_label)
     main_window.global_bounds = QLineEdit()
     main_window.global_bounds.setReadOnly(True)
     main_window.global_bounds.setVisible(False)
-    main_window.globalSA_parameters_hbox.addWidget(main_window.global_bounds)
-    main_window.globalSA_vbox.addLayout(main_window.globalSA_parameters_hbox)
-    layout_tab2.addLayout(main_window.globalSA_vbox)
+    main_window.global_parameters_hbox.addWidget(main_window.global_bounds)
+    layout_tab2.addLayout(main_window.global_parameters_hbox)
 
     ###########################################
-    # Horizontal layout for SA buttons
+    # Horizontal layout for Sampling and Plot
     ###########################################
     buttonSA_hbox = QHBoxLayout()
     # Sample paramaters button
@@ -206,9 +177,9 @@ def create_tab2(main_window):
     layout_tab2.addLayout(buttonSA_hbox)
 
     ###########################################
-    # Horizontal layout for db file name, QoI selection, plot_qoi, and run SA button
+    # Horizontal layout for Run simulations: Define Qoi(s), Run Simulations, Plot QoI(s)
     ###########################################
-    main_window.analysis_type_label = QLabel("<b>Database, QoI, Simulations, and Sensitivity Analysis</b>")
+    main_window.analysis_type_label = QLabel("<b>Run Simulations and DefineQoI(s)</b>")
     main_window.analysis_type_label.setAlignment(Qt.AlignCenter)
     layout_tab2.addWidget(main_window.analysis_type_label)
     main_window.db_file_name_hbox = QHBoxLayout()
@@ -223,7 +194,7 @@ def create_tab2(main_window):
     main_window.define_qoi_button = QPushButton("Define QoI(s)")
     main_window.define_qoi_button.setEnabled(False)
     main_window.define_qoi_button.setStyleSheet("background-color: lightgreen; color: black")
-    main_window.define_qoi_button.clicked.connect(lambda: open_qoi_definition_window(main_window))
+    main_window.define_qoi_button.clicked.connect(lambda: main_window.open_qoi_definition_window(main_window))
     main_window.db_file_name_hbox.addWidget(main_window.define_qoi_button)
     # Run simulations button
     main_window.run_simulations_button = QPushButton("Run Simulations")
@@ -237,20 +208,45 @@ def create_tab2(main_window):
     main_window.plot_qois_button.setStyleSheet("background-color: lightgreen; color: black")
     main_window.plot_qois_button.clicked.connect(lambda: main_window.plot_qois(main_window))
     main_window.db_file_name_hbox.addWidget(main_window.plot_qois_button)
+    layout_tab2.addLayout(main_window.db_file_name_hbox)
+    # Current QoI label
+    main_window.current_qoi_label = QLabel("Current QoI(s): None")
+    main_window.current_qoi_label.setAlignment(Qt.AlignCenter)
+    layout_tab2.addWidget(main_window.current_qoi_label)
+
+    # Separator line
+    layout_tab2.addWidget(QLabel("<hr>"))
+
+    ###########################################
+    # Horizontal layout for Select SA method and Run SA button
+    ###########################################
+    main_window.SA_title_label = QLabel("<b>Sensitivity Analysis</b>")
+    main_window.SA_title_label.setAlignment(Qt.AlignCenter)
+    layout_tab2.addWidget(main_window.SA_title_label)
+    main_window.SA_name_hbox = QHBoxLayout()
+    # SA method combo
+    main_window.SA_method_label = QLabel("Method:")
+    main_window.SA_name_hbox.addWidget(main_window.SA_method_label)
+    main_window.SA_method_combo = QComboBox()
+    main_window.SA_method_combo.currentIndexChanged.connect(lambda: main_window.update_sampler_options(main_window))
+    main_window.SA_name_hbox.addWidget(main_window.SA_method_combo)
+    main_window.sampling_type_hbox.addSpacing(20)  # Space between the two blocks
     # Run SA button
     main_window.run_sa_button = QPushButton("Run SA")
     main_window.run_sa_button.setEnabled(False)
     main_window.run_sa_button.setStyleSheet("background-color: lightgreen; color: black")
     main_window.run_sa_button.clicked.connect(lambda: main_window.run_analysis(main_window))
-    main_window.db_file_name_hbox.addWidget(main_window.run_sa_button)
-    layout_tab2.addLayout(main_window.db_file_name_hbox)
-
-    ###########################################
-    # Current QoI label
-    ###########################################
-    main_window.current_qoi_label = QLabel("Current QoI(s): None")
-    main_window.current_qoi_label.setAlignment(Qt.AlignCenter)
-    layout_tab2.addWidget(main_window.current_qoi_label)
+    main_window.SA_name_hbox.addWidget(main_window.run_sa_button)
+    # Plot SA button
+    main_window.plot_sa_button = QPushButton("Plot SA")
+    main_window.plot_sa_button.setEnabled(False)
+    main_window.plot_sa_button.setStyleSheet("background-color: lightgreen; color: black")
+    main_window.plot_sa_button.clicked.connect(lambda: main_window.plot_sa_results(main_window))
+    main_window.SA_name_hbox.addWidget(main_window.plot_sa_button)
+    layout_tab2.addLayout(main_window.SA_name_hbox)
+    main_window.SA_name_hbox.addStretch() # push everything to the left
+    # Initialize the sampler options
+    main_window.update_sampling_type(main_window)
 
     # Separator line
     layout_tab2.addWidget(QLabel("<hr>"))
@@ -443,21 +439,19 @@ def load_ma_database(main_window):
         Sampler = df_metadata['Sampler'].iloc[0]
         Param_explorer_type = "Local" if Sampler == "OAT" else "Global"
         # Switch the exploration type to the one defined in the database
-        main_window.analysis_type_dropdown.setCurrentText(Param_explorer_type)
-        main_window.update_analysis_type(main_window)
-        main_window.analysis_type_dropdown.setEnabled(False)
+        main_window.sampling_type_dropdown.setCurrentText(Param_explorer_type)
+        main_window.update_sampling_type(main_window)
         if Param_explorer_type == "Global": # Global fields
-            main_window.global_method_combo.clear()
+            main_window.SA_method_combo.clear()
             if Sampler in samplers_to_method:
-                main_window.global_method_combo.addItems(samplers_to_method[Sampler])
+                main_window.SA_method_combo.addItems(samplers_to_method[Sampler])
             else: # LHS sampler map to methods that are not constrained
-                main_window.global_method_combo.addItems(samplers_to_method["Latin hypercube sampling (LHS)"])
-            main_window.global_method_combo.setCurrentText(main_window.global_method_combo.itemText(0))
-            # main_window.global_method_combo.setEnabled(False)
-            main_window.global_sampler_combo.setCurrentText(Sampler)
+                main_window.SA_method_combo.addItems(samplers_to_method["Latin hypercube sampling (LHS)"])
+            main_window.SA_method_combo.setCurrentText(main_window.SA_method_combo.itemText(0))
+            main_window.sampler_combo.setCurrentText(Sampler)
             main_window.global_param_combo.setEnabled(True)
             main_window.global_ref_value_input.setEnabled(False)
-            main_window.global_sampler_combo.setEnabled(False)
+            main_window.sampler_combo.setEnabled(False)
             main_window.global_range_percentage.setEnabled(False)
             main_window.global_bounds.setEnabled(False)
             # Populate the global_SA_parameters dictionary with values from the database
@@ -470,7 +464,13 @@ def load_ma_database(main_window):
                                                             "perturbation": float(df_parameter_space['Perturbation'].iloc[id])}
             # Update the global parameters
             main_window.update_global_inputs(main_window)
-        else: # Activate local fields
+        else: 
+            # Clean the method
+            main_window.SA_method_combo.clear()
+            main_window.SA_method_combo.addItems(samplers_to_method[Sampler])
+            main_window.SA_method_combo.setCurrentText(main_window.SA_method_combo.itemText(0))
+            main_window.sampler_combo.setCurrentText(Sampler)
+            # Activate local fields
             main_window.local_param_combo.setEnabled(True)
             main_window.local_ref_value_input.setEnabled(True)
             main_window.local_perturb_input.setEnabled(True)
@@ -495,7 +495,9 @@ def load_ma_database(main_window):
         main_window.plot_qois_button.setEnabled(True)
         # Enable the button run SA
         main_window.run_sa_button.setEnabled(True)
-
+        main_window.plot_sa_button.setEnabled(True)
+        # Disable sampling type button after successful loading
+        main_window.sampling_type_dropdown.setEnabled(False)
         # Disable sample_params button after successful loading
         main_window.sample_params_button.setEnabled(False)
         # Disable run simulations button after successful loading
@@ -511,7 +513,8 @@ def load_ma_database(main_window):
         # Reset the qois
         main_window.qoi_funcs = {}
         main_window.df_summary_qois = pd.DataFrame()
-        
+        main_window.current_qoi_label.setText("Current QoI(s): None")
+
         # print a message in the output fields of Tab 2
         message = f"Database file loaded: {main_window.ma_file_path}"
         main_window.update_output_tab2(main_window, message)
@@ -522,10 +525,16 @@ def load_ma_database(main_window):
         print(error_message)
         main_window.update_output_tab2(main_window, error_message)
 
-def update_analysis_type(main_window):
-    # Show/hide UI elements based on selected analysis type
-    analysis_type = main_window.analysis_type_dropdown.currentText()
-    if analysis_type == "Local":
+def update_sampling_type(main_window):
+    # Show/hide UI elements based on selected sampling type
+    if main_window.sampling_type_dropdown.currentText() == "Local":
+        # Update the sensitivity analysis method combo box
+        main_window.SA_method_combo.clear()
+        main_window.SA_method_combo.addItems(["OAT - One-at-a-Time"])
+        main_window.SA_method_combo.setCurrentIndex(0)
+        # Update the sampler
+        main_window.update_sampler_options(main_window)
+        main_window.sampler_combo.setCurrentIndex(0)
         # Local fields
         main_window.local_param_label.setVisible(True)
         main_window.local_param_combo.setVisible(True)
@@ -534,10 +543,6 @@ def update_analysis_type(main_window):
         main_window.local_perturb_label.setVisible(True)
         main_window.local_perturb_input.setVisible(True)
         # Global fields
-        main_window.global_method_label.setVisible(False)
-        main_window.global_method_combo.setVisible(False)
-        main_window.global_sampler_label.setVisible(False)
-        main_window.global_sampler_combo.setVisible(False)
         main_window.global_param_label.setVisible(False)
         main_window.global_param_combo.setVisible(False)
         main_window.global_ref_value_label.setVisible(False)
@@ -569,7 +574,23 @@ def update_analysis_type(main_window):
         # Initialize the input fields for the first parameter
         if main_window.local_param_combo.count() > 0:
             main_window.update_local_inputs(main_window)
-    elif analysis_type == "Global":
+    elif main_window.sampling_type_dropdown.currentText() == "Global":
+        # Update the sensitivity analysis method combo box
+        main_window.SA_method_combo.clear()
+        main_window.SA_method_combo.addItems(["FAST - Fourier Amplitude Sensitivity Test",
+            "RBD-FAST - Random Balance Designs Fourier Amplitude Sensitivity Test",
+            "Sobol Sensitivity Analysis",
+            "Delta Moment-Independent Measure",
+            "Derivative-based Global Sensitivity Measure (DGSM)",
+            "Fractional Factorial",
+            "PAWN Sensitivity Analysis",
+            "High-Dimensional Model Representation",
+            "Regional Sensitivity Analysis",
+            "Discrepancy Sensitivity Indices"
+        ])
+        # Update the sampler
+        main_window.update_sampler_options(main_window)
+        main_window.sampler_combo.setCurrentIndex(0)
         # Local fields
         main_window.local_param_label.setVisible(False)
         main_window.local_param_combo.setVisible(False)
@@ -578,10 +599,6 @@ def update_analysis_type(main_window):
         main_window.local_perturb_label.setVisible(False)
         main_window.local_perturb_input.setVisible(False)
         # Global fields
-        main_window.global_method_label.setVisible(True)
-        main_window.global_method_combo.setVisible(True)
-        main_window.global_sampler_label.setVisible(True)
-        main_window.global_sampler_combo.setVisible(True)
         main_window.global_param_label.setVisible(True)
         main_window.global_param_combo.setVisible(True)
         main_window.global_ref_value_label.setVisible(True)
@@ -590,7 +607,6 @@ def update_analysis_type(main_window):
         main_window.global_range_percentage.setVisible(True)
         main_window.global_bounds_label.setVisible(True)
         main_window.global_bounds.setVisible(True)
-
 
         # Populate the combo box with parameters from analysis and rules
         main_window.global_param_combo.clear()
@@ -620,10 +636,6 @@ def update_analysis_type(main_window):
         # Connect signals to synchronize global inputs
         main_window.global_ref_value_input.editingFinished.connect(lambda: main_window.update_global_inputs(main_window))
         main_window.global_range_percentage.editingFinished.connect(lambda: main_window.update_global_inputs(main_window))
-
-        # Ensure the sampler options are updated initially
-        main_window.global_method_combo.currentIndexChanged.connect(lambda: main_window.update_global_sampler_options(main_window))
-        main_window.update_global_sampler_options(main_window)
 
 def update_local_inputs(main_window):
     # Update the reference value and perturbations based on the selected parameter
@@ -702,8 +714,7 @@ def update_global_SA_range_percentage(main_window):
 
 def sample_parameters(main_window):
     # Sample parameters based on the selected SA
-    analysis_type = main_window.analysis_type_dropdown.currentText()
-    if analysis_type == "Local":
+    if main_window.sampling_type_dropdown.currentText() == "Local":
         # Check the validator for the reference value and perturbation inputs
         if not main_window.local_ref_value_input.hasAcceptableInput():
             QMessageBox.warning(main_window, "Invalid Input", "Reference value must be a non-zero number.")
@@ -718,12 +729,12 @@ def sample_parameters(main_window):
         except ValueError as e:
             main_window.update_output_tab2(main_window, f"Error in local sampler: {e}")
             return
-    elif analysis_type == "Global":
+    elif main_window.sampling_type_dropdown.currentText() == "Global":
         # Check the validator for the reference value and range percentage inputs
         if not main_window.global_ref_value_input.hasAcceptableInput():
             QMessageBox.warning(main_window, "Invalid Input", "Reference value must be a non-zero number.")
             return
-        sampler = main_window.global_sampler_combo.currentText()
+        sampler = main_window.sampler_combo.currentText()
         main_window.update_output_tab2(main_window, f"Sampling parameters using {sampler}...")
         # Check if samples already exist, if so, delete them
         if 'samples' in main_window.global_SA_parameters.keys():
@@ -765,7 +776,7 @@ def plot_samples(main_window):
     def update_plot():
         figure.clear()
         ax = figure.add_subplot(111)
-        if main_window.analysis_type_dropdown.currentText() == "Local":
+        if main_window.sampling_type_dropdown.currentText() == "Local":
             # print(main_window.local_SA_parameters)
             perturbations_df = pd.DataFrame(main_window.local_SA_parameters["samples"]).T
             for col in perturbations_df.columns:
@@ -810,7 +821,7 @@ def plot_samples(main_window):
                 fontsize=8,
                 ncol=2
             )
-        elif main_window.analysis_type_dropdown.currentText() == "Global":
+        elif main_window.sampling_type_dropdown.currentText() == "Global":
             # print(main_window.global_SA_parameters)
             normalized_df = pd.DataFrame(main_window.global_SA_parameters["samples"]).T
             for col in normalized_df.columns:
@@ -868,10 +879,8 @@ def plot_samples(main_window):
         main_window.update_output_tab2(main_window, f"Error plotting samples: {e}")
         QMessageBox.warning(plot_samples_window, "Plot Error", f"Error plotting samples: check the parameters ranges. ")
 
-
-   
-
-def update_global_sampler_options(main_window):
+def update_sampler_options(main_window):
+    # OAT - One-At-A-Time: combatible with OAT sampler
     # FAST - Fourier Amplitude Sensitivity Test: combatible with Fast sampler
     # RBD-FAST - Random Balance Designs Fourier Amplitude Sensitivity Test: combatible with all samplers
     # Sobol’ Sensitivity Analysis: combatible with Sobol samplers
@@ -882,42 +891,46 @@ def update_global_sampler_options(main_window):
     # High-Dimensional Model Representation: combatible with all samplers
     # Regional Sensitivity Analysis: combatible with all samplers
     # Discrepancy Sensitivity Indices: combatible with all samplers
-    # Update the global_sampler_combo options based on the selected method
+    # Update the sampler_combo options based on the selected method
     # Avoid unnecessary updates if the combo box is disabled - special case when sampler loaded from .db file will update the method list
-    if not main_window.global_sampler_combo.isEnabled(): return  
-    method = main_window.global_method_combo.currentText()
-    main_window.global_sampler_combo.clear()
 
-    if method == "FAST - Fourier Amplitude Sensitivity Test":
-        main_window.global_sampler_combo.addItems(["Fast"])
-    elif method == "RBD-FAST - Random Balance Designs Fourier Amplitude Sensitivity Test":
-        main_window.global_sampler_combo.addItems([
+    sampling_type = main_window.sampling_type_dropdown.currentText()
+    method = main_window.SA_method_combo.currentText()
+    # Clean the samplers list
+    main_window.sampler_combo.clear()
+
+    if method == "OAT - One-at-a-Time" and sampling_type == "Local": # Local sampling
+        main_window.sampler_combo.addItems(["OAT"])
+    elif method == "FAST - Fourier Amplitude Sensitivity Test" and sampling_type == "Global":
+        main_window.sampler_combo.addItems(["Fast"])
+    elif method == "RBD-FAST - Random Balance Designs Fourier Amplitude Sensitivity Test" and sampling_type == "Global":
+        main_window.sampler_combo.addItems([
             "Fast", "Fractional Factorial", "Finite Difference", 
             "Latin hypercube sampling (LHS)", "Sobol"
         ])
-    elif method == "Sobol Sensitivity Analysis":
-        main_window.global_sampler_combo.addItems(["Sobol"])
-    elif method == "Delta Moment-Independent Measure":
-        main_window.global_sampler_combo.addItems([
+    elif method == "Sobol Sensitivity Analysis" and sampling_type == "Global":
+        main_window.sampler_combo.addItems(["Sobol"])
+    elif method == "Delta Moment-Independent Measure" and sampling_type == "Global":
+        main_window.sampler_combo.addItems([
             "Fast", "Fractional Factorial", "Finite Difference", 
             "Latin hypercube sampling (LHS)", "Sobol"
         ])
-    elif method == "Derivative-based Global Sensitivity Measure (DGSM)":
-        main_window.global_sampler_combo.addItems(["Finite Difference"])
-    elif method == "Fractional Factorial":
-        main_window.global_sampler_combo.addItems(["Fractional Factorial"])
+    elif method == "Derivative-based Global Sensitivity Measure (DGSM)" and sampling_type == "Global":
+        main_window.sampler_combo.addItems(["Finite Difference"])
+    elif method == "Fractional Factorial" and sampling_type == "Global":
+        main_window.sampler_combo.addItems(["Fractional Factorial"])
     elif method in [
         "PAWN Sensitivity Analysis",
         "High-Dimensional Model Representation",
         "Regional Sensitivity Analysis",
         "Discrepancy Sensitivity Indices"
-    ]:
-        main_window.global_sampler_combo.addItems([
+    ] and sampling_type == "Global":
+        main_window.sampler_combo.addItems([
             "Fast", "Fractional Factorial", "Finite Difference", 
             "Latin hypercube sampling (LHS)", "Sobol"
         ])
-    else:
-        main_window.global_sampler_combo.addItems([])  # No compatible samplers  
+    else: # No compatible samplers
+        main_window.sampler_combo.addItems([])  
 
 def run_simulations_function(main_window):
     # Handle the execution of simulations
@@ -950,7 +963,7 @@ def run_simulations_function(main_window):
         layout.addWidget(total_threads_label)
         number_of_replicates_label = QLabel(f"Number of Replicates: {num_replicates}")
         layout.addWidget(number_of_replicates_label)
-        number_of_samples = len(main_window.local_SA_parameters.get("samples")) if main_window.analysis_type_dropdown.currentText() == "Local" else len(main_window.global_SA_parameters.get("samples"))
+        number_of_samples = len(main_window.local_SA_parameters.get("samples")) if main_window.sampling_type_dropdown.currentText() == "Local" else len(main_window.global_SA_parameters.get("samples"))
         number_of_samples_label = QLabel(f"Number of Samples: {number_of_samples}")
         layout.addWidget(number_of_samples_label)
 
@@ -982,28 +995,27 @@ def run_simulations_function(main_window):
         # Retrieve the number of workers after dialog is accepted
         num_workers = workers_input.text()
 
-        # Ensure SA_type is defined only after the dialog is accepted
-        SA_type = main_window.analysis_type_dropdown.currentText()
-        if not SA_type:
+        # Ensure sampling_type is defined only after the dialog is accepted
+        if not main_window.sampling_type_dropdown.currentText():
             main_window.update_output_tab2(main_window, "Error: Sensitivity analysis type is not selected.")
             return
 
-        # Initialize other variables only if SA_type is valid
+        # Initialize other variables only if sampling_type is valid
         SA_method, SA_sampler, SA_samples = None, None, None
-        if SA_type == "Local":
+        if main_window.sampling_type_dropdown.currentText() == "Local":
             try:
-                SA_method = "OAT"
-                SA_sampler = "OAT"
+                SA_method = main_window.SA_method_combo.currentText()
+                SA_sampler = main_window.sampler_combo.currentText()
                 SA_samples = main_window.local_SA_parameters.get("samples")
                 if SA_samples is None:
                     raise ValueError("No samples generated for local sensitivity analysis.")
             except KeyError:
                 main_window.update_output_tab2(main_window, "Error: No samples generated for local sensitivity analysis.")
                 return
-        elif SA_type == "Global":
+        elif main_window.sampling_type_dropdown.currentText() == "Global":
             try:
-                SA_method = main_window.global_method_combo.currentText()
-                SA_sampler = main_window.global_sampler_combo.currentText()
+                SA_method = main_window.SA_method_combo.currentText()
+                SA_sampler = main_window.sampler_combo.currentText()
                 SA_samples = main_window.global_SA_parameters.get("samples")
                 if SA_samples is None:
                     raise ValueError("No samples generated for global sensitivity analysis.")
@@ -1051,7 +1063,7 @@ def run_simulations_function(main_window):
         main_window.update_output_tab2(main_window, f"Running simulations with sampler: {SA_sampler} and number of samples: {len(SA_samples)}")
         model_config = {"ini_path": main_window.ini_file_path, "struc_name": main_window.struc_name_input.text().strip()}
         # Determine the samples to use according to the analysis type
-        SA_type = main_window.analysis_type_dropdown.currentText()
+        sampling_type = main_window.sampling_type_dropdown.currentText()
         # Setup logging
         # Create custom handler that writes to the GUI output text area
         gui_handler = QtTextEditLogHandler(main_window.output_text_tab2)
@@ -1070,14 +1082,14 @@ def run_simulations_function(main_window):
         )
         main_window.logger_tab2 = logging.getLogger(__name__)
         # Simulate the model with the selected samples
-        if "Local" == SA_type:
-            sampler = "OAT"
+        if main_window.sampling_type_dropdown.currentText() == "Local":
+            sampler = main_window.sampler_combo.currentText()
             # Model Analysis context
             context = ModelAnalysisContext(db_file_name, model_config, sampler, main_window.local_SA_parameters, qoi_str, num_workers=int(num_workers), logger=main_window.logger_tab2)
             context.dic_samples = SA_samples
             run_simulations(context)
-        elif "Global" == SA_type:
-            sampler = main_window.global_sampler_combo.currentText()
+        elif main_window.sampling_type_dropdown.currentText() == "Global":
+            sampler = main_window.sampler_combo.currentText()
             # Model Analysis context
             context = ModelAnalysisContext(db_file_name, model_config, sampler, main_window.global_SA_parameters, qoi_str, num_workers=int(num_workers), logger=main_window.logger_tab2)
             context.dic_samples = SA_samples
@@ -1179,29 +1191,25 @@ def run_analysis(main_window):
     all_qois_names = list(main_window.qoi_funcs.keys())
     all_times_label = [col for col in main_window.df_summary_qois.columns if col.startswith("time")]
     print(f"all_qois: {all_qois_names} and all_times: {all_times_label}")
-    if main_window.analysis_type_dropdown.currentText() == "Global":
-        global_method = main_window.global_method_combo.currentText()
+    if main_window.sampling_type_dropdown.currentText() == "Global":
+        global_method = main_window.SA_method_combo.currentText()
         try:
             main_window.sa_results, main_window.qoi_time_values = run_global_sa(main_window.global_SA_parameters, global_method, all_times_label, all_qois_names, main_window.df_summary_qois)
         except Exception as e:
             main_window.update_output_tab2(main_window, f"Error running global sensitivity analysis: {e}")
             return
-
-        # Plot the results
-        main_window.update_output_tab2(main_window, f"Plotting results for {global_method}")
-        main_window.plot_sa_results(main_window)
-    elif main_window.analysis_type_dropdown.currentText() == "Local":
+    elif main_window.sampling_type_dropdown.currentText() == "Local":
         try:
             main_window.sa_results, main_window.qoi_time_values = run_local_sa(main_window.local_SA_parameters, all_times_label, all_qois_names, main_window.df_summary_qois)
         except Exception as e:
             main_window.update_output_tab2(main_window, f"Error running local sensitivity analysis: {e}")
             return
        
-        # Plot the results
-        main_window.update_output_tab2(main_window, f"Plotting results for OAT SA.")
-        main_window.plot_sa_results(main_window)
+    main_window.update_output_tab2(main_window, "Sensitivity analysis completed.")
 
 def plot_sa_results(main_window):
+    # Plot the results
+    main_window.update_output_tab2(main_window, f"Plotting results for {main_window.SA_method_combo.currentText()}")
     # Create a new dialog window for the plot
     plot_window = QDialog(main_window)
     plot_window.setWindowTitle("Sensitivity Analysis Results")
@@ -1225,7 +1233,7 @@ def plot_sa_results(main_window):
     plot_sa_SI_hbox.addWidget(plot_sa_SI_label)
     plot_sa_SI_dropdown = QComboBox(plot_window)
     plot_sa_SI_dropdown.setEditable(False)
-    if main_window.analysis_type_dropdown.currentText() == "Global":
+    if main_window.sampling_type_dropdown.currentText() == "Global":
         qoi_label = list(main_window.sa_results.keys())[-1]
         time_label = list(main_window.sa_results[qoi_label].keys())[-1]
         sensitivity_measurements = list(main_window.sa_results[qoi_label][time_label].keys())
@@ -1256,8 +1264,8 @@ def plot_sa_results(main_window):
         # Clear the previous plot
         print(f"Plotting {selected_sm} of SA from {selected_qoi}.")
         try:
-            if main_window.analysis_type_dropdown.currentText() == "Global":
-                SA_method = main_window.global_method_combo.currentText()
+            if main_window.sampling_type_dropdown.currentText() == "Global":
+                SA_method = main_window.SA_method_combo.currentText()
                 # This is necessary because Sobol method does not return the names of the parameters
                 param_names = [key for key in main_window.global_SA_parameters.keys() if key != "samples"]
                 plot_data = pd.DataFrame([
@@ -1286,8 +1294,8 @@ def plot_sa_results(main_window):
                 handles, labels = ax.get_legend_handles_labels()
                 if handles and labels:
                     ax.legend(bbox_to_anchor=(1.05, 1), loc="upper left", title_fontsize=8, fontsize=8)
-            elif main_window.analysis_type_dropdown.currentText() == "Local":
-                SA_method = "OAT method"
+            elif main_window.sampling_type_dropdown.currentText() == "Local":
+                SA_method = main_window.SA_method_combo.currentText()
                 # Prepare the data for seaborn
                 plot_data = pd.DataFrame([
                     {
