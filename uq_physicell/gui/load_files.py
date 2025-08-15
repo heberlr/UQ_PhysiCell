@@ -89,7 +89,7 @@ def update_rules_file(main_window):
         main_window.update_output_tab1(main_window, f"Error updating rules file path: {e}")
 
 def load_ini_file(main_window, filePath=None, strucName=None):
-    # Load .ini file and extract parameters for sensitivity analysis
+    # Load .ini file and extract parameters for model exploration
     if filePath is None:
         options = QFileDialog.Options()
         main_window.ini_file_path, _ = QFileDialog.getOpenFileName(main_window, "Select .ini File", "", "INI Files (*.ini);;All Files (*)", options=options)
@@ -173,13 +173,9 @@ def load_ini_file(main_window, filePath=None, strucName=None):
             main_window.update_output_tab2(main_window, message)  # Tab 2 output
 
             # Re-enable buttons after successful loading
-            main_window.analysis_type_dropdown.setEnabled(True)
             main_window.sample_params_button.setEnabled(True)
             main_window.plot_samples_button.setEnabled(True)
             # Re-enable widgets after run_SA
-            main_window.global_method_combo.setEnabled(True)
-            main_window.global_sampler_combo.setEnabled(True)
-            main_window.global_param_combo.setEnabled(True)
             main_window.global_ref_value_input.setEnabled(True)
             main_window.global_range_percentage.setEnabled(True)
             main_window.global_bounds.setEnabled(True)
@@ -190,11 +186,10 @@ def load_ini_file(main_window, filePath=None, strucName=None):
             main_window.run_sa_button.setEnabled(False)
 
             # Update the analysis type dropdown
-            main_window.update_analysis_type(main_window)
+            main_window.update_sampling_type(main_window)
 
         except Exception as e:
             # Ensure buttons remain disabled if loading fails
-            main_window.analysis_type_dropdown.setEnabled(False)
             main_window.sample_params_button.setEnabled(False)
             main_window.plot_samples_button.setEnabled(False)
             
