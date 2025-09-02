@@ -1,6 +1,6 @@
 import os, sys
 import logging
-from PyQt5.QtWidgets import QVBoxLayout, QLabel, QHBoxLayout, QPushButton, QComboBox, QLineEdit, QTextEdit, QDialog, QFileDialog, QInputDialog, QListWidget, QMessageBox, QSizePolicy, QApplication, QSpacerItem
+from PyQt5.QtWidgets import QVBoxLayout, QLabel, QHBoxLayout, QPushButton, QComboBox, QLineEdit, QTextEdit, QDialog, QFileDialog, QInputDialog, QListWidget, QMessageBox, QSizePolicy, QApplication, QSpacerItem, QCheckBox
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QIntValidator, QDoubleValidator
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -1081,6 +1081,8 @@ def run_simulations_function(main_window):
             handlers=[gui_handler, console_handler]
         )
         main_window.logger_tab2 = logging.getLogger(__name__)
+        main_window.logger_tab2.setLevel(logging.INFO)
+        main_window.logger_tab2.handlers = [gui_handler, console_handler]
         # Simulate the model with the selected samples
         if main_window.sampling_type_dropdown.currentText() == "Local":
             sampler = main_window.sampler_combo.currentText()
@@ -1121,6 +1123,8 @@ def plot_qois(main_window):
     plot_qoi_combo.addItems(list(main_window.qoi_funcs.keys()))
     plot_qoi_hbox.addWidget(plot_qoi_label)
     plot_qoi_hbox.addWidget(plot_qoi_combo)
+    plot_qoi_mcse_checkbox = QCheckBox("Show Relative Monte Carlo Standard Error (MCSE)")
+    plot_qoi_hbox.addWidget(plot_qoi_mcse_checkbox)
     layout.addLayout(plot_qoi_hbox)
     # Create a new figure and canvas for the plot
     figure = Figure(figsize=(5, 3))
@@ -1128,7 +1132,7 @@ def plot_qois(main_window):
     layout.addWidget(canvas)
     # Calculate the QoIs if not already done
     if main_window.df_summary_qois.empty:
-        try: main_window.df_summary_qois = calculate_qoi_statistics(main_window.df_output, main_window.qoi_funcs, db_file_path = main_window.db_file_name_input.text().strip())
+        try: main_window.df_summary_qois, main_window.df_relative_mcse = calculate_qoi_statistics(main_window.df_output, main_window.qoi_funcs, db_file_path = main_window.db_file_name_input.text().strip())
         except Exception as e:
             main_window.update_output_tab2(main_window, f"Error calculating QoIs: {e}")
             return
@@ -1140,14 +1144,16 @@ def plot_qois(main_window):
         selected_qoi = plot_qoi_combo.currentText()
         # Plot the selected QoI
         if selected_qoi in main_window.qoi_funcs.keys():
-            print(f"Columns: {main_window.df_summary_qois.columns}")
-            qoi_columns = sorted([col for col in main_window.df_summary_qois.columns if col.startswith(selected_qoi)])
-            time_columns = sorted([col for col in main_window.df_summary_qois.columns if col.startswith("time_")])
+            if plot_qoi_mcse_checkbox.isChecked(): df_plot = main_window.df_relative_mcse
+            else: df_plot = main_window.df_summary_qois
+            print(f"Columns: {df_plot.columns}")
+            qoi_columns = sorted([col for col in df_plot.columns if col.startswith(selected_qoi)])
+            time_columns = sorted([col for col in df_plot.columns if col.startswith("time_")])
             # Prepare the data for seaborn
             plot_data = pd.DataFrame({
-                "Time": main_window.df_summary_qois[time_columns].values.flatten(),
-                selected_qoi: main_window.df_summary_qois[qoi_columns].values.flatten(),
-                "SampleID": main_window.df_summary_qois.index.repeat(len(qoi_columns))
+                "Time": df_plot[time_columns].values.flatten(),
+                selected_qoi: df_plot[qoi_columns].values.flatten(),
+                "SampleID": df_plot.index.repeat(len(qoi_columns))
             })
             # Plot using seaborn
             sns.lineplot(data=plot_data, x="Time", y=selected_qoi, hue="SampleID", ax=ax)
@@ -1168,6 +1174,7 @@ def plot_qois(main_window):
     try:
         # Connect the combo box to update the plot
         plot_qoi_combo.currentIndexChanged.connect(update_plot_qoi)
+        plot_qoi_mcse_checkbox.stateChanged.connect(update_plot_qoi)
         # Set the default selected qoi and update the plot
         plot_qoi_combo.setCurrentIndex(0)
         update_plot_qoi()
@@ -1183,7 +1190,7 @@ def run_analysis(main_window):
     main_window.update_output_tab2(main_window, "Running sensitivity analysis...")
      # Calculate the QoIs if not already done
     if main_window.df_summary_qois.empty:
-        try: main_window.df_summary_qois = calculate_qoi_statistics(main_window.df_output, main_window.qoi_funcs, db_file_path = main_window.db_file_name_input.text().strip())
+        try: main_window.df_summary_qois, main_window.df_relative_mcse = calculate_qoi_statistics(main_window.df_output, main_window.qoi_funcs, db_file_path = main_window.db_file_name_input.text().strip())
         except Exception as e:
             main_window.update_output_tab2(main_window, f"Error calculating QoIs: {e}")
             return
