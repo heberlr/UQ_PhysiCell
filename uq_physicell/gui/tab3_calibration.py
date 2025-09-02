@@ -166,6 +166,8 @@ def load_ini_calibration(main_window):
     main_window.tabs.setCurrentIndex(2)
     # Update the ini_file_name_input
     main_window.ini_file_name_input.setText(main_window.ini_file_path)
+    # Clean up the parameter space
+    main_window.df_param_space = pd.DataFrame()
 
 def load_bo_database(main_window):
     # Missing implementation for loading Bayesian Optimization database
@@ -330,30 +332,33 @@ def define_qois(main_window):
     
     # Function to overwrite qoi in the DataFrame
     def add_overwrite_qoi():
-        qoi_name = qoi_combo.currentText()
-        columnObsData_name = obs_combo.currentText()
-        distance = distance_combo.currentText()
-        distance_weight = distance_weight_input.text()
-        # Create the row or Overwrite qoi
-        if main_window.df_qois.empty or qoi_name not in main_window.df_qois['QoI_Name'].values:
-            new_row = pd.DataFrame([{
-                'QoI_Name': qoi_name,
-                'QoI_Function': main_window.qoi_funcs[qoi_name],
-                'ObsData_Column': columnObsData_name,
-                'QoI_distanceFunction': distance,
-                'QoI_distanceWeight': float(distance_weight)
-            }])
-            main_window.df_qois = pd.concat([main_window.df_qois, new_row], ignore_index=True)
-        else:
-            # Overwrite qoi
-            main_window.df_qois.loc[main_window.df_qois['QoI_Name'] == qoi_name, 'QoI_Function'] = main_window.qoi_funcs[qoi_name]
-            main_window.df_qois.loc[main_window.df_qois['QoI_Name'] == qoi_name, 'ObsData_Column'] = columnObsData_name
-            main_window.df_qois.loc[main_window.df_qois['QoI_Name'] == qoi_name, 'QoI_distanceFunction'] = distance
-            main_window.df_qois.loc[main_window.df_qois['QoI_Name'] == qoi_name, 'QoI_distanceWeight'] = float(distance_weight)
+        try:
+            qoi_name = qoi_combo.currentText()
+            columnObsData_name = obs_combo.currentText()
+            distance = distance_combo.currentText()
+            distance_weight = distance_weight_input.text()
+            # Create the row or Overwrite qoi
+            if main_window.df_qois.empty or qoi_name not in main_window.df_qois['QoI_Name'].values:
+                new_row = pd.DataFrame([{
+                    'QoI_Name': qoi_name,
+                    'QoI_Function': main_window.qoi_funcs[qoi_name],
+                    'ObsData_Column': columnObsData_name,
+                    'QoI_distanceFunction': distance,
+                    'QoI_distanceWeight': float(distance_weight)
+                }])
+                main_window.df_qois = pd.concat([main_window.df_qois, new_row], ignore_index=True)
+            else:
+                # Overwrite qoi
+                main_window.df_qois.loc[main_window.df_qois['QoI_Name'] == qoi_name, 'QoI_Function'] = main_window.qoi_funcs[qoi_name]
+                main_window.df_qois.loc[main_window.df_qois['QoI_Name'] == qoi_name, 'ObsData_Column'] = columnObsData_name
+                main_window.df_qois.loc[main_window.df_qois['QoI_Name'] == qoi_name, 'QoI_distanceFunction'] = distance
+                main_window.df_qois.loc[main_window.df_qois['QoI_Name'] == qoi_name, 'QoI_distanceWeight'] = float(distance_weight)
 
-        # Update the table display
-        update_qoi_table()
-    
+            # Update the table display
+            update_qoi_table()
+        except Exception as e:
+            logging.error(f"Error defining QoI: {e}")
+
     # Function to remove qoi in the Dataframe
     def remove_qoi():
         qoi_name = qoi_combo.currentText()
@@ -554,11 +559,9 @@ def run_calibration(main_window):
         console_handler.setLevel(logging.DEBUG)
         console_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
         # Configure logging
-        logging.basicConfig(
-            level=logging.INFO, 
-            handlers=[gui_handler, console_handler]
-        )
         main_window.logger_tab3 = logging.getLogger(__name__)
+        main_window.logger_tab3.setLevel(logging.INFO)
+        main_window.logger_tab3.handlers = [gui_handler, console_handler]
         context = CalibrationContext(
             db_path=main_window.calibration_file_input.text(), 
             obsData=main_window.obs_file_name_input.text(), 
