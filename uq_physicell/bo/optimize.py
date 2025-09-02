@@ -182,8 +182,7 @@ class CalibrationContext:
         self.custom_run_single_replicate_func = bo_options.get("custom_run_single_replicate_func", None)
         self.custom_aggregation_func = bo_options.get("custom_aggregation_func", None)
         
-        # Multi-objective optimization reference point
-        # Using fitness values (1/(1+distance)), ref_point should be below the worst expected fitness
+        # For multi-objective optimization the reference point is 0
         # Fitness values are in range (0, 1] -> fitness 1 is the best (distance=0), approaches 0 for very large distances
         self.ref_point = torch.tensor([0.0] * len(qoi_functions), dtype=torch.float64)  # Standard ref point for inverse fitness
         self.max_workers = bo_options.get("max_workers", os.cpu_count())  # Number of parallel workers, can be adjusted based on system capabilities
@@ -196,6 +195,7 @@ class CalibrationContext:
         self.num_replicates = self.model_config['numReplicates']
         self.workers_inner = min(self.max_workers, self.num_replicates)
         self.workers_out = max(1, self.max_workers // self.workers_inner)
+        
         # BO-specific parameters (Model evaluation = [num_initial_samples + batch_size_bo * batch_size_per_iteration]* num_replicates)
         self.num_initial_samples = bo_options.get("num_initial_samples", 2 * (len(search_space) + 1))  # Initial samples based on the number of parameters 2*(num_params + 1)  # Number of initial samples for Bayesian optimization
         self.batch_size_bo =  bo_options.get("num_iterations", 10)  # Number of BO iterations
@@ -204,13 +204,15 @@ class CalibrationContext:
         self.num_restarts_act_func = bo_options.get("num_restarts_act_func", 20)  # Number of restarts for acquisition function optimization
         self.raw_samples_act_func = bo_options.get("raw_samples_act_func", 512)  # Number of raw samples for acquisition function
         self.use_exponential_fitness = bo_options.get("use_exponential_fitness", True)
+        
         # Initialize metadata for database
         self.dic_metadata = {
-            "BO_Method": "Multi-objective optimization with qNEHVI",
+            "BO_Method": "Multi-objective optimization with qNEHVI" if len(self.qoi_functions.keys()) > 1 else "Single-objective optimization",
             "ObsData_Path": self.obsData_path,
             "Ini_File_Path": self.model_config["ini_path"],
             "StructureName": self.model_config["struc_name"],
         }
+        
         # Store enhanced strategy metadata
         acq_func_strategy = bo_options.get("acq_func_strategy", "none")
         if acq_func_strategy != "none":
