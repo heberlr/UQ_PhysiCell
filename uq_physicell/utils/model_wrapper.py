@@ -116,28 +116,50 @@ def run_replicate(PhysiCellModel: PhysiCell_Model, sample_id: int, replicate_id:
 def run_replicate_serializable(ini_path:str, struc_name:str, sampleID:int, replicateID:int, ParametersXML:dict, ParametersRules:dict, return_binary_output:bool=True, qois_dic:Union[dict, None]=None, drop_columns:list=[], custom_summary_function:Union[callable, None]=None) -> tuple:
     """
     Run a single replicate of the PhysiCell model and return the results.
+    
     Parameters:
-    - ini_path: Path to the initialization file.
-    - struc_name: Structure name.
-    - sampleID: Sample ID.
-    - replicateID: Replicate ID.
-    - ParametersXML: Dictionary of XML parameters.
-    - ParametersRules: Dictionary of rules parameters.
-    - qois_dic: Dictionary of QoIs (keys as names, values as strings).
-    - drop_columns: List of columns to drop from the output.
-    - custom_summary_function: Custom summary function to use instead of the default generic QoI function. `qois_dic` and `drop_columns` are not used if `custom_summary_function` is provided.
+        ini_path (str): Path to the initialization file.
+        struc_name (str): Structure name.
+        sampleID (int): Sample ID.
+        replicateID (int): Replicate ID.
+        ParametersXML (dict): Dictionary of XML parameters.
+        ParametersRules (dict): Dictionary of rules parameters.
+        return_binary_output (bool, optional): Whether to return results as binary data. 
+                                             Defaults to True.
+        qois_dic (dict, optional): Dictionary of QoIs (keys as names, values as strings).
+                                 Defaults to None.
+        drop_columns (list, optional): List of columns to drop from the output.
+                                     Defaults to [].
+        custom_summary_function (callable, optional): Custom summary function to use 
+                                                   instead of the default generic QoI function.
+                                                   Defaults to None.
+    
     Returns:
-    - sampleID, replicateID, result_data
+        tuple: (sampleID, replicateID, result_data)
+    
+    Note:
+        If custom_summary_function is provided, qois_dic and drop_columns are not used.
     """
     try:
+        # Initialize PhysiCell model with process tracking capabilities
         PhysiCellModel = PhysiCell_Model(ini_path, struc_name)
+        
         if custom_summary_function:
+            # Use the enhanced RunModel method that tracks processes
             result_data_nonserialized = PhysiCellModel.RunModel(
-                sampleID, replicateID, ParametersXML, ParametersRules, RemoveConfigFile=True, SummaryFunction=custom_summary_function)
-            if return_binary_output: result_data = pickle.dumps(result_data_nonserialized)
-            else: result_data = result_data_nonserialized
+                sampleID, replicateID, ParametersXML, ParametersRules, 
+                RemoveConfigFile=True, SummaryFunction=custom_summary_function)
+            
+            if return_binary_output: 
+                result_data = pickle.dumps(result_data_nonserialized)
+            else: 
+                result_data = result_data_nonserialized
         else:
-            _, _, result_data = run_replicate(PhysiCellModel, sampleID, replicateID, ParametersXML, ParametersRules, qois_dic, return_binary_output, drop_columns)
+            # Use the run_replicate function that handles QoI processing
+            _, _, result_data = run_replicate(
+                PhysiCellModel, sampleID, replicateID, 
+                ParametersXML, ParametersRules, qois_dic, 
+                return_binary_output, drop_columns)
         return sampleID, replicateID, result_data
     except Exception as e:
         raise RuntimeError(f"Error running replicate: {e}")
