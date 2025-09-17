@@ -134,9 +134,9 @@ def create_tab3(main_window):
     layout_tab3.addLayout(calibration_buttons_hbox)
 
     ###########################################
-    # Output section
+    # Display section
     ###########################################
-    main_window.output_label_tab3 = QLabel("<b>Output</b>")
+    main_window.output_label_tab3 = QLabel("<b>Display</b>")
     main_window.output_label_tab3.setAlignment(Qt.AlignCenter)
     layout_tab3.addWidget(main_window.output_label_tab3)
 
