@@ -3,6 +3,8 @@ import os, sys, io
 import logging
 import pickle
 import traceback
+import signal
+import threading
 from contextlib import redirect_stdout
 
 from uq_physicell import PhysiCell_Model
@@ -89,7 +91,12 @@ class ModelAnalysisContext:
         self.num_workers = num_workers
         self.summary_function = summary_function
         self.logger = logger if logger is not None else logging.getLogger(__name__)
-
+        
+        # Initialize cancellation flag and process tracking
+        self._cancellation_requested = False
+        self.futures = []
+        self.model = None  # Will be set in run_simulations
+        
         # Initialize metadata for database
         self.dic_metadata = {
             'Sampler': sampler,
@@ -108,6 +115,43 @@ class ModelAnalysisContext:
             self.num_workers = 1
         else:
             raise ValueError("Invalid parallel_method. Use 'inter-node' for MPI, 'inter-process' for futures, or 'serial' for single process.") 
+            
+    def cancelled(self):
+        """Check if cancellation has been requested.
+        
+        Returns:
+            bool: True if cancellation was requested, False otherwise
+        """
+        return self._cancellation_requested
+    
+    def request_cancellation(self):
+        """Request cancellation of all simulations.
+        
+        This sets the internal cancellation flag to True, which will be checked
+        by the simulation process at various points.
+        
+        Returns:
+            bool: Always returns True
+        """
+        self.logger.info("Cancellation requested")
+        self._cancellation_requested = True
+        
+        # If we have a model instance and it has active processes, terminate them
+        if hasattr(self, 'model') and self.model is not None:
+            if hasattr(self.model, 'terminate_all_simulations'):
+                self.logger.info("Terminating all active simulations...")
+                results = self.model.terminate_all_simulations()
+                for process_id, return_code in results.items():
+                    self.logger.info(f"Process {process_id} terminated with return code {return_code}")
+        
+        # Cancel futures if they exist
+        if self.parallel_method == 'inter-process' and hasattr(self, 'futures'):
+            for future in self.futures:
+                if not future.done() and not future.cancelled():
+                    future.cancel()
+                    self.logger.info(f"Cancelled future {future}")
+        
+        return True
 
 def run_simulations(context: ModelAnalysisContext):
     """Run PhysiCell simulations based on the provided analysis context.
@@ -137,6 +181,20 @@ def run_simulations(context: ModelAnalysisContext):
         >>> context.dic_samples = run_global_sampler(params, 'LHS', N=100)
         >>> run_simulations(context)
     """
+    # Only set up signal handlers if we're in the main thread of the main interpreter
+    if threading.current_thread() is threading.main_thread():
+        def signal_handler(sig, frame):
+            context.logger.info(f"Received signal {sig}, initiating graceful shutdown")
+            context.request_cancellation()
+            # If it's a keyboard interrupt and we're in the main process, exit
+            if sig == signal.SIGINT and context.parallel_method != 'inter-process':
+                sys.exit(0)
+        
+        # Register signal handlers
+        if context.parallel_method != 'inter-node':  # Don't override MPI's own signal handling
+            signal.signal(signal.SIGINT, signal_handler)
+            signal.signal(signal.SIGTERM, signal_handler)
+    
     # Initialize the parallelization method
     if context.parallel_method == 'inter-node':
         use_mpi = True
@@ -156,6 +214,8 @@ def run_simulations(context: ModelAnalysisContext):
     # Initialize the PhysiCell model - in all ranks to avoid issues with MPI
     try:
         PhysiCellModel = PhysiCell_Model(context.dic_metadata['IniFilePath'], context.dic_metadata['StrucName'])
+        # Store the model in the context for cancellation support
+        context.model = PhysiCellModel
     except Exception as e:
         context.logger.error(f"Error initializing PhysiCell model: {e}")
         raise
@@ -234,31 +294,77 @@ def run_simulations(context: ModelAnalysisContext):
     if use_futures:
         # Use concurrent.futures for parallel execution
         with ProcessPoolExecutor(max_workers=context.num_workers) as executor:
-            futures = []
+            context.futures = []  # Store futures in context for cancellation support
             for ind_sim in range(len(All_Samples)):
+                if context.cancelled():
+                    context.logger.info("Simulation cancelled before submitting all jobs.")
+                    return
                 ParametersXML = {key: All_Parameters[ind_sim][key] for key in params_xml} if params_xml else np.array([])
                 ParametersRules = {key: All_Parameters[ind_sim][key] for key in params_rules} if params_rules else np.array([])
                 if context.summary_function:
-                    futures.append(executor.submit(
+                    context.futures.append(executor.submit(
                         run_replicate_serializable, context.dic_metadata['IniFilePath'], context.dic_metadata['StrucName'],
                         All_Samples[ind_sim], All_Replicates[ind_sim],
                         ParametersXML, ParametersRules, custom_summary_function=context.summary_function
                     ))
                 else:
-                    futures.append(executor.submit(
+                    context.futures.append(executor.submit(
                         run_replicate_serializable, context.dic_metadata['IniFilePath'], context.dic_metadata['StrucName'],
                         All_Samples[ind_sim], All_Replicates[ind_sim],
                         ParametersXML, ParametersRules, context.qois_dict if context.qois_dict else None
                     ))
 
             # Collect results and write to the database
-            for future in futures:
-                sample_id, replicate_id, result_data = future.result()
-                context.logger.info(f"Writing to the database for Sample: {sample_id}, Replicate: {replicate_id}")
+            from concurrent.futures import TimeoutError, as_completed
+            
+            # Use as_completed with a short timeout to avoid blocking when cancelled
+            remaining_futures = list(context.futures)
+            while remaining_futures and not context.cancelled():
                 try:
-                    insert_output(context.db_path, sample_id, replicate_id, result_data)
-                except Exception as e:
-                    context.logger.info(f"Error writing to the database: {e}")
+                    # Use a short timeout to check cancellation frequently
+                    for future_done in as_completed(remaining_futures, timeout=0.5):
+                        remaining_futures.remove(future_done)
+                        
+                        if context.cancelled():
+                            context.logger.info("Simulation cancelled during result collection.")
+                            break
+                        
+                        if future_done.cancelled():
+                            context.logger.info("Future was cancelled, skipping result collection.")
+                            continue
+                        
+                        try:
+                            sample_id, replicate_id, result_data = future_done.result(timeout=0.5)
+                            context.logger.info(f"Writing to the database for Sample: {sample_id}, Replicate: {replicate_id}")
+                            try:
+                                insert_output(context.db_path, sample_id, replicate_id, result_data)
+                            except Exception as e:
+                                context.logger.error(f"Error writing to the database: {e}")
+                        except TimeoutError:
+                            # Future is not done yet, will be picked up in the next iteration
+                            remaining_futures.append(future_done)
+                            context.logger.debug("Future not yet complete, will check again.")
+                        except Exception as e:
+                            context.logger.error(f"Error retrieving future result: {e}")
+                
+                except TimeoutError:
+                    # No futures completed within timeout, check cancellation and continue
+                    if context.cancelled():
+                        context.logger.info("Simulation cancelled while waiting for futures to complete.")
+                        break
+                
+                # If cancellation was requested, exit the loop
+                if context.cancelled():
+                    context.logger.info("Breaking out of future collection loop due to cancellation.")
+                    break
+            
+            # If we cancelled, make sure all futures are cancelled
+            if context.cancelled():
+                context.logger.info("Cancelling any remaining futures.")
+                for future in remaining_futures:
+                    if not future.done() and not future.cancelled():
+                        future.cancel()
+                return
     
     ###################################
     # Running using MPI
@@ -270,6 +376,9 @@ def run_simulations(context: ModelAnalysisContext):
 
         # Run simulations (MPI)
         for ind_sim in SplitIndexes[rank]:
+            if context.cancelled():
+                context.logger.info(f"Rank {rank}: Simulation cancelled.")
+                break
             ParametersXML = {key: All_Parameters[ind_sim][key] for key in params_xml} if params_xml else np.array([])
             ParametersRules = {key: All_Parameters[ind_sim][key] for key in params_rules} if params_rules else np.array([])
             if context.summary_function:
@@ -295,7 +404,6 @@ def run_simulations(context: ModelAnalysisContext):
             # Pass the token to the next rank
             if rank < size - 1:
                 comm.send(None, dest=rank + 1, tag=0)
-        
         comm.Barrier()
         MPI.Finalize()
 
@@ -306,6 +414,9 @@ def run_simulations(context: ModelAnalysisContext):
         context.logger.info(f"Rank {rank} assigned {len(All_Samples)} simulations.")
         # Run simulations sequentially
         for ind_sim in range(len(All_Samples)):
+            if context.cancelled():
+                context.logger.info("Sequential simulation cancelled.")
+                break
             ParametersXML = {key: All_Parameters[ind_sim][key] for key in params_xml} if params_xml else np.array([])
             ParametersRules = {key: All_Parameters[ind_sim][key] for key in params_rules} if params_rules else np.array([])
             if context.summary_function:
