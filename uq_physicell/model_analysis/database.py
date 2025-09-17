@@ -418,7 +418,6 @@ def check_simulations_db(PhysiCellModel: PhysiCell_Model, sampler: str, param_di
         return False, parameters_missing, samples_missing, replicates_missing
 
     try:
-       
         # Load the database structure
         df_metadata, df_parameter_space, df_qois, dic_samples_db, df_data_unserialized = load_structure(db_file)
 
@@ -435,8 +434,9 @@ def check_simulations_db(PhysiCellModel: PhysiCell_Model, sampler: str, param_di
 
         # Check if ParameterSpace matches the expected values
         for sample_id, params in dic_samples.items():
-            if not np.array_equal(dic_samples_db[sample_id].values(), params.values()):
-                raise ValueError(f"ParameterSpace mismatch for SampleID {sample_id}. Expected: {params.values()}, Found: {dic_samples_db[sample_id].values()}.")
+            # Use set items comparison to ignore order of keys
+            if set(dic_samples_db[sample_id].items()) != set(params.items()):
+                raise ValueError(f"ParameterSpace mismatch for SampleID {sample_id}. Expected: {params}, Found: {dic_samples_db[sample_id]}.")
 
         # Check if QoIs match the expected values
         if qois_dic: # not None
