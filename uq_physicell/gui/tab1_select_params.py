@@ -1,4 +1,4 @@
-from PyQt5.QtWidgets import QScrollArea, QWidget, QVBoxLayout, QLabel, QHBoxLayout, QPushButton, QLineEdit, QTextEdit, QComboBox, QFileDialog, QInputDialog, QMessageBox, QGroupBox
+from PyQt5.QtWidgets import QScrollArea, QWidget, QVBoxLayout, QLabel, QHBoxLayout, QPushButton, QLineEdit, QTextEdit, QComboBox, QFileDialog, QInputDialog, QMessageBox, QGroupBox, QTableWidget, QTableWidgetItem, QHeaderView
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QIntValidator
 import os
@@ -29,7 +29,8 @@ def create_tab1(main_window):
     main_window.add_parameter_to_analysis = add_parameter_to_analysis
     main_window.remove_parameter = remove_parameter
     main_window.update_rules_file = update_rules_file
-    main_window.update_ini_preview = update_ini_preview
+    # main_window.update_ini_preview = update_ini_preview
+    main_window.update_preview_table = update_preview_table
     main_window.update_output_tab1 = update_output_tab1
     main_window.save_ini_file = save_ini_file
     main_window.load_ini_file = load_ini_file
@@ -149,23 +150,34 @@ def create_tab1(main_window):
     # Separator line
     layout_tab1.addWidget(QLabel("<hr>"))
 
-    # Preview of .ini file
-    main_window.ini_preview_label = QLabel("<b>.ini File Preview</b>")
+    # Preview table
+    main_window.ini_preview_label = QLabel("<b> Preview Table</b>")
     main_window.ini_preview_label.setAlignment(Qt.AlignCenter)
     layout_tab1.addWidget(main_window.ini_preview_label)
+    main_window.preview_table = QTableWidget()
+    main_window.preview_table.setColumnCount(4)
+    main_window.preview_table.setHorizontalHeaderLabels(["Parameter Path", "Value", "Name", "Place"])
+    main_window.preview_table.setEditTriggers(QTableWidget.NoEditTriggers)  # Make table non-editable
+    header = main_window.preview_table.horizontalHeader()
+    for col in range(main_window.preview_table.columnCount()):
+        header.setSectionResizeMode(col, QHeaderView.Stretch)
+    # Set gray background for header
+    header = main_window.preview_table.horizontalHeader()
+    header.setStyleSheet("QHeaderView::section { background-color: lightgray; color: black; font-weight: bold; }")
+    layout_tab1.addWidget(main_window.preview_table)
 
-    main_window.ini_preview_scroll = QVBoxLayout()
-    main_window.ini_preview_text = QTextEdit()
-    main_window.ini_preview_text.setReadOnly(True)
-    main_window.ini_preview_text.setMinimumHeight(150)
-    main_window.ini_preview_scroll.addWidget(main_window.ini_preview_text)
-    layout_tab1.addLayout(main_window.ini_preview_scroll)
+    # main_window.ini_preview_scroll = QVBoxLayout()
+    # main_window.ini_preview_text = QTextEdit()
+    # main_window.ini_preview_text.setReadOnly(True)
+    # main_window.ini_preview_text.setMinimumHeight(150)
+    # main_window.ini_preview_scroll.addWidget(main_window.ini_preview_text)
+    # layout_tab1.addLayout(main_window.ini_preview_scroll)
 
     # Separator line
     layout_tab1.addWidget(QLabel("<hr>"))
 
-    # Output section
-    main_window.output_label = QLabel("<b>Output</b>")
+    # Display section
+    main_window.output_label = QLabel("<b>Display</b>")
     main_window.output_label.setAlignment(Qt.AlignCenter)
     layout_tab1.addWidget(main_window.output_label)
 
@@ -516,7 +528,7 @@ def set_rule_parameter(main_window):
         old_value = main_window.csv_data.iloc[rule_row.index[0], column_index]
         main_window.selected_rule_label.setText(f"Rule Path: {rule_key}")
         main_window.selected_rule_value_label.setText(f"Rule Value: {old_value} \u2794 {new_value}")
-        main_window.update_ini_preview(main_window)
+        main_window.update_preview_table(main_window)
         main_window.update_output_tab1(main_window, f"Set rule parameter '{rule_key}' to value '{new_value}'.")
     except Exception as e:
         main_window.update_output_tab1(main_window, f"Error setting rule parameter: {e}")
@@ -563,7 +575,7 @@ def add_rule_to_analysis(main_window):
             main_window.analysis_rules_parameters[rule_key] = [None, friendly_name]
             main_window.selected_rule_label.setText(f"Rule Path: {rule_key}")
             main_window.selected_rule_value_label.setText(f"Rule Value: {old_value} \u2794 <analysis>")
-            main_window.update_ini_preview(main_window)
+            main_window.update_preview_table(main_window)
             main_window.update_output_tab1(main_window, f"Added rule '{rule_key}' to analysis.")
         else:
             main_window.update_output_tab1(main_window, "Error: Friendly name is required.")
@@ -590,7 +602,7 @@ def remove_rule_parameter(main_window):
             main_window.update_output_tab1(main_window, f"Removed analysis rule parameter '{rule_key}'.")
 
         # Update the selected rule label and value
-        main_window.update_ini_preview(main_window)
+        main_window.update_preview_table(main_window)
     except Exception as e:
         main_window.update_output_tab1(main_window, f"Error removing rule parameter: {e}")
 
@@ -657,7 +669,7 @@ def set_parameter_value(main_window):
             path = main_window.get_xml_path(main_window, main_window.current_leaf_node)
             main_window.fixed_parameters[path] = new_value
             main_window.new_value_input.clear()
-            main_window.update_ini_preview(main_window)
+            main_window.update_preview_table(main_window)
             main_window.update_selected_param_label(main_window, path, main_window.current_leaf_node.text.strip() if main_window.current_leaf_node.text else "None")
             main_window.update_output_tab1(main_window, f"Set parameter '{path}' to value '{new_value}'")
             # Check if the parameter is a rules file or folder
@@ -673,7 +685,7 @@ def add_parameter_to_analysis(main_window):
         try:
             path = main_window.get_xml_path(main_window, main_window.current_leaf_node)
             main_window.analysis_parameters[path] = [None, friendly_name]
-            main_window.update_ini_preview(main_window)
+            main_window.update_preview_table(main_window)
             main_window.update_selected_param_label(main_window, path, main_window.current_leaf_node.text.strip() if main_window.current_leaf_node.text else "None")
             main_window.update_output_tab1(main_window, f"Added parameter '{path}' to analysis with friendly name '{friendly_name}'")
         except Exception as e:
@@ -689,13 +701,56 @@ def remove_parameter(main_window):
         if path in main_window.analysis_parameters:
             del main_window.analysis_parameters[path]
             main_window.update_output_tab1(main_window, f"Removed analysis parameter '{path}'")
-        main_window.update_ini_preview(main_window)
+        main_window.update_preview_table(main_window)
         main_window.update_selected_param_label(main_window, path, main_window.current_leaf_node.text.strip() if main_window.current_leaf_node.text else "None")
         # Check if the parameter is a rules file or folder
         if path == ".//cell_rules/rulesets/ruleset/filename" or path == ".//cell_rules/rulesets/ruleset/folder":
             main_window.update_rules_file(main_window)
     except Exception as e:
         main_window.update_output_tab1(main_window, f"Error removing parameter: {e}")
+
+def update_preview_table(main_window):
+    # Clear the preview table
+    main_window.preview_table.setRowCount(0)
+    # Update the preview table with the current parameters
+    if (main_window.fixed_parameters or main_window.analysis_parameters or main_window.fixed_rules_parameters or main_window.analysis_rules_parameters):
+        # Set the number of rows in the preview table
+        total_rows = (len(main_window.fixed_parameters) + len(main_window.analysis_parameters) +
+                      len(main_window.fixed_rules_parameters) + len(main_window.analysis_rules_parameters))
+        main_window.preview_table.setRowCount(total_rows)
+        row_position = 0
+        # Fixed parameters
+        for path, value in main_window.fixed_parameters.items():
+            main_window.preview_table.setItem(row_position, 0, QTableWidgetItem(path))
+            main_window.preview_table.setItem(row_position, 1, QTableWidgetItem(str(value)))
+            main_window.preview_table.setItem(row_position, 2, QTableWidgetItem(""))
+            main_window.preview_table.setItem(row_position, 3, QTableWidgetItem("XML"))
+            row_position += 1
+
+        # Analysis parameters
+        for path, value in main_window.analysis_parameters.items():
+            main_window.preview_table.setItem(row_position, 0, QTableWidgetItem(path))
+            main_window.preview_table.setItem(row_position, 1, QTableWidgetItem("<variable>"))
+            main_window.preview_table.setItem(row_position, 2, QTableWidgetItem(str(value[1])))
+            main_window.preview_table.setItem(row_position, 3, QTableWidgetItem("XML"))
+            row_position += 1
+
+        # Fixed rules parameters
+        for path, value in main_window.fixed_rules_parameters.items():
+            main_window.preview_table.setItem(row_position, 0, QTableWidgetItem(path))
+            main_window.preview_table.setItem(row_position, 1, QTableWidgetItem(str(value)))
+            main_window.preview_table.setItem(row_position, 2, QTableWidgetItem(""))
+            main_window.preview_table.setItem(row_position, 3, QTableWidgetItem("CSV"))
+            row_position += 1
+
+        # Analysis rules parameters
+        for path, value in main_window.analysis_rules_parameters.items():
+            main_window.preview_table.setItem(row_position, 0, QTableWidgetItem(path))
+            main_window.preview_table.setItem(row_position, 1, QTableWidgetItem("<variable>"))
+            main_window.preview_table.setItem(row_position, 2, QTableWidgetItem(str(value[1])))
+            main_window.preview_table.setItem(row_position, 3, QTableWidgetItem("CSV"))
+            row_position += 1
+
 
 
 def update_ini_preview(main_window):
