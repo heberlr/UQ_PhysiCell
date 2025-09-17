@@ -12,15 +12,18 @@ import ast # string to literal
 from shutil import copyfile
 import time
 import copy
+import datetime
 
 class PhysiCell_Model:
     """ A class to manage PhysiCell model configurations and executions.
+    
     This class handles the setup of PhysiCell models, including reading configuration files,
     generating XML files, and running simulations with specified parameters.
+    
     Parameters:
-    - configFilePath: Path to the configuration file (INI format).
-    - keyModel: Key in the configuration file to identify the model.
-    - verbose: If True, prints detailed information during execution.
+        configFilePath (str): Path to the configuration file (INI format).
+        keyModel (str): Key in the configuration file to identify the model.
+        verbose (bool): If True, prints detailed information during execution.
     """
     def __init__(self, configFilePath: str, keyModel: str, verbose: bool = False) -> None:
         self.configFilePath = configFilePath
@@ -29,7 +32,9 @@ class PhysiCell_Model:
         self._load_config(configFilePath, keyModel)
         self._load_xml_reference()
         self._load_rules_reference()
-
+        # Dictionary to track all active processes
+        self.active_processes = {}
+        
     def _load_config(self, configFilePath: str, keyModel: str) -> None:
         configFile = configparser.ConfigParser()
         if self.verbose:
@@ -134,6 +139,133 @@ class PhysiCell_Model:
 
     def RunModel(self, SampleID: int, ReplicateID: int, Parameters: Union[np.ndarray, dict] = dict(), ParametersRules: Union[np.ndarray, dict] = dict(), RemoveConfigFile: bool = True, SummaryFunction: Union[None, str] = None) -> Union[None, pd.DataFrame]:
         return RunModel(self, SampleID, ReplicateID, Parameters, ParametersRules, RemoveConfigFile, SummaryFunction)
+    def run_simulation_subprocess(self, XMLFile, sample_id=None, replicate_id=None):
+        """
+        Start the simulation as a subprocess and return the process handle.
+        
+        Args:
+            XMLFile (str): Path to the XML configuration file for the simulation
+            sample_id (int, optional): Identifier for the parameter sample
+            replicate_id (int, optional): Identifier for the simulation replicate
+            
+        Returns:
+            subprocess.Popen: Process handle for the running simulation
+        """
+        callingModel = [self.PC_executable, XMLFile]
+        process = subprocess.Popen(callingModel, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+        
+        # Register the process if sample_id and replicate_id are provided
+        if sample_id is not None and replicate_id is not None:
+            process_id = f"{sample_id}_{replicate_id}"
+            self.active_processes[process_id] = {
+                'process': process,
+                'pid': process.pid,
+                'sample_id': sample_id,
+                'replicate_id': replicate_id,
+                'xml_file': XMLFile,
+                'start_time': datetime.datetime.now()
+            }
+            if self.verbose:
+                print(f"Registered process {process_id} with PID {process.pid}")
+        
+        return process
+
+    def terminate_simulation(self, process=None, process_id=None, sample_id=None, replicate_id=None):
+        """
+        Terminate a running simulation subprocess.
+        
+        Can identify the process by:
+        - Direct process handle
+        - Process ID (in format "{sample_id}_{replicate_id}")
+        - Sample ID and replicate ID pair
+        
+        Args:
+            process (subprocess.Popen, optional): Process handle to terminate
+            process_id (str, optional): Process ID in format "{sample_id}_{replicate_id}"
+            sample_id (int, optional): Sample ID to identify process
+            replicate_id (int, optional): Replicate ID to identify process
+            
+        Returns:
+            int: Return code from the terminated process, or None if process not found
+        """
+        # Resolve the process to terminate
+        if process is None:
+            if process_id is not None:
+                if process_id in self.active_processes:
+                    process = self.active_processes[process_id]['process']
+                else:
+                    return None
+            elif sample_id is not None and replicate_id is not None:
+                process_id = f"{sample_id}_{replicate_id}"
+                if process_id in self.active_processes:
+                    process = self.active_processes[process_id]['process']
+                else:
+                    return None
+            else:
+                return None
+        
+        # Terminate the process if it's still running
+        return_code = None
+        if process and process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+                return_code = process.returncode
+            except subprocess.TimeoutExpired:
+                process.kill()
+                try:
+                    process.wait(timeout=2)
+                    return_code = process.returncode
+                except subprocess.TimeoutExpired:
+                    if self.verbose:
+                        print(f"Failed to kill process {process.pid}")
+        
+        # Remove process from active_processes if it was tracked
+        if process_id in self.active_processes:
+            del self.active_processes[process_id]
+        elif sample_id is not None and replicate_id is not None:
+            process_id = f"{sample_id}_{replicate_id}"
+            if process_id in self.active_processes:
+                del self.active_processes[process_id]
+                
+        return return_code
+        
+    def terminate_all_simulations(self):
+        """
+        Terminate all active simulation processes.
+        
+        Returns:
+            dict: Dictionary of process IDs and their termination return codes
+        """
+        results = {}
+        process_ids = list(self.active_processes.keys())  # Create a copy of keys to avoid dict size change during iteration
+        
+        for process_id in process_ids:
+            if self.verbose:
+                print(f"Terminating process {process_id}")
+            return_code = self.terminate_simulation(process_id=process_id)
+            results[process_id] = return_code
+            
+        return results
+        
+    def get_active_processes_info(self):
+        """
+        Get information about all active processes.
+        
+        Returns:
+            dict: Dictionary containing information about all active processes
+        """
+        # Update status of all processes
+        for process_id, info in self.active_processes.items():
+            process = info['process']
+            if process.poll() is not None:
+                info['status'] = 'finished'
+                info['return_code'] = process.returncode
+            else:
+                info['status'] = 'running'
+                info['runtime'] = (datetime.datetime.now() - info['start_time']).total_seconds()
+        
+        return self.active_processes 
 
 def check_parameters_input(model: PhysiCell_Model, parameters_input_xml: Union[np.ndarray, dict], parameters_input_rules: Union[np.ndarray, dict]) -> None:
     if model.verbose:
@@ -240,13 +372,14 @@ def RunModel(model: PhysiCell_Model, SampleID: int, ReplicateID: int, Parameters
 
         if model.verbose:
             print(f"\t\t>> Running model ...")
-        callingModel = [model.PC_executable, XMLFile]
-        cache = subprocess.run(callingModel, universal_newlines=True, capture_output=True)
-        if cache.returncode != 0:
+        # Use run_simulation_subprocess with tracking
+        process = model.run_simulation_subprocess(XMLFile, SampleID, ReplicateID)
+        stdout, stderr = process.communicate()
+        if process.returncode != 0:
             raise ValueError(f"""Error: model output error! 
-            Executable: {model.PC_executable} XML File: {XMLFile}. returned: {str(cache.returncode)}
+            Executable: {model.PC_executable} XML File: {XMLFile}. returned: {str(process.returncode)}
             Last 1000 characters of the PhysiCell output:
-            {cache.stdout[-1000:]}""")
+            {stdout[-1000:]}""")
 
         if RemoveConfigFile:
             if model.verbose:
