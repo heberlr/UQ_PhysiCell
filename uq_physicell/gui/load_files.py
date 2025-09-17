@@ -14,7 +14,7 @@ def load_xml_file(main_window, filePath=None):
     main_window.fixed_parameters.clear()
     main_window.analysis_rules_parameters.clear()
     main_window.fixed_rules_parameters.clear()
-    main_window.ini_preview_text.clear()
+    # main_window.preview_table.clear()
     main_window.output_text.clear()
     # Load the XML file and parse it
     if filePath is None:
@@ -152,6 +152,7 @@ def load_ini_file(main_window, filePath=None, strucName=None):
             if 'rulesFile_ref' in config[struc_name].keys():
                 main_window.rule_path = config[struc_name]['rulesFile_ref']
                 main_window.load_csv_file(main_window) # load the rules CSV file
+                main_window.load_csv_file(main_window) # the rules section in the tab
                 for key, value in eval(config[struc_name]['parameters_rules']).items():
                     if isinstance(value, list):
                         main_window.analysis_rules_parameters[key] = value
@@ -159,7 +160,7 @@ def load_ini_file(main_window, filePath=None, strucName=None):
                         main_window.fixed_rules_parameters[key] = value
 
             # Update the preview of the .ini file
-            main_window.update_ini_preview(main_window)
+            main_window.update_preview_table(main_window)
 
             # Clean the parameter samples
             if hasattr(main_window, 'local_SA_parameters'):
