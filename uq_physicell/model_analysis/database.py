@@ -231,7 +231,7 @@ def insert_qois(db_file: str, qois_dic: dict):
     try:
         print(f"Inserting {qois_dic} QoIs into the database")
         # If qois_dic is None or empty, insert a placeholder
-        if qois_dic is not None:
+        if qois_dic is None:
             cursor.execute('INSERT INTO QoIs (QOI_Name, QOI_Function) VALUES (?, ?)', (None, None))
             conn.commit()
             conn.close()
@@ -439,7 +439,7 @@ def check_simulations_db(PhysiCellModel: PhysiCell_Model, sampler: str, param_di
                 raise ValueError(f"ParameterSpace mismatch for SampleID {sample_id}. Expected: {params}, Found: {dic_samples_db[sample_id]}.")
 
         # Check if QoIs match the expected values
-        if qois_dic: # not None
+        if qois_dic is not None:
             if df_qois['QOI_Name'].to_list() != list(qois_dic.keys()):
                 raise ValueError(f"QoIs mismatch. Expected: {list(qois_dic.keys())}, Found: {df_qois['QOI_Name'].to_list()}.")
             if df_qois['QOI_Function'].to_list() != list(qois_dic.values()):
@@ -447,7 +447,7 @@ def check_simulations_db(PhysiCellModel: PhysiCell_Model, sampler: str, param_di
 
         # Check for missing samples
         missing_samples = [sample_id for sample_id in dic_samples.keys() if sample_id not in set(dic_samples_db.keys())]
-        print(f"Missing samples: {missing_samples}")
+        # print(f"Missing samples: {missing_samples}")
         
         # Add missing samples to the database
         if missing_samples:
