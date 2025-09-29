@@ -22,8 +22,8 @@ def create_tab1(main_window):
     main_window.set_rule_parameter = set_rule_parameter
     main_window.add_rule_to_analysis = add_rule_to_analysis
     main_window.remove_rule_parameter = remove_rule_parameter
-    main_window.get_xml_path = get_xml_path
-    main_window.get_xml_value = get_xml_value
+    main_window.get_parameter_path_xml = get_parameter_path_xml
+    main_window.get_parameter_value_xml = get_parameter_value_xml
     main_window.get_rule_value = get_rule_value
     main_window.set_parameter_value = set_parameter_value
     main_window.add_parameter_to_analysis = add_parameter_to_analysis
@@ -279,7 +279,7 @@ def handle_combo_selection(main_window, combo_box, parent_node):
             else:
                 # Leaf node reached, display path and value
                 main_window.current_leaf_node = child
-                path = main_window.get_xml_path(main_window, child)
+                path = main_window.get_parameter_path_xml(main_window, child)
                 value = child.text.strip() if child.text else "None"
 
                 # Update the parameter and value labels
@@ -606,7 +606,7 @@ def remove_rule_parameter(main_window):
     except Exception as e:
         main_window.update_output_tab1(main_window, f"Error removing rule parameter: {e}")
 
-def get_xml_path(main_window, node):
+def get_parameter_path_xml(main_window, node):
     # Recursively get the XML tree path of the given node in a format compatible with xml_root.findall()
     path = []
     while node is not None:
@@ -624,7 +624,7 @@ def get_xml_path(main_window, node):
         node = main_window.parent_map.get(node)  # Use the parent map to find the parent
     return ".//" + "/".join(path)
 
-def get_xml_value(main_window, path):
+def get_parameter_value_xml(main_window, path):
     # Retrieve the default value from the XML file for a given path
     try:
         element = main_window.xml_tree.find(path)
@@ -666,7 +666,7 @@ def set_parameter_value(main_window):
     new_value = main_window.new_value_input.text()
     if new_value:
         try:
-            path = main_window.get_xml_path(main_window, main_window.current_leaf_node)
+            path = main_window.get_parameter_path_xml(main_window, main_window.current_leaf_node)
             main_window.fixed_parameters[path] = new_value
             main_window.new_value_input.clear()
             main_window.update_preview_table(main_window)
@@ -683,7 +683,7 @@ def add_parameter_to_analysis(main_window):
     friendly_name, ok = QInputDialog.getText(main_window, "Add Parameter to Analysis", "Enter a friendly name:")
     if ok and friendly_name:
         try:
-            path = main_window.get_xml_path(main_window, main_window.current_leaf_node)
+            path = main_window.get_parameter_path_xml(main_window, main_window.current_leaf_node)
             main_window.analysis_parameters[path] = [None, friendly_name]
             main_window.update_preview_table(main_window)
             main_window.update_selected_param_label(main_window, path, main_window.current_leaf_node.text.strip() if main_window.current_leaf_node.text else "None")
@@ -694,7 +694,7 @@ def add_parameter_to_analysis(main_window):
 def remove_parameter(main_window):
     # Remove the selected parameter from fixed or analysis parameters
     try:
-        path = main_window.get_xml_path(main_window, main_window.current_leaf_node)
+        path = main_window.get_parameter_path_xml(main_window, main_window.current_leaf_node)
         if path in main_window.fixed_parameters:
             del main_window.fixed_parameters[path]
             main_window.update_output_tab1(main_window, f"Removed fixed parameter '{path}'")
