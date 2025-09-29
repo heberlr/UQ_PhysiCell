@@ -99,7 +99,7 @@ def _get_SA_problem(params_dict: dict) -> dict:
     Args:
         params_dict (dict): Dictionary containing parameter names as keys and
             parameter properties as values. Each parameter should have
-            'lower_bounds' and 'upper_bounds' keys. The special key 'samples'
+            'lower_bound' and 'upper_bound' keys. The special key 'samples'
             is excluded from the problem definition.
 
     Returns:
@@ -110,8 +110,8 @@ def _get_SA_problem(params_dict: dict) -> dict:
 
     Example:
         >>> params = {
-        ...     'param1': {'lower_bounds': 0.0, 'upper_bounds': 1.0},
-        ...     'param2': {'lower_bounds': -1.0, 'upper_bounds': 1.0}
+        ...     'param1': {'lower_bound': 0.0, 'upper_bound': 1.0},
+        ...     'param2': {'lower_bound': -1.0, 'upper_bound': 1.0}
         ... }
         >>> problem = _get_SA_problem(params)
         >>> print(problem['num_vars'])
@@ -121,7 +121,7 @@ def _get_SA_problem(params_dict: dict) -> dict:
     problem = {
         'num_vars': len(param_names),
         'names': param_names,
-        'bounds': [(params_dict[key]['lower_bounds'], params_dict[key]['upper_bounds']) for key in param_names]
+        'bounds': [(params_dict[key]['lower_bound'], params_dict[key]['upper_bound']) for key in param_names]
     }
     return problem
 
