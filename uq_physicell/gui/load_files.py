@@ -82,7 +82,7 @@ def update_rules_file(main_window):
         if ".//cell_rules/rulesets/ruleset/filename" in main_window.fixed_parameters.keys():
             filename = main_window.fixed_parameters[".//cell_rules/rulesets/ruleset/filename"]
         else:
-            filename = main_window.get_xml_value(main_window, ".//cell_rules/rulesets/ruleset/filename")
+            filename = main_window.get_parameter_value_xml(main_window, ".//cell_rules/rulesets/ruleset/filename")
         main_window.rule_path = os.path.join(folder_path, filename)
         main_window.update_output_tab1(main_window, f"Updated rules file path: {main_window.rule_path}")
     except Exception as e:
