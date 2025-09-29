@@ -15,6 +15,8 @@ from .database import create_structure, insert_metadata, insert_param_space, ins
 # Check if the required libraries are available - futures and mpi4py
 try:
     from concurrent.futures import ProcessPoolExecutor
+    # Collect results and write to the database
+    from concurrent.futures import TimeoutError, as_completed
     futures_available = True
 except ImportError:
     futures_available = False
@@ -37,8 +39,8 @@ class ModelAnalysisContext:
             Must include 'ini_path' and 'struc_name' keys.
         sampler (str): Name of the sampling method to use (e.g., 'LHS', 'Sobol', 'OAT').
         params_info (dict): Dictionary containing parameter definitions with keys
-            for each parameter name and values containing 'ref_value', 'lower_bounds',
-            'upper_bounds', and 'perturbation' information.
+            for each parameter name and values containing 'ref_value', 'lower_bound',
+            'upper_bound', and 'perturbation' information.
         qois_info (dict): Dictionary containing Quantities of Interest definitions.
         parallel_method (str, optional): Parallelization method. Options are:
             'inter-process' (single node), 'inter-node' (MPI), or 'serial'.
@@ -67,7 +69,7 @@ class ModelAnalysisContext:
         ...     'struc_name': 'tumor_growth'
         ... }
         >>> params = {
-        ...     'param1': {'ref_value': 1.0, 'lower_bounds': 0.5, 'upper_bounds': 1.5}
+        ...     'param1': {'ref_value': 1.0, 'lower_bound': 0.5, 'upper_bound': 1.5}
         ... }
         >>> context = ModelAnalysisContext(
         ...     'analysis.db', model_config, 'LHS', params, {}
@@ -305,17 +307,16 @@ def run_simulations(context: ModelAnalysisContext):
                     context.futures.append(executor.submit(
                         run_replicate_serializable, context.dic_metadata['IniFilePath'], context.dic_metadata['StrucName'],
                         All_Samples[ind_sim], All_Replicates[ind_sim],
-                        ParametersXML, ParametersRules, custom_summary_function=context.summary_function
+                        ParametersXML, ParametersRules, return_binary_output=True,
+                        custom_summary_function=context.summary_function
                     ))
                 else:
                     context.futures.append(executor.submit(
                         run_replicate_serializable, context.dic_metadata['IniFilePath'], context.dic_metadata['StrucName'],
                         All_Samples[ind_sim], All_Replicates[ind_sim],
-                        ParametersXML, ParametersRules, context.qois_dict if context.qois_dict else None
+                        ParametersXML, ParametersRules, return_binary_output=True,
+                        qois_dic=context.qois_dict
                     ))
-
-            # Collect results and write to the database
-            from concurrent.futures import TimeoutError, as_completed
             
             # Use as_completed with a short timeout to avoid blocking when cancelled
             remaining_futures = list(context.futures)
@@ -335,7 +336,7 @@ def run_simulations(context: ModelAnalysisContext):
                         
                         try:
                             sample_id, replicate_id, result_data = future_done.result(timeout=0.5)
-                            context.logger.info(f"Writing to the database for Sample: {sample_id}, Replicate: {replicate_id}")
+                            context.logger.info(f"Writing to the database for Sample: {sample_id}, Replicate: {replicate_id}, Result size: {sys.getsizeof(result_data)/1024:.2f} KB")
                             try:
                                 insert_output(context.db_path, sample_id, replicate_id, result_data)
                             except Exception as e:
@@ -387,7 +388,7 @@ def run_simulations(context: ModelAnalysisContext):
                 result_data = pickle.dumps(result_data_nonserialized)
             else:
                 _, _, result_data = run_replicate(PhysiCellModel, All_Samples[ind_sim], All_Replicates[ind_sim], ParametersXML,
-                                            ParametersRules, context.qois_dict if context.qois_dict else None)
+                                            ParametersRules, context.qois_dict)
 
             # Token-passing mechanism to ensure one rank writes at a time
             if rank > 0:
@@ -425,7 +426,7 @@ def run_simulations(context: ModelAnalysisContext):
                 result_data = pickle.dumps(result_data_nonserialized)
             else:
                 _, _, result_data = run_replicate(PhysiCellModel, All_Samples[ind_sim], All_Replicates[ind_sim], ParametersXML,
-                                        ParametersRules, context.qois_dict if context.qois_dict else None)
+                                        ParametersRules, context.qois_dict)
 
             # Write to the database directly (no locks or MPI synchronization needed)
             context.logger.info(f"Rank {rank} writing to the database for Sample: {All_Samples[ind_sim]}, Replicate: {All_Replicates[ind_sim]}")
@@ -437,39 +438,4 @@ def run_simulations(context: ModelAnalysisContext):
                 raise
             
 if __name__ == "__main__":
-    # Example usage
-    db_path = "examples/virus-mac-new/Simulations_LHS.db"  # Path to the database file
-    model_config = {"ini_path": "examples/virus-mac-new/uq_pc_struc.ini", "struc_name": "SA_struc", "numReplicates": 2} # Example model configuration
-    sampler = 'Latin hypercube sampling (LHS)'  # Example sampler
-    params_info = {
-        'mac_phag_rate_infected': {'ref_value': 1.0, 'lower_bounds': 0.5, 'upper_bounds': 1.5, 'perturbation': 50.0},
-        'mac_motility_bias': {'ref_value': 0.15, 'lower_bounds': 0.075, 'upper_bounds': 0.225, 'perturbation': 50.0},
-        'epi2infected_sat': {'ref_value': 0.1, 'lower_bounds': 0.05, 'upper_bounds': 0.15, 'perturbation': 50.0},
-        'epi2infected_hfm': {'ref_value': 0.4, 'lower_bounds': 0.2, 'upper_bounds': 0.6, 'perturbation': 50.0}
-    }  # Example parameters information
-    qois_info = {}  # Example QoIs information (empty for this example)
-    # Create the context for model analysis
-    context = ModelAnalysisContext(db_path, model_config, sampler, params_info, qois_info, 
-                                   parallel_method='inter-process', num_workers=4)
-    # Generate samples using the global sampler
-    from .samplers import run_global_sampler
-    context.dic_samples = run_global_sampler(context.params_dict, sampler, N=50)  # Generate samples using the global sampler
-    # Run the simulations
-    run_simulations(context)
-
-    # Local parameter sampling example
-    db_path = "examples/virus-mac-new/Simulations_OAT.db"  # Path to the database file
-    sampler = 'OAT'  # Example sampler for local sampling
-    # Add perturbations to the parameters
-    for param_name, properties in params_info.items():
-        # The lower and upper bounds are set to None for OAT - Analysis is according to the perturbations
-        properties['lower_bounds'] = None
-        properties['upper_bounds'] = None
-        properties['perturbation'] = [1.0, 5.0, 10.0] # Example perturbations
-    context = ModelAnalysisContext(db_path, model_config, sampler, params_info, qois_info, 
-                                   parallel_method='inter-process', num_workers=4)
-    # Generate samples using the local sampler
-    from .samplers import run_local_sampler
-    context.dic_samples = run_local_sampler(context.params_dict)
-    # Run the simulations with the local sampler
-    # run_simulations(context)
+    pass
