@@ -1,41 +1,73 @@
 import os, sys
 import logging
-from PyQt5.QtWidgets import QVBoxLayout, QLabel, QHBoxLayout, QPushButton, QComboBox, QLineEdit, QTextEdit, QDialog, QFileDialog, QInputDialog, QListWidget, QMessageBox, QSizePolicy, QApplication, QSpacerItem, QCheckBox
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QIntValidator, QDoubleValidator
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.figure import Figure
 import seaborn as sns
 import numpy as np
 import pandas as pd
 import traceback
 
+# All the specific classes we need
+from threading import Thread
+from PyQt5.QtWidgets import (QVBoxLayout, QLabel, QHBoxLayout, QPushButton, 
+                            QComboBox, QLineEdit, QTextEdit, QDialog, 
+                            QInputDialog, QListWidget, QMessageBox, QCheckBox, QApplication)
+from PyQt5.QtCore import Qt, QTimer, QThread
+from PyQt5.QtGui import QIntValidator, QDoubleValidator
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+
+
 # My local modules
-from uq_physicell.model_analysis.samplers import run_global_sampler, run_local_sampler
-from uq_physicell.model_analysis.sensitivity_analysis import run_global_sa, run_local_sa, samplers_to_method
-from uq_physicell.model_analysis.main import ModelAnalysisContext, run_simulations
-from uq_physicell.model_analysis.utils import calculate_qoi_statistics
-from uq_physicell.model_analysis.database import load_structure
+from ..model_analysis.samplers import run_global_sampler, run_local_sampler
+from ..model_analysis.sensitivity_analysis import run_global_sa, run_local_sa, samplers_to_method
+from ..model_analysis.ma_context import ModelAnalysisContext, run_simulations
+from ..model_analysis.utils import calculate_qoi_statistics
+from ..database.ma_db import load_structure
 
 class QtTextEditLogHandler(logging.Handler):
-    """Custom logging handler that writes to a QTextEdit widget."""
-    
+    """Thread-safe logging handler that uses signal/slot mechanism."""
+
     def __init__(self, text_edit_widget):
-        super().__init__()
+        logging.Handler.__init__(self)
         self.text_edit = text_edit_widget
-    
+        self.main_window = None
+        self.tab_id = None
+        
+        # Try to find the main window that contains this text edit
+        parent = text_edit_widget.parent()
+        while parent:
+            if hasattr(parent, 'post_message') and hasattr(parent, 'message_queue'):
+                self.main_window = parent
+                self.tab_id = 'tab2'  # Default tab ID
+                
+                # Register the widget with the main window
+                if hasattr(parent, 'add_output_widget'):
+                    parent.add_output_widget(self.tab_id, text_edit_widget)
+                break
+            parent = parent.parent()
+
     def emit(self, record):
-        """Emit a log record to the QTextEdit widget."""
+        """Emit a log record in a thread-safe way."""
         try:
             msg = self.format(record)
-            # Use the QTextEdit's append method to add the message
-            self.text_edit.append(msg)
-            # Force immediate GUI update for real-time display
-            self.text_edit.repaint()
-            # Process any pending events to ensure immediate display
-            QApplication.processEvents()
-        except Exception:
-            self.handleError(record)
+            
+            # Use the main window's message queue if available
+            if self.main_window and hasattr(self.main_window, 'post_message'):
+                self.main_window.post_message(self.tab_id, msg)
+            else:
+                # Fall back to stderr
+                print(msg, file=sys.stderr)
+                
+        except Exception as e:
+            # If anything goes wrong, write to stderr
+            print(f"Logging error: {e}", file=sys.stderr)
+
+    def close(self):
+        """Override close method to handle proper cleanup."""
+        self.text_edit = None
+        super().close()
+    
+    # Set flushOnClose to False to prevent access during shutdown
+    flushOnClose = False
 
 class NonZeroDoubleValidator(QDoubleValidator):
     """Custom validator that accepts double values but excludes zero"""
@@ -49,6 +81,300 @@ class NonZeroDoubleValidator(QDoubleValidator):
             except ValueError:
                 pass
         return (state, input_str, pos)
+
+def on_run_simulations_clicked(main_window):
+    # First ensure the UI is in a clean state if a previous thread exists but is dead
+    if hasattr(main_window, 'simulation_thread') and main_window.simulation_thread is not None:
+        if not main_window.simulation_thread.is_alive():
+            main_window.simulation_thread = None
+            main_window.run_simulations_button.setText("Run Simulations")
+            main_window.run_simulations_button.setStyleSheet("background-color: lightgreen; color: black")
+    
+    if main_window.simulation_thread is None:
+        # --- Dialog and input collection (main thread only) ---
+        dialog = QDialog(main_window)
+        dialog.setWindowTitle("Simulation Configuration")
+        dialog.setGeometry(100, 100, 400, 200)
+        layout = QVBoxLayout(dialog)
+        workers_layout = QHBoxLayout()
+        workers_label = QLabel("Number of workers:")
+        workers_input = QLineEdit()
+        workers_input.setValidator(QIntValidator(1, 1000))
+        workers_input.setText("1")
+        workers_layout.addWidget(workers_label)
+        workers_layout.addWidget(workers_input)
+        layout.addLayout(workers_layout)
+        xml_path_omp_threads = ".//parallel/omp_num_threads"
+        num_replicates = main_window.num_replicates_input.text().strip()
+        omp_threads = main_window.xml_tree.find(xml_path_omp_threads).text.strip()
+        if xml_path_omp_threads in list(main_window.fixed_parameters.keys()):
+            omp_threads = main_window.fixed_parameters[xml_path_omp_threads]
+        total_threads_label = QLabel(f"OpenMP Threads per Model: {omp_threads}")
+        layout.addWidget(total_threads_label)
+        number_of_replicates_label = QLabel(f"Number of Replicates: {num_replicates}")
+        layout.addWidget(number_of_replicates_label)
+        number_of_samples = len(main_window.local_SA_parameters.get("samples")) if main_window.sampling_type_dropdown.currentText() == "Local" else len(main_window.global_SA_parameters.get("samples"))
+        number_of_samples_label = QLabel(f"Number of Samples: {number_of_samples}")
+        layout.addWidget(number_of_samples_label)
+        button_layout = QHBoxLayout()
+        ok_button = QPushButton("OK")
+        cancel_button = QPushButton("Cancel")
+        button_layout.addWidget(ok_button)
+        button_layout.addWidget(cancel_button)
+        layout.addLayout(button_layout)
+        def confirm():
+            dialog.accept()
+        def cancel():
+            dialog.reject()
+        ok_button.clicked.connect(confirm)
+        cancel_button.clicked.connect(cancel)
+        result = dialog.exec_()
+        if result != QDialog.Accepted:
+            main_window.update_output_tab2(main_window, "Simulation aborted by user.")
+            return
+        num_workers = workers_input.text()
+        # --- Collect all needed parameters for simulation ---
+        sampling_type = main_window.sampling_type_dropdown.currentText()
+        SA_method = main_window.SA_method_combo.currentText() if sampling_type else None
+        SA_sampler = main_window.sampler_combo.currentText() if sampling_type else None
+        SA_samples = main_window.local_SA_parameters.get("samples") if sampling_type == "Local" else main_window.global_SA_parameters.get("samples")
+        db_file_name = main_window.db_file_name_input.text().strip()
+        qoi_str = ', '.join(main_window.qoi_funcs.keys()) if main_window.qoi_funcs else None
+        model_config = {"ini_path": main_window.ini_file_path, "struc_name": main_window.struc_name_input.text().strip()}
+        # --- Validate inputs (all in main thread) ---
+        if not sampling_type:
+            main_window.update_output_tab2(main_window, "Error: Sensitivity analysis type is not selected.")
+            return
+        if not db_file_name:
+            main_window.update_output_tab2(main_window, "Error: DB file name is required.")
+            return
+        if not db_file_name.endswith(".db"):
+            main_window.update_output_tab2(main_window, "Error: DB file name must end with '.db'.")
+            return
+        if os.path.exists(db_file_name):
+            reply = QMessageBox.question(main_window, "Overwrite Confirmation", f"File '{db_file_name}' already exists. Do you want to overwrite it?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if reply == QMessageBox.No:
+                main_window.update_output_tab2(main_window, "Aborted saving. File was not overwritten.")
+                return
+        if not main_window.qoi_funcs.keys():
+            reply = QMessageBox.question(main_window, "QoI Warning", "No QoI(s) defined. Do you want to run the simulation without QoIs? All data will be stored as mcds list.", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if reply == QMessageBox.No:
+                main_window.update_output_tab2(main_window, "Aborted saving. No QoI(s) defined.")
+                return
+            else:
+                main_window.update_output_tab2(main_window, "QoI(s) not defined: All data will be stored as mcds list.")
+                qoi_str = None
+        # --- Start simulation in background thread ---
+        main_window.simulation_cancelled = False
+        main_window.should_load_db = False  # Initialize flag for database loading
+        # Configure logging only if logger not already set up
+        if not hasattr(main_window, 'logger_tab2') or not main_window.logger_tab2:
+            # Create logger in main thread
+            main_window.logger_tab2 = logging.getLogger(__name__)
+            main_window.logger_tab2.setLevel(logging.INFO)
+            
+            # Remove any existing handlers to avoid duplicates
+            for handler in main_window.logger_tab2.handlers[:]:
+                main_window.logger_tab2.removeHandler(handler)
+            
+            # Create and add handlers in main thread
+            console_handler = logging.StreamHandler(sys.stdout)
+            console_handler.setLevel(logging.DEBUG)
+            console_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+            main_window.logger_tab2.addHandler(console_handler)
+            
+            # Create a custom handler that uses the main window's message queue
+            class QueueLogHandler(logging.Handler):
+                def __init__(self, main_window, tab_id='tab2'):
+                    super().__init__()
+                    self.main_window = main_window
+                    self.tab_id = tab_id
+                    
+                def emit(self, record):
+                    try:
+                        msg = self.format(record)
+                        if hasattr(self.main_window, 'post_message'):
+                            self.main_window.post_message(self.tab_id, msg)
+                        else:
+                            print(msg, file=sys.stderr)
+                    except Exception as e:
+                        print(f"Logging error: {e}", file=sys.stderr)
+            
+            # Add our custom queue handler
+            gui_handler = QueueLogHandler(main_window)
+            gui_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+            main_window.logger_tab2.addHandler(gui_handler)
+                
+            # Prevent propagation to root logger to avoid duplicate messages
+            main_window.logger_tab2.propagate = False
+            
+        # Now define the thread function that will use the already-configured logger
+        def run_simulation_thread():
+            try:
+                main_window.update_output_tab2(main_window, f"Running simulations with sampler: {SA_sampler} and number of samples: {len(SA_samples)}")
+                # Prepare context
+                if sampling_type == "Local":
+                    # Create the context and store it in the main window for cancellation access
+                    main_window.simulation_context = ModelAnalysisContext(
+                        db_file_name, model_config, SA_sampler, 
+                        main_window.local_SA_parameters, qoi_str, 
+                        num_workers=int(num_workers), logger=main_window.logger_tab2
+                    )
+                    main_window.simulation_context.dic_samples = SA_samples
+                    # Set up the cancelled method to check the GUI cancellation flag
+                    main_window.simulation_context.cancelled = lambda: getattr(main_window, 'simulation_cancelled', False)
+                    run_simulations(main_window.simulation_context)
+                elif sampling_type == "Global":
+                    # Create the context and store it in the main window for cancellation access
+                    main_window.simulation_context = ModelAnalysisContext(
+                        db_file_name, model_config, SA_sampler, 
+                        main_window.global_SA_parameters, qoi_str, 
+                        num_workers=int(num_workers), logger=main_window.logger_tab2
+                    )
+                    main_window.simulation_context.dic_samples = SA_samples
+                    # Set up the cancelled method to check the GUI cancellation flag
+                    main_window.simulation_context.cancelled = lambda: getattr(main_window, 'simulation_cancelled', False)
+                    run_simulations(main_window.simulation_context)
+                    # Clean up simulation context
+                if hasattr(main_window, 'simulation_context') and main_window.simulation_context is not None:
+                    if hasattr(main_window.simulation_context, 'model') and main_window.simulation_context.model is not None:
+                        # Make sure all processes are terminated
+                        main_window.simulation_context.model.terminate_all_simulations()
+                    # Remove the reference to allow proper garbage collection
+                    main_window.simulation_context = None
+                
+                # Update UI in the main thread via Qt's signal mechanism
+                if getattr(main_window, 'simulation_cancelled', False):
+                    main_window.update_output_tab2(main_window, "Simulation cancelled and all processes terminated successfully.")
+                else:
+                    main_window.update_output_tab2(main_window, f"Simulations completed and saved to {db_file_name} with QoIs: {', '.join(main_window.qoi_funcs.keys())}.")
+                    main_window.ma_file_path = db_file_name
+
+                    # Signal that we need to load the database when returning to the main thread
+                    # We'll use a flag to indicate this in the completion timer
+                    main_window.should_load_db = True
+                    main_window.db_to_load = db_file_name
+                
+                # Always reset the UI state when done, regardless of success or cancellation
+                def reset_ui_after_completion():
+                    try:
+                        main_window.run_simulations_button.setText("Run Simulations")
+                        main_window.run_simulations_button.setStyleSheet("background-color: lightgreen; color: black")
+                        main_window.run_simulations_button.setEnabled(True)
+                        main_window.simulation_thread = None
+                        # Force an immediate processing of the event queue to ensure UI updates
+                        QApplication.processEvents()
+                    except Exception as reset_error:
+                        print(f"Error resetting UI after completion: {reset_error}")
+                
+            except Exception as e:
+                # Log the full error with traceback
+                error_with_traceback = f"Error: Running simulations failed: {e}\n{traceback.format_exc()}"
+                main_window.update_output_tab2(main_window, error_with_traceback)
+                main_window.simulation_cancelled = True
+                
+                # Clean up simulation context on error
+                if hasattr(main_window, 'simulation_context') and main_window.simulation_context is not None:
+                    try:
+                        if hasattr(main_window.simulation_context, 'model') and main_window.simulation_context.model is not None:
+                            # Make sure all processes are terminated
+                            main_window.simulation_context.model.terminate_all_simulations()
+                    except Exception as cleanup_error:
+                        main_window.update_output_tab2(main_window, f"Warning: Error during cleanup: {cleanup_error}")
+                    # Remove the reference to allow proper garbage collection
+                    main_window.simulation_context = None
+                
+            # Reset the UI state when done, regardless of success, cancellation, or error
+            # Use QTimer to ensure UI updates happen on the main thread
+            QTimer.singleShot(0, reset_ui_after_completion)
+        # Set UI state before starting thread
+        main_window.run_simulations_button.setText("Cancel")
+        main_window.run_simulations_button.setStyleSheet("background-color: orange; color: black")
+        
+        # Create a completion timer that will check for thread completion regardless of success/failure
+        completion_timer = QTimer(main_window)
+        
+        def check_completion():
+            if main_window.simulation_thread is None or not main_window.simulation_thread.is_alive():
+                # Thread has completed, reset the button
+                main_window.run_simulations_button.setText("Run Simulations")
+                main_window.run_simulations_button.setStyleSheet("background-color: lightgreen; color: black")
+                main_window.run_simulations_button.setEnabled(True)
+                main_window.simulation_thread = None
+                
+                # Check if we need to load a database (set by the thread when finishing successfully)
+                if hasattr(main_window, 'should_load_db') and main_window.should_load_db:
+                    main_window.should_load_db = False  # Reset the flag
+                    # Now that we're safely in the main thread, load the database
+                    try:
+                        main_window.load_ma_database(main_window)
+                    except Exception as e:
+                        error_msg = f"Error loading database: {str(e)}\n{traceback.format_exc()}"
+                        main_window.update_output_tab2(main_window, error_msg)
+                
+                # Stop the timer and store it
+                completion_timer.stop()
+                if hasattr(main_window, '_completion_timers'):
+                    main_window._completion_timers = []
+                main_window._completion_timers.append(completion_timer)
+        
+        completion_timer.timeout.connect(check_completion)
+        completion_timer.start(500)  # Check every 500ms
+        
+        # Create and start the thread after UI updates
+        main_window.simulation_thread = Thread(target=run_simulation_thread)
+        main_window.simulation_thread.daemon = True  # Make thread daemon so it doesn't block app exit
+        main_window.simulation_thread.start()
+    else:
+        # Set the cancellation flag
+        main_window.simulation_cancelled = True
+        main_window.update_output_tab2(main_window, "Cancellation requested. Terminating all simulations...")
+        
+        # If we have a ModelAnalysisContext object stored, use its request_cancellation method
+        if hasattr(main_window, 'simulation_context') and main_window.simulation_context is not None:
+            main_window.simulation_context.request_cancellation()
+            # Update UI with process termination status
+            if hasattr(main_window.simulation_context, 'model') and main_window.simulation_context.model is not None:
+                process_count = len(getattr(main_window.simulation_context.model, 'active_processes', {}))
+                if process_count > 0:
+                    main_window.update_output_tab2(main_window, f"Terminating {process_count} active processes...")
+        
+        # Don't join the thread here - that would block the GUI
+        # Instead, disable the button temporarily to prevent multiple cancellations
+        main_window.run_simulations_button.setEnabled(False)
+        main_window.run_simulations_button.setText("Cancelling...")
+        main_window.run_simulations_button.setStyleSheet("background-color: orange; color: black")
+        
+        # Use QTimer to periodically check if the thread has completed
+        def check_thread_completion():
+            # Check if thread is still running
+            if main_window.simulation_thread is None or not main_window.simulation_thread.is_alive():
+                # Thread has completed, reset the button
+                main_window.run_simulations_button.setText("Run Simulations")
+                main_window.run_simulations_button.setStyleSheet("background-color: lightgreen; color: black")
+                main_window.run_simulations_button.setEnabled(True)
+                main_window.simulation_thread = None
+                cancel_timer.stop()
+                main_window.update_output_tab2(main_window, "Simulation cancellation complete.")
+                
+                # Force immediate UI update
+                QApplication.processEvents()
+            else:
+                # Thread is still running, check for any remaining processes
+                if hasattr(main_window, 'simulation_context') and main_window.simulation_context is not None:
+                    if hasattr(main_window.simulation_context, 'model') and main_window.simulation_context.model is not None:
+                        process_count = len(getattr(main_window.simulation_context.model, 'active_processes', {}))
+                        if process_count > 0:
+                            main_window.run_simulations_button.setText(f"Cancelling ({process_count})...")
+        
+        cancel_timer = QTimer(main_window)
+        cancel_timer.timeout.connect(check_thread_completion)
+        cancel_timer.start(200)  # Check more frequently (every 200 ms) for better responsiveness
+        
+        # Store the timer reference on the main window to prevent garbage collection
+        if not hasattr(main_window, '_cancel_timers'):
+            main_window._cancel_timers = []
+        main_window._cancel_timers.append(cancel_timer)
 
 def create_tab2(main_window):
     # Add the following methods to the main_window instance
@@ -200,7 +526,11 @@ def create_tab2(main_window):
     main_window.run_simulations_button = QPushButton("Run Simulations")
     main_window.run_simulations_button.setEnabled(False)
     main_window.run_simulations_button.setStyleSheet("background-color: lightgreen; color: black")
-    main_window.run_simulations_button.clicked.connect(lambda: main_window.run_simulations_function(main_window))
+    main_window.simulation_thread = None
+    main_window.simulation_cancelled = False
+    main_window._cancel_timers = []
+    main_window._completion_timers = []
+    main_window.run_simulations_button.clicked.connect(lambda: on_run_simulations_clicked(main_window))
     main_window.db_file_name_hbox.addWidget(main_window.run_simulations_button)
     # Plot QoI button
     main_window.plot_qois_button = QPushButton("Plot QoI(s)")
@@ -252,15 +582,21 @@ def create_tab2(main_window):
     layout_tab2.addWidget(QLabel("<hr>"))
 
     ###########################################
-    # Output section - display information
+    # Display section - display information
     ###########################################
-    main_window.output_label_tab2 = QLabel("<b>Output</b>")
+    main_window.output_label_tab2 = QLabel("<b>Display</b>")
     main_window.output_label_tab2.setAlignment(Qt.AlignCenter)
     layout_tab2.addWidget(main_window.output_label_tab2)
+    
     main_window.output_text_tab2 = QTextEdit()
     main_window.output_text_tab2.setReadOnly(True)
     main_window.output_text_tab2.setMinimumHeight(100)
     layout_tab2.addWidget(main_window.output_text_tab2)
+    
+    # Register the output widget with the main window's message system
+    if hasattr(main_window, 'add_output_widget'):
+        main_window.add_output_widget('tab2', main_window.output_text_tab2)
+        main_window.post_message('tab2', "Welcome to Model Analysis! Load a model and set parameters to begin.")
 
     return layout_tab2
 
@@ -298,6 +634,7 @@ def open_qoi_definition_window(main_window):
             'std_volume': "lambda df: df['total_volume'].std()",
             'total_volume': "lambda df: df['total_volume'].sum()",
             'template_cellType_live': "lambda df: len( df[ (df['dead'] == False) & (df['cell_type'] == <cellType>) ])",
+            # 'Persistent homology - Vectorisation (muspan - topological data analysis)': "lambda df: compute_persistent_homology(df)",
         }
 
     # Reset the qois
@@ -423,18 +760,66 @@ def open_qoi_definition_window(main_window):
     main_window.current_qoi_label.setText("Current QoI(s): " + ", ".join(main_window.qoi_funcs.keys()) if main_window.qoi_funcs else "Current QoI(s): None")
 
 def update_output_tab2(main_window, message):
-    # Update the output section in Tab 2 with a new message
-    main_window.output_text_tab2.append(message)
+    """Thread-safe method to update the output QTextEdit in tab2."""
+    try:
+        # Always use the message queue for thread safety, regardless of which thread we're in
+        if hasattr(main_window, 'post_message') and hasattr(main_window, 'message_queue'):
+            main_window.post_message('tab2', message)
+            return
+        
+        # Only use direct update if we're in the main thread AND the queue system isn't available
+        if hasattr(main_window, 'output_text_tab2') and QApplication.instance().thread() == QThread.currentThread():
+            main_window.output_text_tab2.append(message)
+            return
+        
+        # Last resort - print to stdout
+        print(f"[Tab2] {message}", file=sys.stdout)
+        sys.stdout.flush()
+        
+    except Exception as e:
+        # Print any errors to stderr
+        print(f"Error in update_output_tab2: {e}", file=sys.stderr)
+        print(f"Original message: {message}", file=sys.stderr)
+    except Exception:
+        # Absolute last resort - just append the message directly
+        # May have thread safety issues but prevents complete failure
+        try:
+            main_window.output_text_tab2.append(message)
+        except:
+            pass
 
 def load_ma_database(main_window):
     try:
+        # Make sure we're on the main thread
+        if QThread.currentThread() != QApplication.instance().thread():
+            main_window.update_output_tab2(main_window, "WARNING: load_ma_database called from non-main thread. Scheduling on main thread...")
+            QTimer.singleShot(0, lambda: main_window.load_ma_database(main_window))
+            return
+            
+        # Verify that ma_file_path is set
+        if not hasattr(main_window, 'ma_file_path') or main_window.ma_file_path is None:
+            main_window.update_output_tab2(main_window, "ERROR: ma_file_path is not set")
+            return
+            
+        # Verify that file exists
+        if not os.path.exists(main_window.ma_file_path):
+            main_window.update_output_tab2(main_window, f"ERROR: Database file {main_window.ma_file_path} does not exist")
+            return
+        
         # Load the database structure
         main_window.update_output_tab2(main_window, f"Loading database file {main_window.ma_file_path} ...")
         df_metadata, df_parameter_space, df_qois, dic_input, main_window.df_output = load_structure(main_window.ma_file_path)
-
+        
+        # Verify that data was loaded correctly
+        if df_metadata.empty:
+            main_window.update_output_tab2(main_window, f"ERROR: Failed to load metadata from {main_window.ma_file_path}")
+            return
+            
         # Load the .ini file
+        main_window.update_output_tab2(main_window, f"Loading .ini file from {df_metadata['Ini_File_Path'].iloc[0]}...")
         main_window.load_ini_file(main_window, df_metadata['Ini_File_Path'].iloc[0], df_metadata['StructureName'].iloc[0])
         print(df_metadata)
+
         # Define the widget to display db structure
         Sampler = df_metadata['Sampler'].iloc[0]
         Param_explorer_type = "Local" if Sampler == "OAT" else "Global"
@@ -458,8 +843,8 @@ def load_ma_database(main_window):
             main_window.global_SA_parameters = {}
             main_window.global_SA_parameters["samples"] = dic_input
             for id, param in enumerate(df_parameter_space['ParamName']):
-                main_window.global_SA_parameters[param] = {"lower_bounds": df_parameter_space['Lower_Bound'].iloc[id],
-                                                            "upper_bounds": df_parameter_space['Upper_Bound'].iloc[id],
+                main_window.global_SA_parameters[param] = {"lower_bound": df_parameter_space['Lower_Bound'].iloc[id],
+                                                            "upper_bound": df_parameter_space['Upper_Bound'].iloc[id],
                                                             "ref_value": df_parameter_space['ReferenceValue'].iloc[id], 
                                                             "perturbation": float(df_parameter_space['Perturbation'].iloc[id])}
             # Update the global parameters
@@ -507,23 +892,44 @@ def load_ma_database(main_window):
         main_window.db_file_name_input.setText(main_window.ma_file_path)
         main_window.db_file_name_input.setEnabled(False)
 
-        # Enable the button to plot samples
-        main_window.plot_samples_button.setEnabled(True)
+        # Enable the plot samples button only if samples are present
+        if main_window.sampling_type_dropdown.currentText() == "Local" and "samples" in main_window.local_SA_parameters:
+            main_window.plot_samples_button.setEnabled(True)
+        elif main_window.sampling_type_dropdown.currentText() == "Global" and "samples" in main_window.global_SA_parameters:
+            main_window.plot_samples_button.setEnabled(True)
+        else:
+            main_window.plot_samples_button.setEnabled(False)
+            main_window.update_output_tab2(main_window, "No samples found in database. You may need to run parameter sampling.")
 
-        # Reset the qois
-        main_window.qoi_funcs = {}
+        # Load QoIs from database if available
+        if not df_qois.empty and 'QoI_Name' in df_qois.columns and 'QoI_Function' in df_qois.columns:
+            main_window.qoi_funcs = {row['QoI_Name']: row['QoI_Function'] for _, row in df_qois.iterrows() if row['QoI_Name'] is not None}
+            if main_window.qoi_funcs:
+                main_window.current_qoi_label.setText("Current QoI(s): " + ", ".join(main_window.qoi_funcs.keys()))
+            else:
+                main_window.qoi_funcs = {}
+                main_window.current_qoi_label.setText("Current QoI(s): None")
+        else:
+            main_window.qoi_funcs = {}
+            main_window.current_qoi_label.setText("Current QoI(s): None")
+            
+        # Reset summary dataframes
         main_window.df_summary_qois = pd.DataFrame()
-        main_window.current_qoi_label.setText("Current QoI(s): None")
 
         # print a message in the output fields of Tab 2
         message = f"Database file loaded: {main_window.ma_file_path}"
         main_window.update_output_tab2(main_window, message)
+    except ValueError:
+        # Re-raise ValueError (from .ini file loading) to propagate it up
+        raise
     except Exception as e:
+        # Handle other exceptions (TypeError, AttributeError, etc.)
         error_message = f"Error loading .db file: {e} (Type: {type(e).__name__})"
         # Add traceback for more technical details
         error_message += f"\nTraceback: {traceback.format_exc()}"
         print(error_message)
         main_window.update_output_tab2(main_window, error_message)
+        raise ValueError(error_message)
 
 def update_sampling_type(main_window):
     # Show/hide UI elements based on selected sampling type
@@ -558,7 +964,7 @@ def update_sampling_type(main_window):
 
         # Populate local_SA_parameters with reference values and default perturbations
         for key, value in main_window.analysis_parameters.items():
-            ref_value = float(main_window.get_xml_value(main_window, key))  # Get the default XML value - string
+            ref_value = float(main_window.get_parameter_value_xml(main_window, key))  # Get the default XML value - string
             main_window.local_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": [1, 10, 20]}
 
         for key, value in main_window.analysis_rules_parameters.items():
@@ -614,14 +1020,14 @@ def update_sampling_type(main_window):
 
         # Populate global_SA_parameters with reference values and default range percentage
         for key, value in main_window.analysis_parameters.items():
-            ref_value = float(main_window.get_xml_value(main_window, key))  # Get the default XML value - string
+            ref_value = float(main_window.get_parameter_value_xml(main_window, key))  # Get the default XML value - string
             # print(f"Update Analysis type - {key}: {ref_value}")
-            main_window.global_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": 20.0, "lower_bounds": float(ref_value) * 0.8, "upper_bounds": float(ref_value) * 1.2}
+            main_window.global_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": 20.0, "lower_bound": float(ref_value) * 0.8, "upper_bound": float(ref_value) * 1.2}
 
         for key, value in main_window.analysis_rules_parameters.items():
             ref_value = main_window.get_rule_value(main_window, key)  # Get the default rule value
             # print(f"Update Analysis type - {key}: {ref_value}")
-            main_window.global_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": 20.0, "lower_bounds": float(ref_value) * 0.8, "upper_bounds": float(ref_value) * 1.2}
+            main_window.global_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": 20.0, "lower_bound": float(ref_value) * 0.8, "upper_bound": float(ref_value) * 1.2}
 
         # Add friendly names to the combo box
         main_window.global_param_combo.addItems(list(main_window.global_SA_parameters.keys()))
@@ -683,8 +1089,8 @@ def update_global_inputs(main_window):
             upper_bound = param_data["ref_value"] * (1 + range_percentage / 100)
             main_window.global_bounds.setText(f"{lower_bound:.3e}, {upper_bound:.3e}")
             # Store bounds in global_SA_parameters
-            main_window.global_SA_parameters[selected_param]["lower_bounds"] = lower_bound
-            main_window.global_SA_parameters[selected_param]["upper_bounds"] = upper_bound
+            main_window.global_SA_parameters[selected_param]["lower_bound"] = lower_bound
+            main_window.global_SA_parameters[selected_param]["upper_bound"] = upper_bound
         except ValueError:
             main_window.update_output_tab2(main_window, "Error: Invalid reference value or range percentage.")
 
@@ -762,7 +1168,20 @@ def plot_samples(main_window):
     plot_samples_window.setWindowTitle("Parameter Samples")
     plot_samples_window.setGeometry(100, 100, 800, 600)
     layout = QVBoxLayout(plot_samples_window)
-
+    
+    # Check if samples data exists
+    has_samples = False
+    if main_window.sampling_type_dropdown.currentText() == "Local":
+        has_samples = hasattr(main_window, 'local_SA_parameters') and main_window.local_SA_parameters and "samples" in main_window.local_SA_parameters
+    elif main_window.sampling_type_dropdown.currentText() == "Global":
+        has_samples = hasattr(main_window, 'global_SA_parameters') and main_window.global_SA_parameters and "samples" in main_window.global_SA_parameters
+    
+    if not has_samples:
+        # Show error message and close the dialog
+        QMessageBox.warning(plot_samples_window, "No Samples", "No parameter samples found. Please run parameter sampling first.")
+        plot_samples_window.reject()
+        return
+    
     # Add info label
     info_label = QLabel("Parameter Sampling Visualization")
     info_label.setAlignment(Qt.AlignCenter)
@@ -826,9 +1245,9 @@ def plot_samples(main_window):
             normalized_df = pd.DataFrame(main_window.global_SA_parameters["samples"]).T
             for col in normalized_df.columns:
                 normalized_df[col] = (
-                    normalized_df[col] - main_window.global_SA_parameters[col]["lower_bounds"]
+                    normalized_df[col] - main_window.global_SA_parameters[col]["lower_bound"]
                 ) / (
-                    main_window.global_SA_parameters[col]["upper_bounds"] - main_window.global_SA_parameters[col]["lower_bounds"]
+                    main_window.global_SA_parameters[col]["upper_bound"] - main_window.global_SA_parameters[col]["lower_bound"]
                 )
             normalized_df = normalized_df.reset_index().melt(
                 id_vars="index", var_name="Parameter", value_name="Normalized Value"
@@ -1050,7 +1469,7 @@ def run_simulations_function(main_window):
                 return
             else:
                 main_window.update_output_tab2(main_window, "QoI(s) not defined: All data will be stored as mcds list.")
-                qoi_str = "None"
+                qoi_str = None
         else:
             qoi_str = ', '.join(main_window.qoi_funcs.keys())
     except Exception as e:
@@ -1075,41 +1494,59 @@ def run_simulations_function(main_window):
         console_handler.setLevel(logging.DEBUG)
         console_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
         
-        # Configure logging
-        logging.basicConfig(
-            level=logging.INFO, 
-            handlers=[gui_handler, console_handler]
-        )
-        main_window.logger_tab2 = logging.getLogger(__name__)
-        main_window.logger_tab2.setLevel(logging.INFO)
-        main_window.logger_tab2.handlers = [gui_handler, console_handler]
+        # Configure logging only if logger not already set up
+        if not hasattr(main_window, 'logger_tab2') or not main_window.logger_tab2:
+            # Don't use basicConfig as it affects the root logger and can cause duplicated output
+            main_window.logger_tab2 = logging.getLogger(__name__)
+            main_window.logger_tab2.setLevel(logging.INFO)
+            # Remove any existing handlers to avoid duplicates
+            for handler in main_window.logger_tab2.handlers[:]:
+                main_window.logger_tab2.removeHandler(handler)
+            # Add our handlers
+            main_window.logger_tab2.addHandler(gui_handler)
+            main_window.logger_tab2.addHandler(console_handler)
+            # Prevent propagation to root logger to avoid duplicate messages
+            main_window.logger_tab2.propagate = False
         # Simulate the model with the selected samples
         if main_window.sampling_type_dropdown.currentText() == "Local":
             sampler = main_window.sampler_combo.currentText()
             # Model Analysis context
             context = ModelAnalysisContext(db_file_name, model_config, sampler, main_window.local_SA_parameters, qoi_str, num_workers=int(num_workers), logger=main_window.logger_tab2)
             context.dic_samples = SA_samples
+            context.cancelled = lambda: getattr(main_window, 'simulation_cancelled', False)
             run_simulations(context)
         elif main_window.sampling_type_dropdown.currentText() == "Global":
             sampler = main_window.sampler_combo.currentText()
             # Model Analysis context
             context = ModelAnalysisContext(db_file_name, model_config, sampler, main_window.global_SA_parameters, qoi_str, num_workers=int(num_workers), logger=main_window.logger_tab2)
             context.dic_samples = SA_samples
+            context.cancelled = lambda: getattr(main_window, 'simulation_cancelled', False)
             run_simulations(context)
+        # After run, re-enable button
+        main_window.run_simulations_button.setEnabled(True)
     except Exception as e:
         main_window.update_output_tab2(main_window, f"Error: Running simulations with {sampler} failed: {e}")
         print(f"Error: Running simulations with {sampler} failed: {e}")
         return
 
     # Simulate saving the samples to the database (replace with actual simulation logic)
-    main_window.update_output_tab2(main_window, f"Simulations completed and saved to {db_file_name} with QoIs: {', '.join(main_window.qoi_funcs.keys())}.")
-    # Load the database file to display results
-    main_window.ma_file_path = db_file_name
-    main_window.load_ma_database(main_window)
+    if getattr(main_window, 'simulation_cancelled', False):
+        main_window.update_output_tab2(main_window, "Simulation cancelled.")
+    else:
+        main_window.update_output_tab2(main_window, f"Simulations completed and saved to {db_file_name} with QoIs: {', '.join(main_window.qoi_funcs.keys() if main_window.qoi_funcs else None)}.")
+        # Load the database file to display results
+        main_window.ma_file_path = db_file_name
+        main_window.load_ma_database(main_window)
     
 
 def plot_qois(main_window):
     main_window.update_output_tab2(main_window, "Plotting QoIs...")
+    # Check if we have QoIs defined
+    if not main_window.qoi_funcs:
+        main_window.update_output_tab2(main_window, "Error: No QoI functions defined. Please define QoI functions first.")
+        QMessageBox.warning(main_window, "No QoIs Defined", "Please define QoI functions before plotting.")
+        return
+        
     # Create a dialog window for plotting QoIs
     plot_qoi_window = QDialog(main_window)
     plot_qoi_window.setWindowTitle("Plot QoIs")
