@@ -6,6 +6,53 @@ from typing import Union
 from uq_physicell import PhysiCell_Model
 from .sumstats import generic_QoI
 
+def compute_persistent_homology(df:pd.DataFrame, Plot=False) -> pd.Series:
+    """
+    Compute persistent homology vectorization using muspan.
+    (source: https://docs.muspan.co.uk/latest/_collections/topology/Topology%203%20-%20persistence%20vectorisation.html)
+    
+    Parameters:
+    - df_cells: DataFrame -> DataFrame containing cell data with 'position_x', 'position_y', and 'cell_type' columns.
+    
+    Returns:
+    - pd.Series -> Vectorized persistent homology features.
+    """
+    try:
+        import muspan
+    except ImportError:
+        raise ImportError("muspan library is required for computing persistent homology. Please install it via 'pip install muspan'.")
+
+    # Extract cell positions
+    points = df[['position_x', 'position_y']].to_numpy()
+    labels = df['cell_type'].to_numpy()
+    
+    # Create a muspan domain and add points
+    domain = muspan.domain('Position Data')
+    domain.add_points(points, 'Cell Positions')
+    domain.add_labels('Celltype', labels)
+
+    # Query to select cells of types 'A', 'B', ... in each domain
+    q_cell_types = muspan.query.query(domain, ('label', 'Celltype'), 'in', df['cell_type'].unique().tolist())
+
+    # Plot domain with cell types (optional)
+    if Plot:
+        import matplotlib.pyplot as plt
+        fig, ax = plt.subplots(figsize=(6, 6))
+        muspan.visualise.visualise(domain, 'Celltype', ax=ax, add_cbar=False, marker_size=2.5, objects_to_plot=q_cell_types)
+
+    # Compute Vietoris-Rips filtrations
+    feature_persistence = muspan.topology.vietoris_rips_filtration(domain, population=q_cell_types, max_dimension=1)
+
+    # Plot persistence diagram (optional)
+    if Plot:
+        fig, ax = plt.subplots(figsize=(6, 6))
+        muspan.visualise.persistence_diagram(feature_persistence, ax=ax)
+        plt.show()
+
+    # Vectorise the persistence homology diagram for the domain using statistical method
+    vectorised_ph,name_of_features = muspan.topology.vectorise_persistence(feature_persistence, method='statistics')
+
+    return pd.Series(vectorised_ph, index=name_of_features)
 
 # Helper function to create named functions from strings
 def create_named_function_from_string(func_str:str, qoi_name:str) -> callable:
