@@ -182,18 +182,17 @@ def calculate_qoi_statistics(df_qois_data: pd.DataFrame, qoi_funcs: dict, db_fil
         num_replicates = df_qois['ReplicateID'].nunique()
         time_columns = sorted([col for col in df_qois.columns if col.startswith("time_")])
         print(f"Number of replicates: {num_replicates}")
-        print(df_qois.head())
-        df_std = df_qois.groupby(['SampleID']).std(numeric_only=True).reset_index() # ignores NaN values
-        df_std.set_index("SampleID").sort_index(inplace=True)
-        df_std.drop(columns=['ReplicateID'], inplace=True)
-        df_mean = df_qois.groupby(['SampleID']).mean(numeric_only=True).reset_index() # ignores NaN values
-        df_mean.set_index("SampleID").sort_index(inplace=True)
+        df_grouped = df_qois.groupby(['SampleID'])
+        df_stds = df_grouped.std(numeric_only=True) # ignores NaN values
+        df_stds.drop(columns=['ReplicateID'], inplace=True)
+        df_mean = df_grouped.mean(numeric_only=True) # ignores NaN values
         df_mean.drop(columns=['ReplicateID'], inplace=True)
         # Calculate the relative Monte Carlo Standard Error (MCSE)
-        df_relative_mcse = (1/np.sqrt(num_replicates))*df_std.reset_index()
-        # Make it relative to the mean if mean >= tolerance, otherwise keep it as is
-        tolerance = 0.1  # Define your tolerance level
-        df_relative_mcse = df_relative_mcse.div(df_mean[df_mean.ge(tolerance)].abs())
+        df_relative_mcse = df_stds/np.sqrt(num_replicates)
+        # Small epsilon to avoid division by zero
+        epsilon = 0.01 * np.median(df_mean.abs().to_numpy().flatten())
+        # Relative MCSE
+        df_relative_mcse = df_relative_mcse.div(df_mean + epsilon)
         # Replace the columns relative to time as the real value from df_mean
         df_relative_mcse[time_columns] = df_mean[time_columns]
     except Exception as e:
