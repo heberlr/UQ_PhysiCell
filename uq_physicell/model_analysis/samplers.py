@@ -1,6 +1,6 @@
 import numpy as np
-
 from SALib.sample import fast_sampler, ff, finite_diff, latin, sobol
+
 from .sensitivity_analysis import _get_SA_problem
 
 def run_global_sampler(params_dict: dict, sampler: str, N: int = None, M: int = 4, seed: int = 42) -> dict:
