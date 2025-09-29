@@ -2,8 +2,9 @@ import numpy as np
 import pandas as pd
 from typing import Union
 
-from .database import load_structure
-from uq_physicell.utils.model_wrapper import create_named_function_from_string
+# My local modules
+from ..database.ma_db import load_structure
+from ..utils.model_wrapper import create_named_function_from_string
 
 def reshape_sa_expanded_data(expanded_data: pd.DataFrame, qoi_columns: list) -> pd.DataFrame:
     """Reshape expanded sensitivity analysis data for pivot table analysis.
