@@ -170,7 +170,7 @@ def insert_param_space(db_file: str, params_dict: dict):
     Args:
         db_file (str): Path to the SQLite database file.
         params_dict (dict): Dictionary containing parameter names and their properties.
-            Each parameter should have keys: 'lower_bounds', 'upper_bounds', 
+            Each parameter should have keys: 'lower_bound', 'upper_bound', 
             'ref_value', and 'perturbation'.
     
     Raises:
@@ -179,8 +179,8 @@ def insert_param_space(db_file: str, params_dict: dict):
     Example:
         >>> params = {
         ...     'param1': {
-        ...         'lower_bounds': 0.0,
-        ...         'upper_bounds': 1.0,
+        ...         'lower_bound': 0.0,
+        ...         'upper_bound': 1.0,
         ...         'ref_value': 0.5,
         ...         'perturbation': 0.1
         ...     }
@@ -193,8 +193,8 @@ def insert_param_space(db_file: str, params_dict: dict):
         for param_name, properties in params_dict.items():
             if param_name == "samples": continue
             properties['perturbation'] = properties.get('perturbation', None)  # If 'perturbation' key does not exist, then it will be None
-            properties['lower_bounds'] = properties.get('lower_bounds', None)  # If 'lower_bounds' key does not exist, then it will be None
-            properties['upper_bounds'] = properties.get('upper_bounds', None)  # If 'upper_bounds' key does not exist, then it will be None
+            properties['lower_bound'] = properties.get('lower_bound', None)  # If 'lower_bound' key does not exist, then it will be None
+            properties['upper_bound'] = properties.get('upper_bound', None)  # If 'upper_bound' key does not exist, then it will be None
             # Convert list to string if it's a list
             if type(properties['perturbation']) == list:
                 properties['perturbation'] = str(properties['perturbation'])
@@ -202,7 +202,7 @@ def insert_param_space(db_file: str, params_dict: dict):
             cursor.execute('''
                 INSERT INTO ParameterSpace (ParamName, Lower_Bound, Upper_Bound, ReferenceValue, Perturbation)
                 VALUES (?, ?, ?, ?, ?)
-            ''', (param_name, properties['lower_bounds'], properties['upper_bounds'], properties['ref_value'], properties['perturbation']))
+            ''', (param_name, properties['lower_bound'], properties['upper_bound'], properties['ref_value'], properties['perturbation']))
         conn.commit()
         conn.close()
     except sqlite3.Error as e:
