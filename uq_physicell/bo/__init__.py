@@ -5,20 +5,9 @@ This module provides Bayesian optimization capabilities for PhysiCell model cali
 with enhanced strategies for handling parameter non-identifiability.
 """
 
-from .optimize import (
+from .bo_context import (
     CalibrationContext,
     run_bayesian_optimization,
-)
-
-from .database import (
-    create_structure,
-    insert_metadata,
-    insert_param_space,
-    insert_qois,
-    insert_gp_models,
-    insert_samples,
-    insert_output,
-    load_structure
 )
 
 from .distances import (
@@ -27,18 +16,40 @@ from .distances import (
     Chebyshev,
 )
 
+from .plots import (
+    plot_parameter_space,
+    plot_parameter_space_db,
+    plot_qoi_param,
+    plot_qoi_param_db,
+    plot_parameter_vs_fitness,
+    plot_parameter_vs_fitness_db,
+)
+
+from .utils import (
+    normalize_params_df,
+    extract_best_parameters,
+    extract_best_parameters_db,
+    extract_all_pareto_points,
+    analyze_pareto_results,
+    get_observed_qoi,
+)   
+
 __all__ = [
     'CalibrationContext',
     'run_bayesian_optimization',
-    'create_structure',
-    'insert_metadata',
-    'insert_param_space',
-    'insert_qois',
-    'insert_gp_models',
-    'insert_samples',
-    'insert_output',
-    'load_structure',
     'SumSquaredDifferences',
     'Manhattan',
     'Chebyshev',
+    'plot_parameter_space',
+    'plot_parameter_space_db',
+    'plot_qoi_param',
+    'plot_qoi_param_db',
+    'plot_parameter_vs_fitness',
+    'plot_parameter_vs_fitness_db',
+    'normalize_params_df',
+    'extract_best_parameters',
+    'extract_best_parameters_db',
+    'extract_all_pareto_points',
+    'analyze_pareto_results',
+    'get_observed_qoi',
 ]
