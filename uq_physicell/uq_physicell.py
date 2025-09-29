@@ -87,37 +87,40 @@ class PhysiCell_Model:
             print(f"\t\t>> Checking parameters in XML file ...")
         # if not in .ini file, get from XML
         if not self.omp_num_threads: 
-            self.omp_num_threads = get_xml_element_value(self.xml_ref_root, './/parallel/omp_num_threads')
+            self.omp_num_threads = _get_xml_element_value(self.xml_ref_root, './/parallel/omp_num_threads')
         for param_key in self.XML_parameters.keys():
             try:
-                get_xml_element_value(self.xml_ref_root, param_key)
+                _get_xml_element_value(self.xml_ref_root, param_key)
             except ValueError as e:
                 raise ValueError(f"Error in parameters_xml. {e}")
 
     def _load_rules_reference(self) -> None:
-        self.default_rules = get_rules(self.RULES_RefPath) if self.RULES_RefPath else None
+        self.default_rules = _get_rules(self.RULES_RefPath) if self.RULES_RefPath else None
         if self.verbose:
             print(f"\t\t>> Checking parameters in RULES file ...")
         for param_key in self.parameters_rules.keys():
             try:
-                get_rule_index_in_csv(self.default_rules, param_key)
+                _get_rule_index_in_csv(self.default_rules, param_key)
             except ValueError as e:
                 raise ValueError(f"Error in parameters_rules. {e}")
 
-    def get_XML_Path(self, sampleID: int, replicateID: int) -> str:
+    def _get_xml_path(self, sampleID: int, replicateID: int) -> str:
         filePath = self.input_folder + self.XML_name % (sampleID, replicateID)
         os.makedirs(os.path.dirname(self.input_folder), exist_ok=True)
         return filePath
 
-    def get_output_Path(self, sampleID: int, replicateID: int) -> str:
+    def _get_output_path(self, sampleID: int, replicateID: int) -> str:
         folderPath = self.output_folder + self.outputs_folder_name % (sampleID, replicateID)
         os.makedirs(os.path.dirname(folderPath), exist_ok=True)
         return folderPath
 
-    def get_RULES_FileName(self, sampleID: int, replicateID: int) -> str:
+    def _get_rules_fileName(self, sampleID: int, replicateID: int) -> str:
         return self.RULES_name % (sampleID, replicateID)
 
     def info(self) -> None:
+        """ 
+        Print model configuration information. 
+        """
         print(f"""
         Project name: {self.projName} 
         Executable: {self.PC_executable}
@@ -134,11 +137,22 @@ class PhysiCell_Model:
         Parameters in RULES: { [param_name for param_name in self.parameters_rules_variable.values()] }
         """)
 
-    def copy(self):
+    def _copy(self):
         return copy.deepcopy(self)
 
     def RunModel(self, SampleID: int, ReplicateID: int, Parameters: Union[np.ndarray, dict] = dict(), ParametersRules: Union[np.ndarray, dict] = dict(), RemoveConfigFile: bool = True, SummaryFunction: Union[None, str] = None) -> Union[None, pd.DataFrame]:
-        return RunModel(self, SampleID, ReplicateID, Parameters, ParametersRules, RemoveConfigFile, SummaryFunction)
+        """ 
+        Run a single simulation with specified parameters.
+        
+        Args:
+            SampleID (int): Identifier for the parameter sample
+            ReplicateID (int): Identifier for the simulation replicate
+            Parameters (np.ndarray or dict, optional): Parameter values for XML configuration
+            ParametersRules (np.ndarray or dict, optional): Parameter values for RULES configuration
+            RemoveConfigFile (bool, optional): If True, removes the generated XML and RULES files after simulation
+            SummaryFunction (function, optional): Function to summarize simulation output
+        """
+        return _run_model(self, SampleID, ReplicateID, Parameters, ParametersRules, RemoveConfigFile, SummaryFunction)
     def run_simulation_subprocess(self, XMLFile, sample_id=None, replicate_id=None):
         """
         Start the simulation as a subprocess and return the process handle.
@@ -170,7 +184,7 @@ class PhysiCell_Model:
         
         return process
 
-    def terminate_simulation(self, process=None, process_id=None, sample_id=None, replicate_id=None):
+    def _terminate_simulation(self, process=None, process_id=None, sample_id=None, replicate_id=None):
         """
         Terminate a running simulation subprocess.
         
@@ -243,7 +257,7 @@ class PhysiCell_Model:
         for process_id in process_ids:
             if self.verbose:
                 print(f"Terminating process {process_id}")
-            return_code = self.terminate_simulation(process_id=process_id)
+            return_code = self._terminate_simulation(process_id=process_id)
             results[process_id] = return_code
             
         return results
@@ -267,7 +281,7 @@ class PhysiCell_Model:
         
         return self.active_processes 
 
-def check_parameters_input(model: PhysiCell_Model, parameters_input_xml: Union[np.ndarray, dict], parameters_input_rules: Union[np.ndarray, dict]) -> None:
+def _check_parameters_input(model: PhysiCell_Model, parameters_input_xml: Union[np.ndarray, dict], parameters_input_rules: Union[np.ndarray, dict]) -> None:
     if model.verbose:
         print(f"\t\t\t\t>>>> Checking XML parameters input {type(parameters_input_xml)} ...")
     if isinstance(parameters_input_xml, dict):
@@ -295,22 +309,22 @@ def check_parameters_input(model: PhysiCell_Model, parameters_input_xml: Union[n
     else:
         raise ValueError("Error: RULES parameters input need to be a numpy array 1D or a dictionary.")
 
-def setup_model_input(model: PhysiCell_Model, SampleID: int, ReplicateID: int, parameters_input: Union[np.ndarray, dict], parameters_rules_input: Union[np.ndarray, dict]) -> None:
+def _setup_model_input(model: PhysiCell_Model, SampleID: int, ReplicateID: int, parameters_input: Union[np.ndarray, dict], parameters_rules_input: Union[np.ndarray, dict]) -> None:
     try:
         if model.verbose:
             print(f"\t\t\t>>> Checking parameters input ...")
-        check_parameters_input(model, parameters_input, parameters_rules_input)
+        _check_parameters_input(model, parameters_input, parameters_rules_input)
     except ValueError as e:
         raise ValueError(f"Error in parameters input!\n{e}")
 
     dic_xml_parameters = model.XML_parameters.copy()
-    XMLFile = model.get_XML_Path(SampleID, ReplicateID)
+    XMLFile = model._get_xml_path(SampleID, ReplicateID)
     if model.parameters_rules:
         if model.verbose:
             print(f"\t\t\t>>> Setting up rules input ...")
         dic_xml_parameters['.//cell_rules/rulesets/ruleset/folder'] = model.input_folder
-        dic_xml_parameters['.//cell_rules/rulesets/ruleset/filename'] = model.get_RULES_FileName(SampleID, ReplicateID)
-        csvFile_out = model.input_folder + model.get_RULES_FileName(SampleID, ReplicateID)
+        dic_xml_parameters['.//cell_rules/rulesets/ruleset/filename'] = model._get_rules_fileName(SampleID, ReplicateID)
+        csvFile_out = model.input_folder + model._get_rules_fileName(SampleID, ReplicateID)
         dic_rules_temp = {}
         for idx, param_key, param_name in zip(range(len(model.parameters_rules_variable)), model.parameters_rules_variable.keys(), model.parameters_rules_variable.values()):
             single_param_rule = param_key.split(",")[-1]
@@ -324,24 +338,24 @@ def setup_model_input(model: PhysiCell_Model, SampleID: int, ReplicateID: int, p
         if model.verbose:
             print(f"\t\t\t>>> Generating rules file {csvFile_out} ...")
         try:
-            generate_csv_file(model.default_rules, csvFile_out, dic_rules_temp)
+            _generate_csv_file(model.default_rules, csvFile_out, dic_rules_temp)
         except ValueError as e:
             raise ValueError(f"Error in generating rules file! {e}")
 
     if model.verbose:
         print(f"\t\t\t>>> Setting up XML input...")
-    dic_xml_parameters['.//save/folder'] = model.get_output_Path(SampleID, ReplicateID)
+    dic_xml_parameters['.//save/folder'] = model._get_output_path(SampleID, ReplicateID)
     dic_xml_parameters['./parallel/omp_num_threads'] = model.omp_num_threads
     try:
         dic_xml_parameters['.//initial_conditions/cell_positions/folder'] = os.path.dirname(model.XML_RefPath)
     except ValueError:
         pass
     try:
-        get_xml_element_value(model.xml_ref_root, './/options/random_seed')
+        _get_xml_element_value(model.xml_ref_root, './/options/random_seed')
         dic_xml_parameters['.//options/random_seed'] = "system_clock"
     except ValueError:
         try:
-            get_xml_element_value(model.xml_ref_root, './/user_parameters/random_seed')
+            _get_xml_element_value(model.xml_ref_root, './/user_parameters/random_seed')
             dic_xml_parameters['.//user_parameters/random_seed'] = random.randint(0, 4294967295)
         except ValueError as e:
             raise ValueError(f"Error in setting random seed. {e}")
@@ -353,22 +367,22 @@ def setup_model_input(model: PhysiCell_Model, SampleID: int, ReplicateID: int, p
     if model.verbose:
         print(f"\t\t\t>>> Generating XML file {XMLFile} ...")
     try:
-        generate_xml_file(pathlib.Path(model.XML_RefPath), pathlib.Path(XMLFile), dic_xml_parameters, model.timeout)
+        _generate_xml_file(pathlib.Path(model.XML_RefPath), pathlib.Path(XMLFile), dic_xml_parameters, model.timeout)
     except ValueError as e:
         raise ValueError(f"Error in generating XML file! {e}")
 
-def RunModel(model: PhysiCell_Model, SampleID: int, ReplicateID: int, Parameters: Union[np.ndarray, dict] = dict(), ParametersRules: Union[np.ndarray, dict] = dict(), RemoveConfigFile: bool = True, SummaryFunction: Union[None, str] = None) -> Union[None, pd.DataFrame]:
+def _run_model(model: PhysiCell_Model, SampleID: int, ReplicateID: int, Parameters: Union[np.ndarray, dict] = dict(), ParametersRules: Union[np.ndarray, dict] = dict(), RemoveConfigFile: bool = True, SummaryFunction: Union[None, str] = None) -> Union[None, pd.DataFrame]:
     if model.verbose:
-        print(f"\t> RunModel - Sample:{SampleID}, Replicate: {ReplicateID}, Parameters XML: {Parameters}, Parameters rules: {ParametersRules}...")
+        print(f"\t> Running - Sample:{SampleID}, Replicate: {ReplicateID}, Parameters XML: {Parameters}, Parameters rules: {ParametersRules}...")
     try:
         try:
             if model.verbose:
                 print(f"\t\t>> Setting up model input ...")
-            setup_model_input(model, SampleID, ReplicateID, Parameters, parameters_rules_input=ParametersRules)
+            _setup_model_input(model, SampleID, ReplicateID, Parameters, parameters_rules_input=ParametersRules)
         except ValueError as e:
             raise ValueError(f"Error in setup_model_input! (Sample: {SampleID} and Replicate: {ReplicateID}).\n{e}")
 
-        XMLFile = model.get_XML_Path(SampleID, ReplicateID)
+        XMLFile = model._get_xml_path(SampleID, ReplicateID)
 
         if model.verbose:
             print(f"\t\t>> Running model ...")
@@ -387,7 +401,7 @@ def RunModel(model: PhysiCell_Model, SampleID: int, ReplicateID: int, Parameters
             try:
                 os.remove(pathlib.Path(XMLFile))
                 if model.parameters_rules:
-                    filenameRule = model.get_RULES_FileName(SampleID, ReplicateID)
+                    filenameRule = model._get_rules_fileName(SampleID, ReplicateID)
                     os.remove(pathlib.Path(model.input_folder + filenameRule))
             except OSError as e:
                 print(f"Error removing files: {e}")
@@ -395,7 +409,7 @@ def RunModel(model: PhysiCell_Model, SampleID: int, ReplicateID: int, Parameters
         if SummaryFunction:
             if model.verbose:
                 print(f"\t\t>> Running summary function: {SummaryFunction} ...")
-            OutputFolder = model.get_output_Path(SampleID, ReplicateID)
+            OutputFolder = model._get_output_path(SampleID, ReplicateID)
             dic_params = {}
             if isinstance(Parameters, dict):
                 dic_params = {param_name: Parameters[param_name] for param_name in model.XML_parameters_variable.values()}
@@ -424,7 +438,7 @@ def RunModel(model: PhysiCell_Model, SampleID: int, ReplicateID: int, Parameters
     except Exception as e:
         raise ValueError(f"An unexpected error occurred in RunModel: {e}")
 
-def get_xml_element_value(xml_root: ET.Element, key: str) -> str:
+def _get_xml_element_value(xml_root: ET.Element, key: str) -> str:
     elem = xml_root.findall(key)
     if len(elem) != 1:
         raise ValueError(f""" Error in getting XML element!
@@ -436,7 +450,7 @@ def get_xml_element_value(xml_root: ET.Element, key: str) -> str:
                 """)
     return elem[0].text
 
-def set_xml_element_value(xml_root: ET.Element, key: str, val: Union[str, int, float]) -> None:
+def _set_xml_element_value(xml_root: ET.Element, key: str, val: Union[str, int, float]) -> None:
     elem = xml_root.findall(key)
     if len(elem) != 1:
         raise ValueError(f""" Error in setting XML element!
@@ -449,7 +463,7 @@ def set_xml_element_value(xml_root: ET.Element, key: str, val: Union[str, int, f
     else:
         elem[0].text = str(val)
 
-def generate_xml_file(xml_file_in: str, xml_file_out: str, dic_parameters: dict, max_wait_time: float) -> None:
+def _generate_xml_file(xml_file_in: str, xml_file_out: str, dic_parameters: dict, max_wait_time: float) -> None:
     copyfile(xml_file_in, xml_file_out)
     start_time = time.time()
     while not os.path.exists(xml_file_out) or os.path.getsize(xml_file_out) != os.path.getsize(xml_file_in):
@@ -461,13 +475,13 @@ def generate_xml_file(xml_file_in: str, xml_file_out: str, dic_parameters: dict,
     for key in dic_parameters.keys():
         val = dic_parameters[key]
         try:
-            set_xml_element_value(xml_root, key, val)
+            _set_xml_element_value(xml_root, key, val)
         except ValueError as e:
             raise ValueError(f"Error in setting parameter {key} with value {val}. {e}")
         # print(key,val)
     tree.write(xml_file_out)
 
-def get_rules(filename: str) -> list:
+def _get_rules(filename: str) -> list:
     default_rules = []
     try:
         with open(filename, newline='') as csvfile:
@@ -479,7 +493,7 @@ def get_rules(filename: str) -> list:
     except FileNotFoundError:
         raise ValueError(f"Error! File {filename} not found!")
 
-def get_rule_index_in_csv(rules: list, key_rules: str) -> int:
+def _get_rule_index_in_csv(rules: list, key_rules: str) -> int:
     try:
         cell_type, signal, direction, behavior, parameter = key_rules.split(",")
     except ValueError:
@@ -493,7 +507,7 @@ def get_rule_index_in_csv(rules: list, key_rules: str) -> int:
     except ValueError:
         raise ValueError(f"Error! Rule {cell_type},{signal},{direction},{behavior} not found or parameter {parameter} does not exist!")
 
-def generate_csv_file(rules: list, csv_file_out: str, dic_parameters_rules: dict) -> None:
+def _generate_csv_file(rules: list, csv_file_out: str, dic_parameters_rules: dict) -> None:
     try:
         with open(csv_file_out, 'w', newline='') as csvfile:
             fieldNames = ['cell_type', 'signal', 'direction', 'behavior', 'saturation', 'half_max', 'hill_power', 'dead']
@@ -502,7 +516,7 @@ def generate_csv_file(rules: list, csv_file_out: str, dic_parameters_rules: dict
             rules_inactived = []
             for parameterID in dic_parameters_rules.keys():
                 value, key_rule, param_name = dic_parameters_rules[parameterID]
-                index_rule = get_rule_index_in_csv(rules, key_rule)
+                index_rule = _get_rule_index_in_csv(rules, key_rule)
                 if (param_name not in fieldNames) and (param_name != "inactive"):
                     raise ValueError(f"Error! Parameter {param_name} not found in RULE: {key_rule}. Available parameters: {fieldNames} and inactive option.")
                 # if the parameter is 'inactive', remove the rule or ignore it
