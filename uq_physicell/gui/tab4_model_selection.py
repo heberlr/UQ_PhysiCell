@@ -1,12 +1,14 @@
+import numpy as np
+import os
 
+# All the specific classes we need
 from PyQt5.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog, QListWidget, QMessageBox, QTableWidget, QTableWidgetItem, QHeaderView
 from PyQt5.QtCore import Qt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
-import numpy as np
-import os
 
-from uq_physicell.bo.database import load_structure
+# My local modules
+from uq_physicell.database.bo_db import load_structure
 
 
 def calculate_aic(log_fitness, num_params):
