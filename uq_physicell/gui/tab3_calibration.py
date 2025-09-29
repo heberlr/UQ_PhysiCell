@@ -1,20 +1,24 @@
+import pandas as pd
+import seaborn as sns
+import logging
+import sys
+
+# All the specific classes we need
 from PyQt5.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, QLineEdit, QTextEdit, QDialog, QFileDialog, QListWidget, QSpacerItem, QSizePolicy, QTableWidget, QTableWidgetItem, QMessageBox
 )
 from PyQt5.QtCore import Qt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
-import pandas as pd
-import seaborn as sns
-import logging
-import sys
 
-from uq_physicell.gui.tab2_model_analysis import QtTextEditLogHandler
-from uq_physicell.bo.database import load_structure
-from uq_physicell.bo.optimize import CalibrationContext, run_bayesian_optimization
-from uq_physicell.bo.plot import (
-    analyze_pareto_results, get_observed_qoi, plot_parameter_space, plot_qoi_param, plot_parameter_vs_fitness
+# My local modules
+from ..gui.tab2_model_analysis import QtTextEditLogHandler
+from ..database.bo_db import load_structure
+from ..bo.bo_context import CalibrationContext, run_bayesian_optimization
+from ..bo.plots import (
+    get_observed_qoi, plot_parameter_space, plot_qoi_param, plot_parameter_vs_fitness
 )
+from ..bo.utils import analyze_pareto_results
 
 def create_tab3(main_window):
     # Add methods to the main_window instance
@@ -144,7 +148,12 @@ def create_tab3(main_window):
     main_window.output_text_tab3.setReadOnly(True)
     main_window.output_text_tab3.setMinimumHeight(100)
     layout_tab3.addWidget(main_window.output_text_tab3)
-
+    
+    # Register with main window's message system if available
+    if hasattr(main_window, 'add_output_widget'):
+        main_window.add_output_widget('tab3', main_window.output_text_tab3)
+        main_window.post_message('tab3', "Welcome to Calibration! Load a model and observational data, set parameters, and Quantity(s) of Interest (QoIs) to begin.")
+    
     return layout_tab3
 
 
@@ -156,9 +165,16 @@ def load_obs_data(main_window):
         try:
             main_window.obs_data = pd.read_csv(file_path)
             main_window.obs_file_name_input.setText(file_path)
-            main_window.output_text_tab3.append(f"Loaded observational data from {file_path}")
+            # Thread-safe update via main window
+            if hasattr(main_window, 'post_message'):
+                main_window.post_message('tab3', f"Loaded observational data from {file_path}")
+            else:
+                main_window.output_text_tab3.append(f"Loaded observational data from {file_path}")
         except Exception as e:
-            main_window.output_text_tab3.append(f"Error loading observational data: {e}")
+            if hasattr(main_window, 'post_message'):
+                main_window.post_message('tab3', f"Error loading observational data: {e}")
+            else:
+                main_window.output_text_tab3.append(f"Error loading observational data: {e}")
 
 def load_ini_calibration(main_window):
     main_window.load_ini_file(main_window)
@@ -298,7 +314,7 @@ def define_parameter_space(main_window):
     if main_window.df_param_space.empty:
         # From XML
         for key, value in main_window.analysis_parameters.items():
-            ref_value = float(main_window.get_xml_value(main_window, key))  # Get the default XML value - string
+            ref_value = float(main_window.get_parameter_value_xml(main_window, key))  # Get the default XML value - string
             lower_bound = float(ref_value) * 0.8
             upper_bound = float(ref_value) * 1.2
             new_row = pd.DataFrame([{'Parameter': value[1], 'Type': 'real', 'Lower Bound': lower_bound, 'Upper Bound': upper_bound}])
