@@ -1,8 +1,9 @@
 import sys, os
 import pandas as pd
+import queue
 from PyQt5.QtWidgets import QApplication, QMainWindow, QTabWidget, QVBoxLayout, QWidget, QMessageBox
 from PyQt5.QtGui import QIcon, QPalette, QColor, QDesktopServices
-from PyQt5.QtCore import Qt, QUrl
+from PyQt5.QtCore import Qt, QUrl, QTimer
 
 from uq_physicell import __version__ as uq_physicell_version
 
@@ -30,7 +31,26 @@ class MainWindow(QMainWindow):
         self.qoi_funcs = {}  # Store the QoI functions
         self.df_output = pd.DataFrame()  # DataFrame to store the output of the analysis
         self.df_qois = pd.DataFrame()  # DataFrame to store the QoIs of the output of the analysis
+        
+        self.df_output = pd.DataFrame()  # DataFrame to store the output of the analysis
+        self.df_qois = pd.DataFrame()  # DataFrame to store the QoIs of the output of the analysis
 
+        # Logging related attributes - created later after widgets are set up
+        self.logger_tab2 = None
+        self.logger_tab3 = None
+        
+        # Thread-safe message queue
+        self.message_queue = queue.Queue()
+        
+        # Set up a timer for processing messages
+        self.message_timer = QTimer()
+        self.message_timer.setInterval(50)  # Process messages every 50ms
+        self.message_timer.timeout.connect(self._process_message_queue)
+        
+        # Dictionary to store output widgets for different tabs
+        self.output_widgets = {}
+        
+        # Setting up the main window
         self.setWindowTitle("UQ_PhysiCell - GUI")
 
         # Create a menu bar
@@ -105,11 +125,131 @@ class MainWindow(QMainWindow):
         ##########################################
         # Layout for tab 4 - Model Selection
         ##########################################
-        layout_tab4 = QVBoxLayout()
+        layout_tab4 =  create_tab4(self)
         self.tab4.setLayout(layout_tab4)
         
         # Set central widget
         self.setCentralWidget(self.tabs)
+        
+        # Start the message processing timer after initializing all UI components
+        self.start_message_processing()
+        
+    def _process_message_queue(self):
+        """Process messages from the queue and update the appropriate widget safely in the main thread."""
+        try:
+            # Process up to 10 messages per timer tick to prevent UI freezing
+            for _ in range(10):
+                if self.message_queue.empty():
+                    break
+                
+                try:    
+                    tab_id, message = self.message_queue.get_nowait()
+                    
+                    # Update the appropriate widget if it exists
+                    if tab_id in self.output_widgets and self.output_widgets[tab_id]:
+                        try:
+                            # Get the text edit widget and append message
+                            text_edit = self.output_widgets[tab_id]
+                            text_edit.append(message)
+                            
+                            # Ensure text is visible by scrolling to the bottom
+                            # This is safe because we're in the main thread
+                            text_edit.ensureCursorVisible()
+                            
+                        except Exception as e:
+                            import sys
+                            print(f"Error updating UI: {e}", file=sys.stderr)
+                    
+                    # Mark task as done even if there was an error
+                    self.message_queue.task_done()
+                    
+                except queue.Empty:
+                    # Queue became empty while we were processing
+                    break
+                    
+        except Exception as e:
+            import sys
+            print(f"Error processing message queue: {e}", file=sys.stderr)
+    
+    def start_message_processing(self):
+        """Start the message processing timer."""
+        if not self.message_timer.isActive():
+            self.message_timer.start()
+            
+    def stop_message_processing(self):
+        """Stop the message processing timer."""
+        if self.message_timer.isActive():
+            self.message_timer.stop()
+    
+    def add_output_widget(self, tab_id, widget):
+        """Register an output widget for a specific tab."""
+        self.output_widgets[tab_id] = widget
+        # Make sure the message timer is running
+        if hasattr(self, 'message_timer') and not self.message_timer.isActive():
+            self.message_timer.start()
+        
+    def post_message(self, tab_id, message):
+        """Add a message to the queue to be processed by the main thread."""
+        try:
+            self.message_queue.put((tab_id, message))
+            # Make sure the timer is running
+            if hasattr(self, 'message_timer') and not self.message_timer.isActive():
+                self.message_timer.start()
+        except Exception as e:
+            import sys
+            print(f"Error posting message: {e}", file=sys.stderr)
+            print(f"Message: {message}", file=sys.stderr)
+        
+    def closeEvent(self, event):
+        """Handle the window close event to properly clean up resources."""
+        # Stop message processing timer
+        self.stop_message_processing()
+        
+        # Clear message queue
+        import queue
+        try:
+            while not self.message_queue.empty():
+                self.message_queue.get_nowait()
+                self.message_queue.task_done()
+        except (AttributeError, queue.Empty):
+            pass
+            
+        # Clear output widgets dictionary
+        if hasattr(self, 'output_widgets'):
+            self.output_widgets.clear()
+            
+        # Clean up logging handlers to prevent access to deleted Qt objects
+        import logging
+        
+        # Clean up tab2 logger if it exists
+        if hasattr(self, 'logger_tab2') and self.logger_tab2:
+            # Remove all handlers to prevent them from accessing deleted Qt objects
+            if self.logger_tab2.handlers:
+                for handler in self.logger_tab2.handlers[:]:
+                    try:
+                        handler.close()
+                    except:
+                        pass
+                    self.logger_tab2.removeHandler(handler)
+        
+        # Clean up tab3 logger if it exists
+        if hasattr(self, 'logger_tab3') and self.logger_tab3:
+            # Remove all handlers to prevent them from accessing deleted Qt objects
+            if self.logger_tab3.handlers:
+                for handler in self.logger_tab3.handlers[:]:
+                    try:
+                        handler.close()
+                    except:
+                        pass
+                    self.logger_tab3.removeHandler(handler)
+        
+        # Reset root logger configuration to avoid issues on next startup
+        root_logger = logging.getLogger()
+        for handler in root_logger.handlers[:]:
+            root_logger.removeHandler(handler)
+        
+        # Accept the close event
+        event.accept()
 
 def show_about_uq_physicell(main_window):
     about_text = f"<b>UQ_PhysiCell v.{uq_physicell_version}</b><br><br>"
@@ -144,6 +284,17 @@ def reset_all(main_window):
 
 def main():
     print(f"UQ_PhysiCell version: {uq_physicell_version}")
+    
+    # Make sure Qt modules are imported in the correct order
+    import PyQt5.QtCore
+    import PyQt5.QtGui
+    import PyQt5.QtWidgets
+    
+    # Import QTextCursor but don't try to register it - we'll use a different approach
+    from PyQt5.QtGui import QTextCursor
+    print("Note: Using thread-safe message queue for UI updates instead of QTextCursor registration")
+    
+    # Create the application
     uq_physicell_app = QApplication(sys.argv)
 
     # Set the application icon
@@ -180,6 +331,7 @@ def main():
     window.resize(1100, 790)
     window.setMinimumSize(1100, 790)
     window.show()
+    
     sys.exit(uq_physicell_app.exec_())
 
 if __name__ == '__main__':
