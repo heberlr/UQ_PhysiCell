@@ -64,7 +64,7 @@ bo = [
 ]
 
 [project.scripts]
-uq_physicell = "uq_physicell.gui.main:main"
+uq_physicell = "uq_physicell.gui.main_window:main"
 
 [project.urls]
 "Homepage" = "https://github.com/heberlr/UQ_PhysiCell"
