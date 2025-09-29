@@ -11,7 +11,7 @@ def run_global_sampler(params_dict: dict, sampler: str, N: int = None, M: int = 
     
     Args:
         params_dict (dict): Dictionary containing parameter definitions with
-            'lower_bounds' and 'upper_bounds' for each parameter.
+            'lower_bound' and 'upper_bound' for each parameter.
         sampler (str): Sampling method to use. Supported methods include:
             - 'Fast': FAST sampling for Fourier Amplitude Sensitivity Test
             - 'Fractional Factorial': Fractional factorial design
@@ -35,8 +35,8 @@ def run_global_sampler(params_dict: dict, sampler: str, N: int = None, M: int = 
     
     Example:
         >>> params = {
-        ...     'param1': {'lower_bounds': 0.0, 'upper_bounds': 1.0},
-        ...     'param2': {'lower_bounds': 0.5, 'upper_bounds': 2.0}
+        ...     'param1': {'lower_bound': 0.0, 'upper_bound': 1.0},
+        ...     'param2': {'lower_bound': 0.5, 'upper_bound': 2.0}
         ... }
         >>> samples = run_global_sampler(params, 'LHS', N=100)
         >>> len(samples)
