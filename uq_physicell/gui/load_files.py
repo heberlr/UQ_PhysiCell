@@ -6,7 +6,7 @@ import traceback
 
 from PyQt5.QtWidgets import QFileDialog, QInputDialog
 
-from uq_physicell.model_analysis.database import get_database_type
+from ..database.ma_db import get_database_type
 
 def load_xml_file(main_window, filePath=None):
      # Clear parameters, .ini File Preview, and output
@@ -107,29 +107,32 @@ def load_ini_file(main_window, filePath=None, strucName=None):
             sections = config.sections()
             if not sections:
                 main_window.update_output_tab1(main_window, "Error: No sections found in the .ini file.")
-                return
-
-            # If only one section, load it directly
-            if len(sections) == 1:
-                struc_name = sections[0]
-            elif strucName is not None:
-                struc_name = strucName
-            else:
-                # Create a dialog to display radio buttons for section selection
-                dialog = QInputDialog(main_window)
-                dialog.setWindowTitle("Select structure name")
-                dialog.setLabelText("Select the structure section to load:")
-                dialog.setComboBoxItems(sections)
-                dialog.setOption(QInputDialog.UseListViewForComboBoxItems)
-
-                if dialog.exec_() == QInputDialog.Accepted:
-                    struc_name = dialog.textValue()
-                    if struc_name not in sections:
-                        main_window.update_output_tab1(main_window, f"Error: Structure name '{struc_name}' not found in the .ini file.")
-                        return
+                raise ValueError("No sections found in the .ini file.")
+            # Determine which section to load
+            if strucName is not None:
+                # print(f"Provided structure name: {strucName}")
+                # print(f"Available sections: {sections}")
+                if strucName in sections:
+                    struc_name = strucName
                 else:
-                    main_window.update_output_tab1(main_window, "No section selected.")
-                    return
+                    raise ValueError(f"Structure name '{strucName}' not found in the .ini file.")
+            else: # If no structure name provided, prompt the user to select one
+                # If only one section, load it directly
+                if len(sections) == 1:
+                    struc_name = sections[0]
+                else: # Create a dialog to display radio buttons for section selection
+                    dialog = QInputDialog(main_window)
+                    dialog.setWindowTitle("Select structure name")
+                    dialog.setLabelText("Select the structure section to load:")
+                    dialog.setComboBoxItems(sections)
+                    dialog.setOption(QInputDialog.UseListViewForComboBoxItems)
+
+                    if dialog.exec_() == QInputDialog.Accepted:
+                        struc_name = dialog.textValue()
+                        if struc_name not in sections:
+                            raise ValueError(f"Structure name '{struc_name}' not found in the .ini file.")
+                    else:
+                        raise ValueError("No section selected.")
 
             # Extract parameters from the selected section
             main_window.struc_name_input.setText(struc_name)
@@ -209,6 +212,7 @@ def load_ini_file(main_window, filePath=None, strucName=None):
             print(error_message)
             main_window.update_output_tab1(main_window, error_message)  # Tab 1 output
             main_window.update_output_tab2(main_window, error_message)  # Tab 2 output
+            raise ValueError(error_message)
 
 def load_db_file(main_window, filePath=None):
         # Load the database file and extract parameters for sensitivity analysis
