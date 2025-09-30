@@ -1,7 +1,7 @@
 try:
     from mpi4py import MPI
     mpi_available = True
-except ImportError:
+except (ImportError, RuntimeError):
     mpi_available = False
     MPI = None
 
