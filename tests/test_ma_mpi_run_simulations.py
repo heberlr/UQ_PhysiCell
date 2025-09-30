@@ -1,4 +1,10 @@
-from mpi4py import MPI
+try:
+    from mpi4py import MPI
+    mpi_available = True
+except ImportError:
+    mpi_available = False
+    MPI = None
+
 import unittest
 import pickle
 from unittest.mock import MagicMock, patch
@@ -27,6 +33,7 @@ def mock_run_replicate_serializable_func(ini_path, struc_name, sampleID, replica
 
 
 class TestRunSASimulationsMPI(unittest.TestCase):
+    @unittest.skipIf(not mpi_available, "MPI not available")
     @patch('uq_physicell.model_analysis.ma_context.PhysiCell_Model', new=SerializableMockModel)
     @patch('uq_physicell.model_analysis.ma_context.check_simulations_db')
     @patch('uq_physicell.model_analysis.ma_context.create_structure')
@@ -41,9 +48,13 @@ class TestRunSASimulationsMPI(unittest.TestCase):
                                     mock_insert_qoi, mock_insert_param_space, mock_insert_metadata, 
                                     mock_create_structure, mock_check_simulations_db):
         # Mock MPI environment
-        comm = MPI.COMM_WORLD
-        rank = comm.Get_rank()
-        size = comm.Get_size()
+        if MPI is not None:
+            comm = MPI.COMM_WORLD
+            rank = comm.Get_rank()
+            size = comm.Get_size()
+        else:
+            rank = 0
+            size = 1
 
         print(f"Rank {rank}: Starting test on {size} MPI processes")
 
