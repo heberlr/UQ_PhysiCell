@@ -1,4 +1,17 @@
 numpy
 pandas
+matplotlib
+PyQt5
 # Add other dependencies as needed
 pcdl
+salib
+# Additional dependencies for testing
+pytest
+pytest-cov
+mpi4py
+# Additional dependencies for Bayesian Optimization
+torch
+botorch
+gpytorch
+# Additional dependencies for ABC
+pyabc
