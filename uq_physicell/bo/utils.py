@@ -1,6 +1,7 @@
 import pandas as pd
 from typing import Union
 import torch
+from ..database.bo_db import load_structure
 
 def normalize_params_df(df_params, df_search_space) -> pd.DataFrame:
     """
