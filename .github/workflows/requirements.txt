@@ -1,6 +1,5 @@
-numpy
 pandas
-matplotlib
+seaborn
 PyQt5
 # Add other dependencies as needed
 pcdl
