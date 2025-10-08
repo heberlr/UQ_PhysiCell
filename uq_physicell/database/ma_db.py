@@ -443,7 +443,7 @@ def check_simulations_db(PhysiCellModel: PhysiCell_Model, sampler: str, param_di
                 raise ValueError(f"ParameterSpace mismatch for SampleID {sample_id}. Expected: {params}, Found: {dic_samples_db[sample_id]}.")
 
         # Check if QoIs match the expected values
-        if qois_dic is not None:
+        if qois_dic:
             if df_qois['QOI_Name'].to_list() != list(qois_dic.keys()):
                 raise ValueError(f"QoIs mismatch. Expected: {list(qois_dic.keys())}, Found: {df_qois['QOI_Name'].to_list()}.")
             if df_qois['QOI_Function'].to_list() != list(qois_dic.values()):
