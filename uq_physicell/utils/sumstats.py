@@ -2,6 +2,53 @@ import pcdl
 import pandas as pd
 from shutil import rmtree
 from typing import Union
+import inspect
+
+def check_functions_need_microenv(qoi_funcs):
+    """
+    Check if any of the QoI functions require microenvironment data (df_subs).
+    
+    Parameters:
+    - qoi_funcs: dict -> Dictionary of QoI functions
+    
+    Returns:
+    - bool: True if any function needs microenvironment data
+    """
+    if not qoi_funcs:
+        return False
+        
+    for func in qoi_funcs.values():
+        # Check if any parameter name indicates substrate/concentration data
+        param_lower = func.__param_name__.lower()
+        if 'subs' in param_lower or 'conc' in param_lower or 'micro' in param_lower:
+                return True
+    
+    return False
+
+def safe_call_qoi_function(func, df_cell, df_subs=None):
+    """
+    Safely call a QoI function with the appropriate dataframe based on parameter inspection.
+    
+    Parameters:
+    - func: The QoI function to call
+    - df_cell: Cell dataframe
+    - df_subs: Substrate dataframe (optional)
+    
+    Returns:
+    - Result of the QoI function
+    """
+    
+    # Check if function has our custom parameter name attribute (from string creation)
+    param_name = func.__param_name__
+    needs_subs = any(keyword in param_name.lower() for keyword in ['subs', 'conc', 'micro'])
+    
+    # Call function with appropriate dataframe
+    if needs_subs:
+        if df_subs is None:
+            raise ValueError(f"Function {func.__name__} needs substrate data but df_subs is None")
+        return func(df_subs)
+    else:
+        return func(df_cell)
 
 def summ_func_FinalPopLiveDead(outputPath:str,summaryFile:Union[str,None], dic_params:dict, SampleID:int, ReplicateID:int) -> Union[pd.DataFrame,None]:
     """
@@ -89,8 +136,11 @@ def generic_QoI(outputPath: str, summaryFile: Union[str, None], dic_params: dict
     """
     try:
         if mode == 'last_snapshot':
+            # Check if any function needs microenvironment data
+            needs_microenv = check_functions_need_microenv(qoi_funcs)
+            
             # Load the last snapshot
-            mcds = pcdl.TimeStep('final.xml', outputPath, microenv=False, graph=False, settingxml=None, verbose=False)
+            mcds = pcdl.TimeStep('final.xml', outputPath, microenv=needs_microenv, graph=False, settingxml=None, verbose=False)
             if qoi_funcs is None:
                 # Optional: Remove replicate output folder
                 if (RemoveFolder): rmtree(outputPath)
@@ -98,16 +148,15 @@ def generic_QoI(outputPath: str, summaryFile: Union[str, None], dic_params: dict
                 if not drop_columns:
                     return [mcds]
                 else:
-                    df_cell = mcds.get_cell_df()
                     df_cell = mcds.get_cell_df()  # Ensure df_cell is initialized
                     df_cell.drop(columns=drop_columns, inplace=True, errors='ignore')
                 return [df_cell]
                     
             else:
                 df_cell = mcds.get_cell_df()
-
-                # Compute QoIs
-                qoi_data = {name: func(df_cell) for name, func in qoi_funcs.items()}
+                df_subs = mcds.get_conc_df() if needs_microenv else None
+                # Compute QoIs using safe function calling
+                qoi_data = {name: safe_call_qoi_function(func, df_cell, df_subs) for name, func in qoi_funcs.items()}
                 data = {
                     'time': mcds.get_time(),
                     'sampleID': SampleID,
@@ -118,8 +167,11 @@ def generic_QoI(outputPath: str, summaryFile: Union[str, None], dic_params: dict
                 df = pd.DataFrame([data_conc])
 
         elif mode == 'time_series':
+            # Check if any function needs microenvironment data
+            needs_microenv = check_functions_need_microenv(qoi_funcs)
+            
             # Load the time series
-            mcds_ts = pcdl.TimeSeries(outputPath, microenv=False, graph=False, settingxml=None, verbose=False)
+            mcds_ts = pcdl.TimeSeries(outputPath, microenv=needs_microenv, graph=False, settingxml=None, verbose=False)
             #  All data is stored as a list of mcds
             if qoi_funcs is None:
                 # Optional: Remove replicate output folder
@@ -138,8 +190,9 @@ def generic_QoI(outputPath: str, summaryFile: Union[str, None], dic_params: dict
                 df_list = []
                 for mcds in mcds_ts.get_mcds_list():
                     df_cell = mcds.get_cell_df()
+                    df_subs = mcds.get_conc_df() if needs_microenv else None
                     try: 
-                        qoi_data = {name: func(df_cell) for name, func in qoi_funcs.items()}
+                        qoi_data = {name: safe_call_qoi_function(func, df_cell, df_subs) for name, func in qoi_funcs.items()}
                     except Exception as e:
                         raise RuntimeError(f"Error computing QoIs in generic_QoI function: {e}")
 
@@ -155,13 +208,17 @@ def generic_QoI(outputPath: str, summaryFile: Union[str, None], dic_params: dict
                 
 
         elif mode == 'summary':
+            # Check if any function needs microenvironment data
+            needs_microenv = check_functions_need_microenv(qoi_funcs)
+            
             # Load the time series and summarize across snapshots
-            mcds_ts = pcdl.TimeSeries(outputPath, microenv=False, graph=False, settingxml=None, verbose=False)
+            mcds_ts = pcdl.TimeSeries(outputPath, microenv=needs_microenv, graph=False, settingxml=None, verbose=False)
             summary_data = {name: [] for name in qoi_funcs.keys()}
             for mcds in mcds_ts.get_mcds_list():
                 df_cell = mcds.get_cell_df()
+                df_subs = mcds.get_conc_df() if needs_microenv else None
                 for name, func in qoi_funcs.items():
-                    summary_data[name].append(func(df_cell))
+                    summary_data[name].append(safe_call_qoi_function(func, df_cell, df_subs))
             summarized_qois = {name: sum(values) / len(values) for name, values in summary_data.items()}
             data = {
                 'sampleID': SampleID,
