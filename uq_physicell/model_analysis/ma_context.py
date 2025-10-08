@@ -23,7 +23,7 @@ except ImportError:
 
 # My local modules
 from uq_physicell import PhysiCell_Model
-from .samplers import run_local_sampler
+from .samplers import run_local_sampler, run_global_sampler, run_local_sampler
 from ..utils.model_wrapper import run_replicate, run_replicate_serializable
 from ..database.ma_db import create_structure, insert_metadata, insert_param_space, insert_qois, insert_samples, insert_output, check_simulations_db
 
@@ -119,7 +119,13 @@ class ModelAnalysisContext:
             self.num_workers = 1
         else:
             raise ValueError("Invalid parallel_method. Use 'inter-node' for MPI, 'inter-process' for futures, or 'serial' for single process.") 
-            
+    
+    def generate_samples(self, N: int = None, M: int = 4, seed: int = 42):
+        if (self.dic_metadata['Sampler'] == 'OAT'):
+            self.dic_samples = run_local_sampler(self.params_dict, self.dic_metadata['Sampler'])
+        elif (self.dic_metadata['Sampler'] != 'User-defined'):
+            self.dic_samples = run_global_sampler(self.params_dict, self.dic_metadata['Sampler'], N, M, seed)
+
     def cancelled(self):
         """Check if cancellation has been requested.
         
