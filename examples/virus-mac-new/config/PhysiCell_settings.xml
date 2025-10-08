@@ -106,11 +106,6 @@
                     <phase_transition_rates units="1/min">
                         <rate start_index="0" end_index="0" fixed_duration="false">0</rate>
                     </phase_transition_rates>
-                    <standard_asymmetric_division enabled="False">
-                        <asymmetric_division_probability name="epithelial" units="dimensionless">1.0</asymmetric_division_probability>
-                        <asymmetric_division_probability name="epithelial_infected" units="dimensionless">0</asymmetric_division_probability>
-                        <asymmetric_division_probability name="macrophage" units="dimensionless">0</asymmetric_division_probability>
-                    </standard_asymmetric_division>
                 </cycle>
                 <death>
                     <model code="100" name="apoptosis">
@@ -265,11 +260,6 @@
                     <phase_transition_rates units="1/min">
                         <rate start_index="0" end_index="0" fixed_duration="false">0.00072</rate>
                     </phase_transition_rates>
-                    <standard_asymmetric_division enabled="False">
-                        <asymmetric_division_probability name="epithelial" units="dimensionless">0</asymmetric_division_probability>
-                        <asymmetric_division_probability name="epithelial_infected" units="dimensionless">1.0</asymmetric_division_probability>
-                        <asymmetric_division_probability name="macrophage" units="dimensionless">0</asymmetric_division_probability>
-                    </standard_asymmetric_division>
                 </cycle>
                 <death>
                     <model code="100" name="apoptosis">
@@ -413,11 +403,6 @@
                     <phase_transition_rates units="1/min">
                         <rate start_index="0" end_index="0" fixed_duration="false">0</rate>
                     </phase_transition_rates>
-                    <standard_asymmetric_division enabled="False">
-                        <asymmetric_division_probability name="epithelial" units="dimensionless">0</asymmetric_division_probability>
-                        <asymmetric_division_probability name="epithelial_infected" units="dimensionless">0</asymmetric_division_probability>
-                        <asymmetric_division_probability name="macrophage" units="dimensionless">1.0</asymmetric_division_probability>
-                    </standard_asymmetric_division>
                 </cycle>
                 <death>
                     <model code="100" name="apoptosis">
