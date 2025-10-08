@@ -1,4 +1,7 @@
 import pathlib
+import urllib.request
+import zipfile
+import re
 import os
 import subprocess
 from typing import Union
@@ -9,7 +12,7 @@ import csv
 import random
 import configparser # read config *.ini file
 import ast # string to literal
-from shutil import copyfile
+import shutil
 import time
 import copy
 import datetime
@@ -42,17 +45,28 @@ class PhysiCell_Model:
             print(f"\t\t>> Reading config file: {configFilePath} ...")
         with open(configFilePath) as fd:
             configFile.read_file(fd)
+        
+        # Mandatory variables
+        self.XML_RefPath = configFile[keyModel]['configFile_ref']
+        if not os.path.exists(self.XML_RefPath): raise ValueError(f"Error! XML file {self.XML_RefPath} not found!")
+        self.numReplicates = int(configFile[keyModel]['numReplicates'])
+
         # PhysiCell executable
         self.PC_executable = configFile[keyModel]['executable']
         if self.verbose:
             print(f"\t\t>> Checking executable format ...")
         if os.name == 'nt':
             self.PC_executable = self.PC_executable.replace(os.altsep, os.sep) + '.exe'
-        if not os.path.exists(self.PC_executable): raise ValueError(f"Error! Executable {self.PC_executable} not found!")
+        if not os.path.exists(self.PC_executable): 
+            try:
+                # If PhysiCell path is not found, assume it is in the same folder as the executable
+                PC_path = configFile[keyModel]['PhysiCell_path'] if 'PhysiCell_path' in configFile[keyModel] else os.path.dirname(self.PC_executable)
+                # If Model path is not found, assume it is in the same folder of reference XML file Model_path/config/XML_RefFile
+                Model_path = configFile[keyModel]['Model_path'] if 'Model_path' in configFile[keyModel] else pathlib.Path(self.XML_RefPath).parent.parent
+                compile_physicell(PC_path, Model_path, executable_path=self.PC_executable)
+            except ValueError as e:
+                raise ValueError(f"Error! Executable {self.PC_executable} not found and cannot be compiled! {e}")
         # Path of XML file of reference
-        self.XML_RefPath = configFile[keyModel]['configFile_ref']
-        if not os.path.exists(self.XML_RefPath): raise ValueError(f"Error! XML file {self.XML_RefPath} not found!")
-        self.numReplicates = int(configFile[keyModel]['numReplicates'])
 
         #### Optional variables
         self.projName = configFile[keyModel].get('projName', fallback=keyModel) # project name
@@ -464,7 +478,7 @@ def _set_xml_element_value(xml_root: ET.Element, key: str, val: Union[str, int, 
         elem[0].text = str(val)
 
 def _generate_xml_file(xml_file_in: str, xml_file_out: str, dic_parameters: dict, max_wait_time: float) -> None:
-    copyfile(xml_file_in, xml_file_out)
+    shutil.copyfile(xml_file_in, xml_file_out)
     start_time = time.time()
     while not os.path.exists(xml_file_out) or os.path.getsize(xml_file_out) != os.path.getsize(xml_file_in):
         if time.time() - start_time > max_wait_time:
@@ -531,3 +545,192 @@ def _generate_csv_file(rules: list, csv_file_out: str, dic_parameters_rules: dic
                     writer.writerow(rule)
     except:
         raise ValueError(f"Error generating csv file.")
+
+def get_physicell(target_dir: str, force_download=False, interactive=True):
+    """
+    Download PhysiCell from GitHub and extract it to the target directory.
+    
+    Args:
+        target_dir (str): Directory where PhysiCell will be downloaded and extracted.
+        force_download (bool): If True, download even if PhysiCell already exists.
+                              If False, check for existing installation first.
+        interactive (bool): If True, prompt user for action when PhysiCell exists.
+                           If False, skip download when PhysiCell exists (unless force_download=True).
+    
+    Returns:
+        bool: True if successful, False otherwise.
+    """
+    try:
+        # Define the target directory
+        target_path = pathlib.Path(target_dir)
+        
+        # Create the target directory if it doesn't exist
+        target_path.mkdir(parents=True, exist_ok=True)
+        
+        # Check if PhysiCell already exists
+        physicell_dir = target_path / "PhysiCell-master"
+        if physicell_dir.exists():
+            print(f"PhysiCell already exists at: {physicell_dir.resolve()}")
+            
+            if not force_download:
+                if interactive:
+                    while True:
+                        choice = input("Do you want to (r)eplace, (s)kip, or (c)ancel? [r/s/c]: ").lower().strip()
+                        if choice in ['r', 'replace']:
+                            print("Removing existing PhysiCell installation...")
+                            shutil.rmtree(physicell_dir)
+                            break
+                        elif choice in ['s', 'skip']:
+                            print("Skipping download. Using existing PhysiCell installation.")
+                            return True
+                        elif choice in ['c', 'cancel']:
+                            print("Download cancelled by user.")
+                            return False
+                        else:
+                            print("Please enter 'r' for replace, 's' for skip, or 'c' for cancel.")
+                else:
+                    print("Skipping download. Use force_download=True to override.")
+                    return True
+            else:
+                print("Force download enabled. Removing existing installation...")
+                shutil.rmtree(physicell_dir)
+        
+        # Navigate to the target directory (change working directory)
+        original_cwd = os.getcwd()
+        os.chdir(target_path)
+        
+        print(f"Downloading PhysiCell to {target_path.resolve()}...")
+        
+        # Download the PhysiCell zip file
+        url = "https://github.com/MathCancer/PhysiCell/archive/refs/heads/master.zip"
+        zip_filename = "PhysiCell.zip"
+        
+        urllib.request.urlretrieve(url, zip_filename)
+        print("Download completed.")
+        
+        # Unzip the downloaded file - this will create a new directory called PhysiCell-master
+        with zipfile.ZipFile(zip_filename, 'r') as zip_ref:
+            zip_ref.extractall()
+        print("Extraction completed.")
+        
+        # Remove the zip file
+        os.remove(zip_filename)
+        print("Temporary zip file removed.")
+        
+        print("PhysiCell has been downloaded into the examples folder.")
+        
+        # Restore original working directory
+        os.chdir(original_cwd)
+        
+        return True
+        
+    except Exception as e:
+        print(f"Error downloading PhysiCell: {e}")
+        # Restore original working directory in case of error
+        try:
+            os.chdir(original_cwd)
+        except:
+            pass
+        return False
+
+def get_executable_name_from_makefile(model_path):
+    """
+    Extract the executable name from the Makefile in the model directory.
+    
+    Args:
+        model_path (str): Path to the model directory containing the Makefile
+    
+    Returns:
+        str or None: The executable name if found, None otherwise
+    """
+    makefile_path = os.path.join(model_path, "Makefile")
+    
+    if not os.path.exists(makefile_path):
+        print(f"Makefile not found at: {makefile_path}")
+        return None
+    
+    try:
+        with open(makefile_path, 'r') as f:
+            content = f.read()
+        
+        # Look for PROGRAM_NAME := <name> pattern
+        match = re.search(r'^PROGRAM_NAME\s*:=\s*(\w+)', content, re.MULTILINE)
+        if match:
+            executable_name = match.group(1)
+            print(f"Found executable name in Makefile: {executable_name}")
+            return executable_name
+        else:
+            print("Could not find PROGRAM_NAME in Makefile")
+            return None
+            
+    except Exception as e:
+        print(f"Error reading Makefile: {e}")
+        return None
+
+
+def compile_physicell(pc_path, model_path, executable_path=None, force_compile=False):
+    """
+    Compile PhysiCell and return the executable name from the Makefile.
+    Actual compilation steps would depend on the user's environment and requirements.
+    Args:
+        pc_path (str): Path to the PhysiCell directory
+        model_path (str): Path to the model directory containing the Makefile
+        executable_path (str, optional): Path to store the compiled executable. If None, uses model_path.
+        force_compile (bool): If True, forces recompilation even if executable exists
+    """
+    executable2move = None
+    if executable_path is None:
+        # Get executable name from Makefile before compilation
+        executable2move = get_executable_name_from_makefile(model_path)
+        executable_path = os.path.join(model_path, executable2move)
+
+    if not force_compile and os.path.exists(executable_path):
+        print(f"Executable already exists in {executable_path}. Skipping compilation.")
+        return
+
+    print(f"Compiling PhysiCell model: {executable_path}...")
+    # Check if pc_path exists
+    if not os.path.exists(pc_path):
+        print(f"PhysiCell path does not exist ... Downloading it now.")
+        root_dir = os.path.dirname(pc_path)
+        get_physicell(target_dir=root_dir)
+    
+    original_cwd = os.getcwd()
+    
+    # Calculate the relative path from PhysiCell directory to model directory
+    # Convert both paths to absolute paths BEFORE changing working directory
+    abs_pc_path = os.path.abspath(pc_path)
+    abs_model_path = os.path.abspath(model_path)
+    
+    # Calculate relative path from PhysiCell directory to model directory
+    rel_model_path = os.path.relpath(abs_model_path, abs_pc_path)
+    
+    print(f"PhysiCell path: {abs_pc_path}")
+    print(f"Model path: {abs_model_path}")
+    print(f"Relative path for PROJ: {rel_model_path}")
+    
+    try:
+        # Change to the PhysiCell directory
+        os.chdir(pc_path)
+        
+        # Compile the model using the calculated relative path
+        result = os.system(f"make load PROJ=../{rel_model_path} && make")
+        
+        if result != 0:
+            raise ValueError(f"Make command failed with return code: {result}")
+        
+        print("Compilation completed.")
+        
+        # Move executable to model directory if it exists
+        if executable2move:
+            # Use the relative path we calculated earlier
+            target_path = os.path.join(rel_model_path, executable2move)
+            shutil.move(executable2move, target_path)
+            print(f"Moved executable {executable2move} to {target_path}")
+        
+    except Exception as e:
+        raise ValueError(f"Error during compilation: {e}")
+
+    finally:
+        # Restore original working directory
+        os.chdir(original_cwd)

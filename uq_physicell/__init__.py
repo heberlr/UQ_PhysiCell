@@ -8,7 +8,9 @@ and Bayesian optimization of PhysiCell models.
 from uq_physicell.VERSION import __version__
 from uq_physicell.pc_model import (
     PhysiCell_Model,
-    _run_model as RunModel # backward compatibility
+    _run_model as RunModel, # backward compatibility
+    get_physicell,
+    compile_physicell,
 )
 
 # Import submodules to make them available
