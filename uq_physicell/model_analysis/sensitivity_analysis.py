@@ -192,7 +192,7 @@ def run_global_sa(params_dict: dict, method: str, all_times_label: list, all_qoi
                 elif method == "Delta Moment-Independent Measure":
                     sa_results_dict[qoi][time_label] = delta_analyze.analyze(problem, params_np, qoi_result_np)
                 elif method == "Sobol Sensitivity Analysis":
-                    sa_results_dict[qoi][time_label] = sobol_analyze.analyze(problem, params_np, qoi_result_np)
+                    sa_results_dict[qoi][time_label] = sobol_analyze.analyze(problem, qoi_result_np)
             except Exception as e:
                 raise ValueError(f"Error running {method} for QoI: {qoi} and time: {qoi_time_values[time_label]} - {e}")
 
