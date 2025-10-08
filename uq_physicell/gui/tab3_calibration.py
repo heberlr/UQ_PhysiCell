@@ -177,7 +177,10 @@ def load_obs_data(main_window):
                 main_window.output_text_tab3.append(f"Error loading observational data: {e}")
 
 def load_ini_calibration(main_window):
-    main_window.load_ini_file(main_window)
+    try: 
+        main_window.load_ini_file(main_window)
+    except Exception as e:
+        main_window.output_text_tab3.append(e)
     # Switch the selected tab to Tab 3
     main_window.tabs.setCurrentIndex(2)
     # Update the ini_file_name_input
