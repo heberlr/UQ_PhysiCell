@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import pickle
+import re
 from typing import Union
 
 from uq_physicell import PhysiCell_Model
@@ -55,26 +56,40 @@ def compute_persistent_homology(df:pd.DataFrame, Plot=False) -> pd.Series:
     return pd.Series(vectorised_ph, index=name_of_features)
 
 # Helper function to create named functions from strings
-def create_named_function_from_string(func_str:str, qoi_name:str) -> callable:
+def create_named_function_from_string(func_str: str, qoi_name: str) -> callable:
     """
-    Dynamically creates a named function from a string and assigns it to the module's global scope.
+    Dynamically creates a named function from a string.
     Parameters:
     - func_str: The string representation of the function.
     - qoi_name: The name of the function to be created.
     Return:
-    - The created function.
+    - The created function with preserved parameter inspection capability.
     """
-    # Check if the function already exists in the global scope
-    func_name = f"named_{qoi_name}"
-    if func_name not in globals():
-        exec(
-            f"def {func_name}(*args, **kwargs):\n"
-            f"    return eval({repr(func_str)}, {{'len': len, 'pd': pd, 'np': np}})(*args, **kwargs)",
-            globals()
-        )
-    return globals()[func_name]
+    # Extract parameter name from lambda (e.g., "lambda df_subs:" -> "df_subs")
+    param_match = re.search(r'lambda\s+(\w+):', func_str)
+    if param_match:
+        param_name = param_match.group(1)
+    else:
+        # Default parameter name if parsing fails
+        param_name = 'df'
+    
+    # Create a namespace with necessary imports
+    namespace = {'pd': pd, 'np': np, 'len': len}
+    
+    # Create a wrapper function that accepts any arguments
+    def wrapper(*args, **kwargs):
+        # Evaluate the lambda function string
+        func = eval(func_str, namespace)
+        # Call it with the provided arguments
+        return func(*args, **kwargs)
+    
+    # Store the original parameter name as an attribute for inspection
+    wrapper.__param_name__ = param_name
+    wrapper.__name__ = f"named_{qoi_name}"
+    
+    return wrapper
 
-def summary_function(outputPath:str, summaryFile:str, dic_params:dict, SampleID:int, ReplicateID:int, qoi_functions:dict, drop_columns:Union[list, None]=None):
+def summary_function(outputPath:str, summaryFile:str, dic_params:dict, SampleID:int, ReplicateID:int, qoi_functions:dict, drop_columns:Union[list, None]=None, mode:str='time_series'):
     """
     A standalone function to encapsulate the summary function logic.
     Parameters:
@@ -96,7 +111,7 @@ def summary_function(outputPath:str, summaryFile:str, dic_params:dict, SampleID:
             SampleID=SampleID,
             ReplicateID=ReplicateID,
             qoi_funcs=qoi_functions,
-            mode='time_series',
+            mode=mode,
             RemoveFolder=True,
             drop_columns=drop_columns
         )
