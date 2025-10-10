@@ -6,7 +6,7 @@ __pycache__/*
 uq_physicell/uq_physicell.egg-*
 /dist
 /examples/PhysiCell-master/*
-/examples/virus-mac-new/output/*
+/examples/virus-mac-new/output_ObsData/*
 UQ_PC_InputFolder/*
 UQ_PC_OutputFolder/*
 ALL_CITATIONS.txt
