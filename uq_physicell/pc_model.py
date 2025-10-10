@@ -135,14 +135,19 @@ class PhysiCell_Model:
         """ 
         Print model configuration information. 
         """
+        # Use relative paths for privacy (avoid exposing personal directory structure)
+        rel_executable = os.path.relpath(self.PC_executable, os.getcwd())
+        rel_xml_ref = os.path.relpath(self.XML_RefPath, os.getcwd())
+        rel_rules_ref = os.path.relpath(self.RULES_RefPath, os.getcwd()) if self.RULES_RefPath else None
+        
         print(f"""
         Project name: {self.projName} 
-        Executable: {self.PC_executable}
+        Executable: {rel_executable}
         Number of replicates for each parameter set: {self.numReplicates} 
-        Config. file of reference: {self.XML_RefPath}
+        Config. file of reference: {rel_xml_ref}
         Folder to save config. files: {self.input_folder} 
         Folder to save output folders: {self.output_folder}
-        Rules file of reference: {self.RULES_RefPath}
+        Rules file of reference: {rel_rules_ref}
         Name of output folders: {self.outputs_folder_name}
         Number of omp threads for each simulation: {self.omp_num_threads}
         Number of parameters for sampling in XML: {len(self.XML_parameters_variable)}
@@ -350,7 +355,9 @@ def _setup_model_input(model: PhysiCell_Model, SampleID: int, ReplicateID: int, 
             single_param_rule = param_key.split(",")[-1]
             dic_rules_temp[idx + len(model.parameters_rules_variable)] = [float(model.parameters_rules_fixed[param_key]), param_key, single_param_rule]
         if model.verbose:
-            print(f"\t\t\t>>> Generating rules file {csvFile_out} ...")
+            # Use relative path for privacy
+            rel_csvFile_out = os.path.relpath(csvFile_out, os.getcwd())
+            print(f"\t\t\t>>> Generating rules file {rel_csvFile_out} ...")
         try:
             _generate_csv_file(model.default_rules, csvFile_out, dic_rules_temp)
         except ValueError as e:
@@ -379,7 +386,9 @@ def _setup_model_input(model: PhysiCell_Model, SampleID: int, ReplicateID: int, 
         else:
             dic_xml_parameters[param_key] = parameters_input[idx]
     if model.verbose:
-        print(f"\t\t\t>>> Generating XML file {XMLFile} ...")
+        # Use relative path for privacy
+        rel_XMLFile = os.path.relpath(XMLFile, os.getcwd())
+        print(f"\t\t\t>>> Generating XML file {rel_XMLFile} ...")
     try:
         _generate_xml_file(pathlib.Path(model.XML_RefPath), pathlib.Path(XMLFile), dic_xml_parameters, model.timeout)
     except ValueError as e:
@@ -705,8 +714,12 @@ def compile_physicell(pc_path, model_path, executable_path=None, force_compile=F
     # Calculate relative path from PhysiCell directory to model directory
     rel_model_path = os.path.relpath(abs_model_path, abs_pc_path)
     
-    print(f"PhysiCell path: {abs_pc_path}")
-    print(f"Model path: {abs_model_path}")
+    # Use relative paths for privacy (avoid exposing personal directory structure)
+    rel_pc_path = os.path.relpath(abs_pc_path, original_cwd)
+    rel_model_path_display = os.path.relpath(abs_model_path, original_cwd)
+    
+    print(f"PhysiCell path: {rel_pc_path}")
+    print(f"Model path: {rel_model_path_display}")
     print(f"Relative path for PROJ: {rel_model_path}")
     
     try:
