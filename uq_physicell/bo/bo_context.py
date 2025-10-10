@@ -1,4 +1,4 @@
-import os
+import os, sys
 import logging
 import concurrent.futures
 import pickle
@@ -81,7 +81,7 @@ class CalibrationContext:
         distance_functions: dict, 
         search_space: dict, 
         bo_options: dict, 
-        logger: logging.Logger
+        logger: logging.Logger=None
     ):
         """Initialize CalibrationContext with comprehensive validation and setup."""
         # Core configuration
@@ -91,8 +91,24 @@ class CalibrationContext:
         self.distance_functions = distance_functions
         self.search_space = search_space
         self.bo_options = bo_options
-        self.logger = logger
-        
+        if logger is None:
+            # Create a logger with proper configuration
+            self.logger = logging.getLogger(__name__)
+            self.logger.setLevel(logging.INFO)
+            
+            # Only add handler if none exist to avoid duplicates
+            if not self.logger.handlers:
+                console_handler = logging.StreamHandler(sys.stdout)
+                console_handler.setLevel(logging.INFO)
+                formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+                console_handler.setFormatter(formatter)
+                self.logger.addHandler(console_handler)
+            
+            # Always prevent propagation to root logger to avoid duplicate messages
+            self.logger.propagate = False
+        else:
+            self.logger = logger
+
         # Load and validate observed data
         if isinstance(obsData, dict):
             self.dic_obsData = obsData
