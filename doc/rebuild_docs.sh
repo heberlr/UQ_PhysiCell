@@ -7,6 +7,9 @@
 #   --serve    Start a local server after building
 #   --help     Show this help message
 
+# Requirements:
+# pip install sphinx sphinx-rtd-theme myst-parser
+
 set -e  # Exit on any error
 
 # Colors for output
@@ -105,12 +108,6 @@ fi
 # Check if required packages are installed
 print_status "Checking dependencies..."
 
-# Check for sphinx
-if ! command -v sphinx-build &> /dev/null; then
-    print_error "sphinx-build not found. Installing documentation dependencies..."
-    pip install -r requirements.txt
-fi
-
 # Check if UQ-PhysiCell is importable (for version detection)
 if ! python -c "import uq_physicell" 2>/dev/null; then
     print_warning "UQ-PhysiCell not importable. Installing in development mode..."
@@ -126,8 +123,39 @@ VERSION=$(python -c "try:
 except ImportError:
     print('unknown')
 ")
-
+VERSION_STR="v$VERSION"
+VERSION_REF="https://github.com/heberlr/UQ_PhysiCell/releases/tag/$VERSION_STR"
 print_status "Building documentation for UQ-PhysiCell version: $VERSION"
+
+
+# Write index.md with correct version info
+cat > index.md <<EOF
+# UQ-PhysiCell Documentation
+
+Welcome to the UQ-PhysiCell documentation! This project provides uncertainty quantification tools for PhysiCell models.
+
+**Release:** [$VERSION_STR]($VERSION_REF)
+
+\`\`\`{toctree}
+:maxdepth: 3
+:caption: Contents:
+about
+installation
+gui
+model_analysis
+calibration
+model_selection
+api_reference
+examples
+\`\`\`
+EOF
+print_status "Generated index.md with release $VERSION_STR"
+
+# Check for sphinx
+if ! command -v sphinx-build &> /dev/null; then
+    print_error "sphinx-build not found. Installing documentation dependencies..."
+    pip install -r requirements.txt
+fi
 
 # Clean if requested
 if [[ "$CLEAN" == true ]]; then
