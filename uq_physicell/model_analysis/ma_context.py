@@ -311,19 +311,16 @@ def run_simulations(context: ModelAnalysisContext):
                     return
                 ParametersXML = {key: All_Parameters[ind_sim][key] for key in params_xml} if params_xml else np.array([])
                 ParametersRules = {key: All_Parameters[ind_sim][key] for key in params_rules} if params_rules else np.array([])
-                if context.summary_function:
-                    context.futures.append(executor.submit(
-                        run_replicate_serializable, context.dic_metadata['IniFilePath'], context.dic_metadata['StrucName'],
+                model_config = {
+                    'ini_path': context.dic_metadata['IniFilePath'],
+                    'struc_name': context.dic_metadata['StrucName'],
+                }
+                # Submit the job to the executor
+                context.futures.append(executor.submit(
+                        run_replicate_serializable, model_config,
                         All_Samples[ind_sim], All_Replicates[ind_sim],
                         ParametersXML, ParametersRules, return_binary_output=True,
-                        custom_summary_function=context.summary_function
-                    ))
-                else:
-                    context.futures.append(executor.submit(
-                        run_replicate_serializable, context.dic_metadata['IniFilePath'], context.dic_metadata['StrucName'],
-                        All_Samples[ind_sim], All_Replicates[ind_sim],
-                        ParametersXML, ParametersRules, return_binary_output=True,
-                        qois_dic=context.qois_dict
+                        qoi_functions=context.qoi_functions, custom_summary_function=context.summary_function
                     ))
             
             # Use as_completed with a short timeout to avoid blocking when cancelled
@@ -395,8 +392,7 @@ def run_simulations(context: ModelAnalysisContext):
                     All_Samples[ind_sim], All_Replicates[ind_sim], ParametersXML, ParametersRules, RemoveConfigFile=True, SummaryFunction=context.summary_function)
                 result_data = pickle.dumps(result_data_nonserialized)
             else:
-                _, _, result_data = run_replicate(PhysiCellModel, All_Samples[ind_sim], All_Replicates[ind_sim], ParametersXML,
-                                            ParametersRules, context.qois_dict)
+                _, _, result_data = run_replicate(PhysiCellModel, All_Samples[ind_sim], All_Replicates[ind_sim], ParametersXML,ParametersRules, context.qois_dict)
 
             # Token-passing mechanism to ensure one rank writes at a time
             if rank > 0:
