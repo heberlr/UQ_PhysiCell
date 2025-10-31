@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch, Mock, mock_open
 
 # Import the classes and functions to test
 from uq_physicell.bo.bo_context import CalibrationContext, run_bayesian_optimization
-from uq_physicell.bo.distances import SumSquaredDifferences
+from uq_physicell.utils import SumSquaredDifferences
 
 
 class TestCalibrationContext(unittest.TestCase):

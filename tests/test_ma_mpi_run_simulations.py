@@ -24,11 +24,11 @@ class SerializableMockModel:
 
 
 # Create a serializable mock function
-def mock_run_replicate_func(ini_path, struc_name, sampleID, replicateID, ParametersXML, ParametersRules, qois_dic=None, drop_columns=[], custom_summary_function=None):
+def mock_run_replicate_func(PC_model, sampleID, replicateID, ParametersXML, ParametersRules, qoi_functions=None, return_binary_output=False, drop_columns=[], custom_summary_function=None):
     return sampleID, replicateID, pickle.dumps({"out1": 1.0, "out2": 2.0})
 
 
-def mock_run_replicate_serializable_func(ini_path, struc_name, sampleID, replicateID, ParametersXML, ParametersRules, qois_dic=None, drop_columns=[], custom_summary_function=None, return_binary_output=False):
+def mock_run_replicate_serializable_func(PC_model_conf, sampleID, replicateID, ParametersXML, ParametersRules, qoi_functions=None, return_binary_output=False, drop_columns=[], custom_summary_function=None):
     return sampleID, replicateID, pickle.dumps({"out1": 1.0, "out2": 2.0})
 
 

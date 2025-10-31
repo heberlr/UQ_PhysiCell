@@ -2,7 +2,7 @@ import unittest
 import numpy as np
 
 # Import the distance functions to test
-from uq_physicell.bo.distances import SumSquaredDifferences, Manhattan, Chebyshev
+from uq_physicell.utils import SumSquaredDifferences, Manhattan, Chebyshev
 
 
 class TestDistanceFunctions(unittest.TestCase):
