@@ -4,7 +4,11 @@ Utilities module for UQ PhysiCell.
 This module provides utility functions for model wrapping, summary statistics,
 and quantity of interest (QoI) calculations for PhysiCell simulations.
 """
-
+from .distances import (
+    SumSquaredDifferences,
+    Manhattan,
+    Chebyshev
+)
 from .model_wrapper import (
     create_named_function_from_string,
     summary_function,
@@ -19,6 +23,9 @@ from .sumstats import (
 )
 
 __all__ = [
+    'SumSquaredDifferences',
+    'Manhattan',
+    'Chebyshev',
     'create_named_function_from_string',
     'summary_function',
     'run_replicate',
