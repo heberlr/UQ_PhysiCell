@@ -28,7 +28,7 @@ from ..database.bo_db import (
     create_structure, insert_metadata, insert_param_space, insert_qois, 
     insert_gp_models, insert_samples, insert_output, load_structure
 )
-from .distances import SumSquaredDifferences, Manhattan, Chebyshev
+from ..utils.distances import SumSquaredDifferences, Manhattan, Chebyshev
 from .utils import unnormalize_params, tensor_to_param_dict, normalize_params, param_dict_to_tensor
 
 class CalibrationContext:
@@ -232,11 +232,10 @@ class CalibrationContext:
         dic_params_xml = {par_name: par_value for par_name, par_value in params.items() if par_name in PC_model.XML_parameters_variable.values()}
         dic_params_rules = {par_name: par_value for par_name, par_value in params.items() if par_name in PC_model.parameters_rules_variable.values()}
         _, _, result_data = run_replicate_serializable(
-            self.model_config["ini_path"], 
-            self.model_config["struc_name"], 
-            sample_id, replicate_id, 
-            dic_params_xml, dic_params_rules, 
-            qois_dic=self.qoi_functions, return_binary_output=False,
+            self.model_config, 
+            sample_id, replicate_id,
+            dic_params_xml, dic_params_rules,
+            qoi_functions=self.qoi_functions, return_binary_output=False,
             custom_summary_function=self.summary_function
         )
         dic_result_data = result_data.to_dict(orient='list')
@@ -1078,6 +1077,11 @@ def run_bayesian_optimization(calib_context: CalibrationContext, additional_iter
             multi_objective_bayesian_optimization(
                 calib_context, train_x, train_obj, train_obj_true, train_obj_std, start_iteration, latest_hypervolume, resume_from_db
             )
+        
+        # Remove temporary file and folders
+        physicell_model = PhysiCell_Model(calib_context.model_config['ini_path'], calib_context.model_config['struc_name'])
+        physicell_model.remove_io_folders()
+        
     except Exception as e:
         logger.error(f"❌ Error during Bayesian optimization: {e}")
         raise
