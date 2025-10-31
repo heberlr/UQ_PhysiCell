@@ -299,6 +299,12 @@ class PhysiCell_Model:
                 info['runtime'] = (datetime.datetime.now() - info['start_time']).total_seconds()
         
         return self.active_processes 
+    
+    def remove_io_folders(self):
+        if os.path.exists(self.input_folder):
+            shutil.rmtree(self.input_folder)
+        if os.path.exists(self.output_folder):
+            shutil.rmtree(self.output_folder)
 
 def _check_parameters_input(model: PhysiCell_Model, parameters_input_xml: Union[np.ndarray, dict], parameters_input_rules: Union[np.ndarray, dict]) -> None:
     if model.verbose:
