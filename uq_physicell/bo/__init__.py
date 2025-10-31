@@ -10,12 +10,6 @@ from .bo_context import (
     run_bayesian_optimization,
 )
 
-from .distances import (
-    SumSquaredDifferences,
-    Manhattan,
-    Chebyshev,
-)
-
 from .plots import (
     plot_parameter_space,
     plot_parameter_space_db,
@@ -37,9 +31,6 @@ from .utils import (
 __all__ = [
     'CalibrationContext',
     'run_bayesian_optimization',
-    'SumSquaredDifferences',
-    'Manhattan',
-    'Chebyshev',
     'plot_parameter_space',
     'plot_parameter_space_db',
     'plot_qoi_param',
