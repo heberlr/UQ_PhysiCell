@@ -2,14 +2,12 @@
 
 ## Requirements
 
-UQ-PhysiCell requires Python 3.8 or later and the following dependencies:
+UQ-PhysiCell requires Python 3.8>= or later and the following dependencies:
 
 - numpy
 - pandas
-- pcdl
-- torch (for Bayesian optimization)
-- botorch (for Bayesian optimization)
-- gpytorch (for Gaussian processes)
+- [pcdl](https://github.com/elmbeech/physicelldataloader/tree/master)
+- [SALib](https://salib.readthedocs.io/en/latest/index.html)
 
 ## Installation from PyPI
 
@@ -38,10 +36,10 @@ For Bayesian optimization features, install the optional dependencies:
 pip install torch botorch gpytorch
 ```
 
-For documentation building:
+For Aproximate Bayesian Computation:
 
 ```bash
-pip install sphinx sphinx-rtd-theme myst-parser
+pip install pyabc
 ```
 
 ## Verification

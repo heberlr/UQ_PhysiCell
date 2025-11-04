@@ -36,7 +36,7 @@ extensions = [
     'sphinx.ext.mathjax',
     'sphinx.ext.autosummary',      # Generate summary tables
     'sphinx.ext.todo',             # Support for TODO items
-    'myst_parser',
+    'myst_nb',                     # Support for Jupyter Notebooks
 ]
 
 templates_path = ['_templates']
@@ -81,7 +81,6 @@ autodoc_mock_imports = [
     'gpytorch', 
     'torch',
     'matplotlib',
-    'plotly',
     'scipy',
     'seaborn'
 ]
@@ -113,3 +112,16 @@ intersphinx_mapping = {
     'numpy': ('https://numpy.org/doc/stable/', None),
     'pandas': ('https://pandas.pydata.org/docs/', None),
 }
+
+# Notebook execution mode for MyST-NB (replaces deprecated jupyter_execute_notebooks)
+# Options: 'off' (never execute), 'auto' (execute when outputs are missing), 'force' (always execute)
+# See: https://myst-nb.readthedocs.io/en/latest/config.html#nb-execution
+nb_execution_mode = "off"   # 'off' | 'auto' | 'force'
+
+# Backwards-compat note: older versions of myst-nb used the jupyter_execute_notebooks
+# config name which is now deprecated; use nb_execution_mode instead.
+
+# Add custom CSS to make DataFrame outputs responsive (see _static/custom.css)
+html_css_files = [
+    'custom.css',
+]

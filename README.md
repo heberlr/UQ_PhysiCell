@@ -50,10 +50,10 @@ pip install "uq-physicell[docs,bo]"
 ```
 
 ## Quick Start
-Here are some examples to help you get started with the package:
+The following examples show common workflows to get started quickly.
 
 ## Example 1: Basic Usage
-  - Description: Print information about two model structures, [physicell_model_1](examples/SampleModel.ini#l1) and [physicell_model_2](examples/SampleModel.ini#l18), as defined in the config file [examples/SampleModel.ini](examples/SampleModel.ini#l20). This operation does not run a PhysiCell simulation. See [example 1](examples/ex1_print.py).
+  - Description: Print information about two model structures defined in the configuration file (for example, `physicell_model_1` and `physicell_model_2`). This operation only prints the model metadata and does not run a PhysiCell simulation. See [example 1](examples/ex1_print.py).
     ```bash
     python examples/ex1_print.py
     ```
@@ -75,16 +75,16 @@ Here are some examples to help you get started with the package:
     bash examples/PhysiCell.sh
     ```
     This will create a folder named `PhysiCell-master` inside `examples`. Populate and compile the project (Step 1 below) without modifying [SampleModel.ini](examples/SampleModel.ini).
-    - Step 1: Compile the `virus-macrophage` example in the PhysiCell folder:
+    - Step 1: Compile the `virus-macrophage` sample in the PhysiCell folder:
       ```bash
       make reset && make virus-macrophage-sample && make
       ```
-    - Step 2: Update the `executable` and `configFile_ref` paths in the [physicell_model_2](examples/SampleModel.ini#l20) model in the [examples/SampleModel.ini](examples/SampleModel.ini) section of [SampleModel.ini](examples/SampleModel.ini).
+    - Step 2: Update the `executable` and `configFile_ref` paths for the `physicell_model_2` entry in `examples/SampleModel.ini`.
       ```ini
       executable = [new path]
       configFile_ref = [new path]
       ```
-    - Step 3: Execute the script:
+    - Step 3: Run the example script:
       ```bash
       python examples/ex2_runModel.py
       ```

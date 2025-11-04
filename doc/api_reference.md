@@ -9,30 +9,7 @@ The main module provides the core PhysiCell model interface and utilities.
    :members:
    :undoc-members:
    :show-inheritance:
-```
-
-### Quick Import Examples
-
-```python
-# Core model functionality
-from uq_physicell import PhysiCell_Model, RunModel
-
-# Model analysis tools
-from uq_physicell.model_analysis import (
-    ModelAnalysisContext,
-    run_simulations,
-    run_global_sa,
-    run_local_sa
-)
-
-# Bayesian optimization tools  
-from uq_physicell.bo import (
-    CalibrationContext,
-    run_bayesian_optimization,
-    SumSquaredDifferences,
-    Manhattan,
-    Chebyshev
-)
+   :no-imported-members:
 ```
 
 ## Model Analysis Module
@@ -40,7 +17,7 @@ from uq_physicell.bo import (
 Tools for sensitivity analysis, parameter sampling, and model analysis.
 
 ```{eval-rst}
-.. automodule:: uq_physicell.model_analysis.main
+.. automodule:: uq_physicell.model_analysis.ma_context
    :members:
    :undoc-members:
    :show-inheritance:
@@ -68,7 +45,7 @@ Tools for sensitivity analysis, parameter sampling, and model analysis.
 Multi-objective Bayesian optimization for model calibration.
 
 ```{eval-rst}
-.. automodule:: uq_physicell.bo.optimize
+.. automodule:: uq_physicell.bo.bo_context
    :members:
    :undoc-members:
    :show-inheritance:
@@ -77,21 +54,22 @@ Multi-objective Bayesian optimization for model calibration.
 
 ```{note}
 The Bayesian Optimization module requires additional dependencies (botorch, gpytorch, torch).
-Install them with: `pip install botorch matplotlib plotly seaborn`
+Install them with: `pip install botorch`
 ```
-
-### Distance Functions
-
-```{eval-rst}
-.. automodule:: uq_physicell.bo.distances
-   :members:
-   :undoc-members:
-```
-
 ### Plotting and Visualization
 
 ```{eval-rst}
-.. automodule:: uq_physicell.bo.plot
+.. automodule:: uq_physicell.bo.plots
    :members:
    :undoc-members:
 ```
+
+## Utils
+
+### Distances
+```{eval-rst}
+.. automodule:: uq_physicell.utils.distances
+   :members:
+   :undoc-members:
+```
+
