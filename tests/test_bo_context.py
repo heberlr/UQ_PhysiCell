@@ -6,6 +6,12 @@ import pandas as pd
 import torch
 import numpy as np
 from unittest.mock import MagicMock, patch, Mock, mock_open
+import pytest
+
+# Require heavy optional dependencies for these tests: botorch and gpytorch.
+# When running under pytest, this will skip the module with an informative reason if missing.
+pytest.importorskip('botorch', reason="This test requires 'botorch'. Install it via 'pip install botorch'.")
+pytest.importorskip('gpytorch', reason="This test requires 'gpytorch'. Install it via 'pip install gpytorch'.")
 
 # Import the classes and functions to test
 from uq_physicell.bo.bo_context import CalibrationContext, run_bayesian_optimization
@@ -340,6 +346,22 @@ class TestRunBayesianOptimization(unittest.TestCase):
         self.mock_context.db_path = '/fake/path.db'
         self.mock_context.logger = self.logger
         self.mock_context.qoi_details = {'QOI_Name': ['obj1', 'obj2']}
+        
+        # Patch PhysiCell_Model in the bo_context module so tests don't instantiate the real model
+        # This keeps changes confined to tests and avoids touching core code.
+        self._physicell_patcher = patch('uq_physicell.bo.bo_context.PhysiCell_Model')
+        self.mock_physicell_class = self._physicell_patcher.start()
+        # Ensure the instance has a remove_io_folders method that does nothing
+        mock_physicell_instance = MagicMock()
+        mock_physicell_instance.remove_io_folders.return_value = None
+        self.mock_physicell_class.return_value = mock_physicell_instance
+
+    def tearDown(self):
+        """Stop any active patchers from setUp."""
+        try:
+            self._physicell_patcher.stop()
+        except Exception:
+            pass
 
     @patch('uq_physicell.bo.bo_context.os.path.exists')
     @patch('uq_physicell.bo.bo_context.create_structure')
