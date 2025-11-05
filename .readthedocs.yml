@@ -21,7 +21,6 @@ formats:
 # to build your documentation
 # See https://docs.readthedocs.io/en/stable/guides/reproducible-builds.html
 python:
-  version: "3.11"
   install:
     - requirements: doc/requirements.txt
     - method: pip
@@ -31,3 +30,5 @@ python:
 build:
   os: "ubuntu-22.04"
   image: latest
+  tools:
+    python: "3.11"
