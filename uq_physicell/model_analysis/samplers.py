@@ -33,14 +33,6 @@ def run_global_sampler(params_dict: dict, sampler: str, N: int = None, M: int = 
         ValueError: If an unsupported sampling method is specified or if
             required parameters are missing.
     
-    Example:
-        >>> params = {
-        ...     'param1': {'lower_bound': 0.0, 'upper_bound': 1.0},
-        ...     'param2': {'lower_bound': 0.5, 'upper_bound': 2.0}
-        ... }
-        >>> samples = run_global_sampler(params, 'LHS', N=100)
-        >>> len(samples)
-        100
     """
 
     # Define the problem for SALib
@@ -120,15 +112,6 @@ def run_local_sampler(params_dict: dict, sampler: str = 'OAT') -> dict:
         Subsequent samples perturb one parameter at a time while keeping others
         at their reference values. If multiple perturbations are specified for
         a parameter, multiple samples are generated for that parameter.
-    
-    Example:
-        >>> params = {
-        ...     'param1': {'ref_value': 1.0, 'perturbation': [5.0, 10.0]},
-        ...     'param2': {'ref_value': 0.5, 'perturbation': 10.0}
-        ... }
-        >>> samples = run_local_sampler(params, 'OAT')
-        >>> len(samples)  # 1 reference + 2 perturbations for param1 + 1 for param2
-        4
     """
     params_ref = {key: params_dict[key]["ref_value"] for key in params_dict.keys()}
     # First sample is the reference value

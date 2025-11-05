@@ -51,24 +51,6 @@ class CalibrationContext:
                           Use 'acq_func_strategy' key for strategy: 'diversity_bonus', 'uncertainty_weighting', 
                           'soft_constraints', 'adaptive_scaling', 'combined', or 'none' (default: 'none').
         logger (logging.Logger): Logger instance for logging messages during the calibration process.
-    
-    Example:
-        >>> bo_options = {
-        ...     "num_initial_samples": 50,
-        ...     "num_iterations": 25,
-        ...     "acq_func_strategy": "combined"  # Use combined strategy
-        ... }
-        >>> calib_context = CalibrationContext(
-        ...     db_path="calibration.db",
-        ...     obsData="observed_data.csv",
-        ...     obsData_columns={"qoi1": "Column1", "qoi2": "Column2"},
-        ...     model_config={"ini_path": "config.ini", "struc_name": "structure", "numReplicates": 3},
-        ...     qoi_functions={"qoi1": "lambda df: df['metric1'].sum()"},
-        ...     distance_functions={"qoi1": {"function": SumSquaredDifferences, "weight": 1e-5}},
-        ...     search_space={"param1": {"type": "real", "lower_bound": 0.1, "upper_bound": 1.0}},
-        ...     bo_options={"num_initial_samples": 50, "num_iterations": 25, "acq_func_strategy": "combined"},
-        ...     logger=logger
-        ... )
     """
     
     def __init__(

@@ -64,18 +64,6 @@ class ModelAnalysisContext:
     Raises:
         ImportError: If required parallelization libraries are not available.
         ValueError: If invalid parallel_method is specified.
-    
-    Example:
-        >>> model_config = {
-        ...     'ini_path': 'model.xml',
-        ...     'struc_name': 'tumor_growth'
-        ... }
-        >>> params = {
-        ...     'param1': {'ref_value': 1.0, 'lower_bound': 0.5, 'upper_bound': 1.5}
-        ... }
-        >>> context = ModelAnalysisContext(
-        ...     'analysis.db', model_config, 'LHS', params, {}
-        ... )
     """
     def __init__(
             self, 
@@ -185,11 +173,6 @@ def run_simulations(context: ModelAnalysisContext):
         - Serial: Single-threaded execution for small analyses
         - Inter-process: Multi-processing on a single node using concurrent.futures
         - Inter-node: Distributed execution across multiple nodes using MPI
-    
-    Example:
-        >>> context = ModelAnalysisContext(db_path, model_config, 'LHS', params, qois)
-        >>> context.dic_samples = run_global_sampler(params, 'LHS', N=100)
-        >>> run_simulations(context)
     """
     # Only set up signal handlers if we're in the main thread of the main interpreter
     if threading.current_thread() is threading.main_thread():

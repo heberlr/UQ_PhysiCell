@@ -107,15 +107,6 @@ def _get_SA_problem(params_dict: dict) -> dict:
             - num_vars (int): Number of parameters
             - names (list): List of parameter names
             - bounds (list): List of tuples with (lower, upper) bounds for each parameter
-
-    Example:
-        >>> params = {
-        ...     'param1': {'lower_bound': 0.0, 'upper_bound': 1.0},
-        ...     'param2': {'lower_bound': -1.0, 'upper_bound': 1.0}
-        ... }
-        >>> problem = _get_SA_problem(params)
-        >>> print(problem['num_vars'])
-        2
     """
     param_names = [key for key in params_dict.keys() if key != "samples"]
     problem = {
@@ -149,11 +140,6 @@ def run_global_sa(params_dict: dict, method: str, all_times_label: list, all_qoi
     Raises:
         ValueError: If there's a mismatch between number of samples and QoI results,
             or if the specified method fails during analysis.
-    
-    Example:
-        >>> params = {'param1': {...}, 'samples': {...}}
-        >>> results, times = run_global_sa(params, 'Sobol Sensitivity Analysis', 
-        ...                               ['t_0', 't_24'], ['cell_count'], df_qois)
     """
     # Get the problem definition for SALib
     problem = _get_SA_problem(params_dict)
@@ -260,10 +246,6 @@ def run_local_sa(params_dict: dict, all_times_label: list, all_qois_names: list,
         The OAT method computes sensitivity indices by comparing parameter perturbations
         against a reference sample (sample 0). Results are summed across all perturbations
         for each parameter.
-    
-    Example:
-        >>> params = {'param1': {...}, 'samples': {...}}
-        >>> results, times = run_local_sa(params, ['t_0', 't_24'], ['cell_count'], df_qois)
     """
     # Get parameter names
     param_names = [key for key in params_dict.keys() if key != "samples"]

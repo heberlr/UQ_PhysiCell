@@ -38,30 +38,6 @@ class CalibrationContext:
         prior (Distribution): Distribution defining the prior distributions for parameters
         abc_options (dict): Options for ABC-SMC including population parameters, sampling strategies, and convergence criteria.
         logger (logging.Logger): Logger instance for logging messages during the calibration process.
-
-    Example:
-        >>> abc_options = {
-        ...     "max_populations": 20,
-        ...     "max_simulations": 1000,
-        ...     "population_strategy": "adaptive",
-        ...     "sampler": "multicore",
-        ...     "num_workers": 8,
-        ...     "mode": "cluster"
-        ... }
-        >>> calib_context = CalibrationContext(
-        ...     db_path="calibration.db",
-        ...     obsData="observed_data.csv",
-        ...     obsData_columns={"qoi1": "Column1", "qoi2": "Column2"},
-        ...     model_config={"ini_path": "config.ini", "struc_name": "MyModel", "numReplicates": 5},
-        ...     qoi_functions={"qoi1": "lambda df: df['metric1'].sum()"},
-        ...     distance_functions={"qoi1": {"function": euclidean_func, "weight": 1.0}},
-        ...     prior=Distribution(
-        ...         par1=RV("uniform", 0.7, 1.5),
-        ...         par2=RV("uniform", 0.1, 0.3)
-        ...     ),
-        ...     abc_options=abc_options,
-        ...     logger=logger
-        ... )
     """
     
     def __init__(
