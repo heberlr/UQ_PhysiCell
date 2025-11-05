@@ -20,6 +20,11 @@ except ImportError:
     bo = None
 
 try:
+    from . import abc
+except ImportError:
+    abc = None
+
+try:
     from . import model_analysis
 except ImportError:
     model_analysis = None
@@ -43,6 +48,7 @@ __all__ = [
     '__version__',
     'PhysiCell_Model',
     'bo',
+    'abc',
     'model_analysis',
     'utils',
     'database',
