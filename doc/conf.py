@@ -131,3 +131,16 @@ nb_execution_mode = "off"   # 'off' | 'auto' | 'force'
 html_css_files = [
     'custom.css',
 ]
+
+
+# Some ReadTheDocs / theme combos are picky about how extra CSS is registered.
+# Register the CSS file explicitly via the Sphinx "setup" hook so it's added
+# consistently across Sphinx versions and hosting environments (including
+# ReadTheDocs). This duplicates `html_css_files` but is harmless and can
+# increase compatibility.
+def setup(app):
+    # Sphinx >= 1.8: add_css_file; older versions used add_stylesheet
+    try:
+        app.add_css_file('custom.css')
+    except AttributeError:
+        app.add_stylesheet('custom.css')
