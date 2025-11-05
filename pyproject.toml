@@ -30,7 +30,7 @@ dynamic = ["version"]
 description = "Project to perform uncertainty quantification of PhysiCell models"
 readme = "README.md"
 
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 
 license = {text = "MIT"}
 
@@ -39,17 +39,40 @@ authors = [
 ]
 
 keywords = [
-    "uncertainty quantification",
+    "Uncertainty Quantification",
     "PhysiCell",
+    "Sensitivity Analysis",
+    "Calibration",
+    "Model selection",
 ]
 
 dependencies = [
-    "numpy",
-    "pandas",
     "pcdl",
+    "SALib",
 ]
 
-urls = { "Homepage" = "https://github.com/heberlr/UQ_PhysiCell" }
+[project.optional-dependencies]
+docs = [
+    "sphinx>=5.0",
+    "sphinx-rtd-theme>=1.0", 
+    "myst-parser>=0.18",
+    "sphinx-autobuild>=2021.3.14",
+    "linkify-it-py>=2.0"
+]
+bo = [
+    "torch",
+    "botorch", 
+    "gpytorch"
+]
+abc = [
+    "pyabc"
+]
+
+[project.scripts]
+uq_physicell = "uq_physicell.gui.main_window:main"
+
+[project.urls]
+"Homepage" = "https://github.com/heberlr/UQ_PhysiCell"
 
 [tool.hatch.version]
 path = "uq_physicell/VERSION.py"

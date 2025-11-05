@@ -1,0 +1,32 @@
+# Read the Docs configuration file for UQ-PhysiCell
+# See https://docs.readthedocs.io/en/stable/config-file/v2.html for details
+
+# Required
+version: 2
+
+# Build documentation in the "doc/" directory with Sphinx
+sphinx:
+  configuration: doc/conf.py
+
+# Build documentation with MkDocs
+#mkdocs:
+#  configuration: mkdocs.yml
+
+# Optionally build your docs in additional formats such as PDF and ePub
+formats:
+  - pdf
+  - epub
+
+# Optional but recommended, declare the Python requirements required
+# to build your documentation
+# See https://docs.readthedocs.io/en/stable/guides/reproducible-builds.html
+python:
+  version: "3.11"
+  install:
+    - requirements: doc/requirements.txt
+    - method: pip
+      path: .
+
+# Use the latest Read the Docs build image for a more predictable environment
+build:
+  image: latest
