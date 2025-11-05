@@ -1,131 +1,20 @@
 # UQ-PhysiCell
 
-Uncertainty quantification and Bayesian optimization framework for PhysiCell models.
+<p align="center">
+  <img src="./uq_physicell/doc/icon.png" alt="pyABC logo" width="50%">
+</p>
 
-## Overview
+[![Run Unit Tests](https://github.com/heberlr/UQ_PhysiCell/actions/workflows/test-examples.yml/badge.svg)](https://github.com/heberlr/UQ_PhysiCell/actions/workflows/test-examples.yml)
+[![Documentation Status](https://readthedocs.org/projects/uq-physicell/badge/?version=latest)](https://uq-physicell.readthedocs.io/en/latest/?badge=latest)
+[![PyPI](https://badge.fury.io/py/uq-physicell.svg)](https://badge.fury.io/py/uq-physicell)
+[![Python](https://img.shields.io/badge/Python-%3E%3D3.10-blue?logo=python&logoColor=green)](https://python.org)
 
-UQ-PhysiCell provides comprehensive tools for:
-- Multi-objective Bayesian optimization for model calibration
-- Parameter sensitivity analysis
-- Uncertainty quantification of PhysiCell models
-- Handling parameter non-identifiability issues
+UQ-PhysiCell is a comprehensive framework for performing uncertainty quantification and parameter calibration of PhysiCell models. It provides sophisticated tools for model analysis, calibration, and model selection.
 
-## Documentation
-
-📖 **Full documentation is available in the [`doc/`](doc/) folder.**
-
-To build the documentation locally:
-
-```bash
-cd doc
-pip install -r requirements.txt
-make html
-```
-
-Or install with optional documentation dependencies:
-
-```bash
-pip install "uq-physicell[docs]"
-cd doc
-make html
-```
-
-The documentation includes:
-- [Installation Guide](doc/installation.md)
-- [Model Analysis](doc/model_analysis.md)
-- [Bayesian Optimization Tutorial](doc/bayesian_optimization.md) 
-- [API Reference](doc/api_reference.md)
-- [Examples](doc/examples.md)
-
-## Installation
-
-Install the package using pip:
-```bash
-pip install uq-physicell
-```
-
-For development with documentation tools:
-```bash
-pip install "uq-physicell[docs,bo]"
-```
-
-## Quick Start
-The following examples show common workflows to get started quickly.
-
-## Example 1: Basic Usage
-  - Description: Print information about two model structures defined in the configuration file (for example, `physicell_model_1` and `physicell_model_2`). This operation only prints the model metadata and does not run a PhysiCell simulation. See [example 1](examples/ex1_print.py).
-    ```bash
-    python examples/ex1_print.py
-    ```
-
-## Example 2: Running PhysiCell Simulations
-  - Requirements: A PhysiCell folder is required.
-  - Description: Run three PhysiCell simulations associated with the key [physicell_model_2](examples/SampleModel.ini#l18) in the config file [SampleModel.ini](examples/SampleModel.ini). This corresponds to the `virus_macrophage` example in `PhysiCell's sample projects`. See [example 2](examples/ex2_runModel.py).
-    - **First simulation:** Demonstrates running a simulation with a predefined summary function that summarizes the final population of live and dead cells, storing results in a new folder `output2`.
-    - **Second simulation:** Runs the simulation while preserving the config files and retaining the complete PhysiCell output without summarization.
-    - **Third simulation:** Configures the execution to summarize the output and returns a DataFrame with the summary.
-
-    Run script:
-    ```bash
-    python examples/ex2_runModel.py
-    ```
-
-    Alternatively, download the lastest PhysiCell version with:
-    ```bash
-    bash examples/PhysiCell.sh
-    ```
-    This will create a folder named `PhysiCell-master` inside `examples`. Populate and compile the project (Step 1 below) without modifying [SampleModel.ini](examples/SampleModel.ini).
-    - Step 1: Compile the `virus-macrophage` sample in the PhysiCell folder:
-      ```bash
-      make reset && make virus-macrophage-sample && make
-      ```
-    - Step 2: Update the `executable` and `configFile_ref` paths for the `physicell_model_2` entry in `examples/SampleModel.ini`.
-      ```ini
-      executable = [new path]
-      configFile_ref = [new path]
-      ```
-    - Step 3: Run the example script:
-      ```bash
-      python examples/ex2_runModel.py
-      ```
-
-## Example 3: Customizable Summary Function
-  - Requirements: A PhysiCell folder is required.
-  - Description: Run two simulations of [physicell_model_2](examples/SampleModel.ini#l18) using a customizable summary function to generate population time series. See [example 3](examples/ex3_runModelCust.py).
-    - **First simulation:** Runs the simulation while preserving the config files definitions and using a custom summary function.
-    - **Second simulation:** Similar to the first, but adjust the model for 4 OpenMP threads and returns a DataFrame instead of a summary file.
-  - Run script:
-    ```bash
-    python examples/ex3_runModelCust.py
-    ```
-
-## Example 4: Sensitivity Analysis (Single Task)
-  - Requirements: A PhysiCell folder and the ``SALib`` Python package.
-  - Description: Perform sensitivity analysis using the Sobol method. See [example 4](examples/ex4_runSA_singletask.py).
-  - Run script:
-    ```bash
-    python examples/ex4_runSA_singleTask.py
-    ```
-
-## Example 5: Sensitivity Analysis (Parallel Tasks with MPI)
-  - Requirements: A PhysiCell folder, and the `SALib` and `mpi4py` Python packages.
-  - Description: Perform sensitivity analysis using the Sobol method with MPI. See [example 5](examples/ex5_runSA_MPI.py).
-  - Run script:
-    ```bash
-    mpiexec -n 2 python -m mpi4py examples/ex5_runSA_MPI.py
-    ```
-
-## Example 6: Sensitivity Analysis with Constrained Parameters (MPI).
-  - Requirements: A PhysiCell folder (SampleModel.ini assumes it is located in the examples folder) and the `SALib` and `mpi4py` Python packages. Compile the asymmetric_division example:
-    ```bash
-    make reset && make asymmetric-division-sample && make
-    ```
-  - Description: Perform sensitivity analysis (Sobol method) with MPI, handling constrained parameters. This example uses the `asymmetric_division` model from `PhysiCell's sample_projects` and includes analyzing `parameters of rules`. See [example 6](examples/ex6_runSA_AsymDiv.py).
-  - Run script:
-    ```bash
-    mpiexec -n 2 python -m mpi4py examples/ex6_runSA_AsymDiv.py
-    ```
-
-Feel free to explore these examples to understand the package's capabilities and how to use it.
-
-One example of how to create the SLURM script to execute the sensitivity analysis in a SLURM cluster can be found in [slurm_script](examples/slurm_script.sh).
+## Resources
+- 📖 **Documentation**: [...](...)
+- 💡 **Examples**: [...](...)
+- 💬 **Contact**: [...](...)
+- 🐛 **Bug Reports**: [https://github.com/heberlr/UQ_PhysiCell/issues](https://github.com/heberlr/UQ_PhysiCell/issues)
+- 💻 **Source Code**: [https://github.com/heberlr/UQ_PhysiCell](https://github.com/heberlr/UQ_PhysiCell)
+- 📄 **Cite**: [...](...)
