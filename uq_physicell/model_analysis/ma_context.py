@@ -320,7 +320,7 @@ def run_simulations(context: ModelAnalysisContext):
                         run_replicate_serializable, model_config,
                         All_Samples[ind_sim], All_Replicates[ind_sim],
                         ParametersXML, ParametersRules, return_binary_output=True,
-                        qoi_functions=context.qoi_functions, custom_summary_function=context.summary_function
+                        qoi_functions=context.qois_dict, custom_summary_function=context.summary_function
                     ))
             
             # Use as_completed with a short timeout to avoid blocking when cancelled
