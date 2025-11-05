@@ -26,9 +26,8 @@ python:
     - method: pip
       path: .
 
-# Use the latest Read the Docs build image for a more predictable environment
+# Specify the build environment
 build:
   os: "ubuntu-22.04"
-  image: latest
   tools:
     python: "3.11"
