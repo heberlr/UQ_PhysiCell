@@ -30,7 +30,7 @@ dynamic = ["version"]
 description = "Project to perform uncertainty quantification of PhysiCell models"
 readme = "README.md"
 
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 
 license = {text = "MIT"}
 
@@ -39,14 +39,16 @@ authors = [
 ]
 
 keywords = [
-    "uncertainty quantification",
+    "Uncertainty Quantification",
     "PhysiCell",
+    "Sensitivity Analysis",
+    "Calibration",
+    "Model selection",
 ]
 
 dependencies = [
-    "numpy",
-    "pandas",
     "pcdl",
+    "SALib",
 ]
 
 [project.optional-dependencies]
@@ -61,6 +63,9 @@ bo = [
     "torch",
     "botorch", 
     "gpytorch"
+]
+abc = [
+    "pyabc"
 ]
 
 [project.scripts]
