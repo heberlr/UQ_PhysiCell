@@ -1,7 +1,7 @@
 # UQ-PhysiCell
 
 <p align="center">
-  <img src="./uq_physicell/doc/icon.png" alt="pyABC logo" width="50%">
+  <img src="https://github.com/heberlr/UQ_PhysiCell/blob/development/uq_physicell/doc/icon.png" alt="pyABC logo" width="50%">
 </p>
 
 [![Run Unit Tests](https://github.com/heberlr/UQ_PhysiCell/actions/workflows/test-examples.yml/badge.svg)](https://github.com/heberlr/UQ_PhysiCell/actions/workflows/test-examples.yml)
