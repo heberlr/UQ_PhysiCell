@@ -29,4 +29,5 @@ python:
 
 # Use the latest Read the Docs build image for a more predictable environment
 build:
+  os: "ubuntu-22.04"
   image: latest
