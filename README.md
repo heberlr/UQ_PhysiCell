@@ -12,9 +12,8 @@
 UQ-PhysiCell is a comprehensive framework for performing uncertainty quantification and parameter calibration of PhysiCell models. It provides sophisticated tools for model analysis, calibration, and model selection.
 
 ## Resources
-- 📖 **Documentation**: [...](...)
-- 💡 **Examples**: [...](...)
-- 💬 **Contact**: [...](...)
+- 📖 **Documentation**: [https://uq-physicell.readthedocs.io/en/latest/index.html](https://uq-physicell.readthedocs.io/en/latest/index.html)
+- 💡 **Examples**: [https://uq-physicell.readthedocs.io/en/latest/examples.html](https://uq-physicell.readthedocs.io/en/latest/examples.html)
 - 🐛 **Bug Reports**: [https://github.com/heberlr/UQ_PhysiCell/issues](https://github.com/heberlr/UQ_PhysiCell/issues)
 - 💻 **Source Code**: [https://github.com/heberlr/UQ_PhysiCell](https://github.com/heberlr/UQ_PhysiCell)
-- 📄 **Cite**: [...](...)
+<!-- - 📄 **Cite**: [...](...) -->
