@@ -136,6 +136,10 @@ Welcome to the UQ-PhysiCell documentation! This project provides uncertainty qua
 
 **Release:** [$VERSION_STR]($VERSION_REF)
 
+\`\`\`{note}
+This readthedocs documentation is under active development.
+\`\`\`
+
 \`\`\`{toctree}
 :maxdepth: 3
 :caption: Contents:
@@ -144,9 +148,10 @@ installation
 gui
 model_analysis
 calibration
-model_selection
 api_reference
 examples
+publications
+funding
 \`\`\`
 EOF
 print_status "Generated index.md with release $VERSION_STR"

@@ -54,7 +54,7 @@ Multi-objective Bayesian optimization for model calibration.
 
 ```{note}
 The Bayesian Optimization module requires additional dependencies (botorch, gpytorch, torch).
-Install them with: `pip install botorch`
+Install them with: `pip install botorch gpytorch torch`
 ```
 ### Plotting and Visualization
 
@@ -62,6 +62,21 @@ Install them with: `pip install botorch`
 .. automodule:: uq_physicell.bo.plots
    :members:
    :undoc-members:
+```
+
+## Approximate Bayesian Computation Module
+
+```{eval-rst}
+.. automodule:: uq_physicell.abc.abc_context
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :no-imported-members:
+```
+
+```{note}
+The Approximate Bayesian Computation module requires additional dependency (pyabc).
+Install them with: `pip install pyabc`
 ```
 
 ## Utils

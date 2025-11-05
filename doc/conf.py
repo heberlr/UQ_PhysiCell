@@ -40,7 +40,12 @@ extensions = [
 ]
 
 templates_path = ['_templates']
-exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
+# Exclude build artifacts and external/example third-party docs that we don't
+# want to include in our documentation build. Specifically exclude the
+# PhysiCell-master example subtree which contains upstream PhysiCell docs
+# (documentation-deprecated / Quickstart) that should not be part of
+# UQ-PhysiCell documentation.
+exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store', 'examples/PhysiCell-master/**']
 
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
@@ -82,7 +87,8 @@ autodoc_mock_imports = [
     'torch',
     'matplotlib',
     'scipy',
-    'seaborn'
+    'seaborn',
+    'pyabc',
 ]
 
 # Autosummary settings

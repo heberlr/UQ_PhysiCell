@@ -46,16 +46,6 @@ To clean the build directory:
 make clean
 ```
 
-## Documentation Structure
-
-- `index.md` - Main documentation index
-- `installation.md` - Installation instructions
-- `bayesian_optimization.md` - Detailed Bayesian optimization guide
-- `api_reference.md` - API documentation
-- `examples.md` - Usage examples
-- `conf.py` - Sphinx configuration
-- `UQ_PhysiCell_logo.png` - Project logo
-
 ## Documentation Format
 
 The documentation uses MyST Markdown format, which allows for rich formatting including:

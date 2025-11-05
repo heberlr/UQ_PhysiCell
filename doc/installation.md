@@ -2,10 +2,7 @@
 
 ## Requirements
 
-UQ-PhysiCell requires Python 3.8>= or later and the following dependencies:
-
-- numpy
-- pandas
+UQ-PhysiCell requires Python 3.10 or later and the following dependencies:
 - [pcdl](https://github.com/elmbeech/physicelldataloader/tree/master)
 - [SALib](https://salib.readthedocs.io/en/latest/index.html)
 
@@ -31,13 +28,11 @@ pip install uq-physicell
 ## Additional Dependencies
 
 For Bayesian optimization features, install the optional dependencies:
-
 ```bash
 pip install torch botorch gpytorch
 ```
 
 For Aproximate Bayesian Computation:
-
 ```bash
 pip install pyabc
 ```
@@ -45,7 +40,6 @@ pip install pyabc
 ## Verification
 
 To verify the installation, run:
-
 ```python
 import uq_physicell
 print(f"UQ-PhysiCell version: {uq_physicell.__version__}")

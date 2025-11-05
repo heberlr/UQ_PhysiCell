@@ -4,6 +4,10 @@ Welcome to the UQ-PhysiCell documentation! This project provides uncertainty qua
 
 **Release:** [v1.2.0](https://github.com/heberlr/UQ_PhysiCell/releases/tag/v1.2.0)
 
+```{note}
+This readthedocs documentation is under active development.
+```
+
 ```{toctree}
 :maxdepth: 3
 :caption: Contents:
@@ -12,7 +16,8 @@ installation
 gui
 model_analysis
 calibration
-model_selection
 api_reference
 examples
+publications
+funding
 ```
