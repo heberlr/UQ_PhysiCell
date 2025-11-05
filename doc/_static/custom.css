@@ -1,0 +1,127 @@
+/* Custom docs CSS to make pandas / notebook tables responsive in Sphinx output.
+   Ensures wide DataFrame outputs won't exceed page width.
+*/
+
+/* Make DataFrame containers horizontally scrollable (preferred for many columns) */
+.rendered_html .dataframe,
+.output_area .dataframe,
+.jp-RenderedHTMLCommon .dataframe,
+.dataframe {
+  /* Allow both horizontal and vertical scrolling when table is too large */
+  overflow-x: auto !important;
+  overflow-y: auto !important;
+  -webkit-overflow-scrolling: touch; /* smooth scrolling on mobile */
+  margin-bottom: 1rem;
+  display: block; /* ensure overflow applies */
+  max-height: 60vh; /* limit height so very tall tables scroll vertically */
+}
+
+/* Fallback / stronger selectors for ReadTheDocs and rtd-theme wrappers.
+   Some builds produce slightly different wrapper classes (e.g. `.document`,
+   `.rst-content`, or theme-specific wrappers like `.wy-body-for-nav`). These
+   rules ensure large tables and outputs become scrollable even when the
+   original selectors don't match. */
+.document .dataframe,
+.rst-content .dataframe,
+.wy-body-for-nav .dataframe,
+.document .output_area,
+.rst-content .output_area,
+.wy-body-for-nav .output_area,
+.document .nboutput,
+.rst-content .nboutput,
+.wy-body-for-nav .nboutput {
+  overflow-x: auto !important;
+  overflow-y: auto !important;
+  -webkit-overflow-scrolling: touch !important;
+  display: block !important;
+  box-sizing: border-box !important;
+  max-height: 60vh !important;
+  margin-bottom: 1rem !important;
+}
+
+/* Force tables to fit their container and allow scrolling instead of overflowing */
+.rendered_html table,
+.output_area table,
+.jp-RenderedHTMLCommon table,
+table.dataframe {
+  /* Let the table determine its own width. Use a min-width of 100% so
+     narrow tables still fill the container but wide tables can exceed it
+     and trigger a horizontal scrollbar on the parent `.dataframe` wrapper. */
+  width: auto !important;
+  min-width: 100% !important;
+  max-width: none !important;
+  table-layout: auto; /* let columns size naturally */
+  border-collapse: collapse;
+  display: table;
+}
+
+/* By default avoid wrapping inside table cells so wide tables will create a
+   horizontal scrollbar instead of squeezing/wrapping columns. On very small
+   screens revert to wrapping for readability via the media query below. */
+table.dataframe th,
+table.dataframe td {
+  white-space: nowrap !important;
+  word-break: normal;
+}
+
+/* Allow wrapping on narrow viewports so tables remain readable on phones */
+@media (max-width: 600px) {
+  table.dataframe th,
+  table.dataframe td {
+    white-space: normal !important;
+    word-break: break-word;
+  }
+}
+
+/* Optional: tighten spacing for large tables to reduce vertical space */
+table.dataframe th,
+table.dataframe td {
+  padding: 0.35rem 0.5rem;
+}
+
+/* Ensure code/HTML outputs that embed preformatted tables don't overflow */
+.rendered_html pre,
+.output_area pre {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+/* For very tall pre blocks, also allow vertical scrolling */
+.rendered_html pre,
+.output_area pre {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+/* Make regular Jupyter output cells scrollable when content is large.
+   This covers rendered HTML/text outputs, long logs, and other non-table outputs. */
+.rendered_html .output_area,
+.rendered_html .output_area .output_subarea,
+.output_area .output_subarea,
+.output_area .output_text,
+.output_area .jp-OutputArea-output,
+.jp-RenderedHTMLCommon,
+.jp-RenderedText,
+.cell .output_wrapper,
+.cell .output,
+.nboutput,
+.notebook-output {
+  /* Stronger rules with !important to override theme/inline styles */
+  display: block !important; /* ensure overflow applies */
+  box-sizing: border-box !important;
+  max-height: 60vh !important; /* limit vertical size */
+  overflow-y: auto !important; /* vertical scrollbar when tall */
+  overflow-x: auto !important; /* keep horizontal scrolling as fallback */
+  -webkit-overflow-scrolling: touch !important;
+}
+
+/* Also constrain direct pre/code blocks inside outputs */
+.output_area pre,
+.output_area code,
+.rendered_html pre,
+.rendered_html code {
+  max-height: 60vh !important;
+  overflow-y: auto !important;
+  overflow-x: auto !important;
+  box-sizing: border-box !important;
+}
