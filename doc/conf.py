@@ -128,9 +128,9 @@ nb_execution_mode = "off"   # 'off' | 'auto' | 'force'
 # config name which is now deprecated; use nb_execution_mode instead.
 
 # Add custom CSS to make DataFrame outputs responsive (see _static/custom.css)
-html_css_files = [
-    'custom.css',
-]
+# Custom CSS is registered via the setup() hook below. We avoid using
+# `html_css_files` here to prevent duplicate <link> tags in the built HTML.
+# html_css_files = ['custom.css']
 
 
 # Some ReadTheDocs / theme combos are picky about how extra CSS is registered.
