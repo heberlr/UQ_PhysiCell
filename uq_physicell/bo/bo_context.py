@@ -175,6 +175,8 @@ class CalibrationContext:
         }
 
         self.logger.info(f"🔧 CalibrationContext initialized with {self.max_workers} max workers, {self.workers_inner} inner workers, and {self.workers_out} outer workers.")
+        # Cancellation flag for cooperative cancellation support
+        self.cancel_requested = False
 
     def _validate_acquisition_strategy(self) -> None:
         """
@@ -305,6 +307,8 @@ class CalibrationContext:
         self.logger.debug(f"Sample {sample_index} with params: {params}")
         # Check if using default run_single_replicate function
         if not self.custom_run_single_replicate_func:
+            # Include fixed_params into params
+            params.update(self.fixed_params)
             with concurrent.futures.ProcessPoolExecutor(max_workers=self.workers_inner) as executor:
                 replicate_results = list(executor.map(
                     self.default_run_single_replicate,
@@ -903,6 +907,10 @@ def single_objective_bayesian_optimization(calib_context, train_x, train_obj, tr
         logger.info(f"{'='*60}")
         logger.info(f"🔄 Single-Objective BO Iteration {iteration}/{batch_size_bo}")
         logger.info(f"{'='*60}")
+        # Cooperative cancellation check
+        if getattr(calib_context, 'cancel_requested', False):
+            logger.info("🛑 Cancellation requested — stopping single-objective optimization loop.")
+            break
         # Fit GP model
         logger.info("🔧 Fitting Gaussian Process model...")
         train_y = train_obj[:, 0:1]
@@ -967,6 +975,10 @@ def multi_objective_bayesian_optimization(calib_context, train_x, train_obj, tra
         logger.info(f"{'='*60}")
         logger.info(f"🔄 Multi-Objective BO Iteration {iteration}/{batch_size_bo}")
         logger.info(f"{'='*60}")
+        # Cooperative cancellation check
+        if getattr(calib_context, 'cancel_requested', False):
+            logger.info("🛑 Cancellation requested — stopping multi-objective optimization loop.")
+            break
         logger.info("🔧 Fitting Gaussian Process models...")
         model = _fit_gp_models(train_x, train_obj, train_obj_std, calib_context)
         logger.info("🎯 Optimizing acquisition function...")
