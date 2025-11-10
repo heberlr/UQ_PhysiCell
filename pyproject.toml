@@ -16,8 +16,8 @@
 # 6. Pull request from dev to main
 # 7. Create the release tag (make sure the release tag is vx.x.x to match with GitHub link from documentation)
 # Prepare to reload the documentation - (Execute from here just for documentation update).
-# 7. Run bash doc/rebuild_docs.sh --clean
-# 8. Rebuild the documentation in : https://app.readthedocs.org/projects/uq-physicell/ 
+# 8. Run bash doc/rebuild_docs.sh --clean
+# 9. Rebuild the documentation in : https://app.readthedocs.org/projects/uq-physicell/ 
 ##### do not use conda env #######
 
 [build-system]
