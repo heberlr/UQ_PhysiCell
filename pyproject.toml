@@ -12,12 +12,13 @@
 # 2. python -m build --sdist  # make source distribution
 # 3. python -m build --wheel  # make binary distribution python wheel
 # 4. python -m twine upload dist/* --verbose # publising python package
-# 5. git push origin
-# 6. Pull request from dev to main
-# 7. Create the release tag (make sure the release tag is vx.x.x to match with GitHub link from documentation)
+# 5. Change the badge of pypi on README.md https://badge.fury.io/py/uq-physicell.svg?updated=xxxxxxxx
+# 6. git push origin
+# 7. Pull request from dev to main
+# 8. Create the release tag (make sure the release tag is vx.x.x to match with GitHub link from documentation)
 # Prepare to reload the documentation - (Execute from here just for documentation update).
-# 8. Run bash doc/rebuild_docs.sh --clean
-# 9. Rebuild the documentation in : https://app.readthedocs.org/projects/uq-physicell/ 
+# 9. Run bash doc/rebuild_docs.sh --clean
+# 10. Check if rebuild the documentation in : https://app.readthedocs.org/projects/uq-physicell/ 
 ##### do not use conda env #######
 
 [build-system]
