@@ -54,7 +54,7 @@ def process_db_files_and_plot(main_window):
         try:
             df_metadata, df_param_space, df_qois, df_gp_models, df_samples, df_output = load_structure(db_file)
             num_params = df_param_space.shape[0]
-            max_log_fitness = np.log(np.max(df_gp_models['Hypervolume']))
+            max_log_fitness = np.log(np.max(df_gp_models['Hypervolume'])) # This is a heuristic AIC-style criterion, not a formal information criterion.
             aic = calculate_aic(max_log_fitness, num_params)
             # Fill table
             main_window.db_table.setItem(idx, 2, QTableWidgetItem(str(num_params)))

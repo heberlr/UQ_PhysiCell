@@ -199,7 +199,7 @@ class PhysiCell_Model:
                 'start_time': datetime.datetime.now()
             }
             if self.verbose:
-                print(f"Registered process {process_id} with PID {process.pid}")
+                print(f"Registered process {process_id} with PID {process.pid} - running simulation ...")
         
         return process
 
@@ -423,10 +423,12 @@ def _run_model(model: PhysiCell_Model, SampleID: int, ReplicateID: int, Paramete
             Executable: {model.PC_executable} XML File: {XMLFile}. returned: {str(process.returncode)}
             Last 1000 characters of the PhysiCell output:
             {stdout[-1000:]}""")
+        elif model.verbose:
+            print("\t\t>> Simulation completed successfully!")
 
         if RemoveConfigFile:
             if model.verbose:
-                print(f"\t\t>> Removing config files ...")
+                print("\t\t>> Removing config files ...")
             try:
                 os.remove(pathlib.Path(XMLFile))
                 if model.parameters_rules:
@@ -561,7 +563,7 @@ def _generate_csv_file(rules: list, csv_file_out: str, dic_parameters_rules: dic
     except:
         raise ValueError(f"Error generating csv file.")
 
-def get_physicell(target_dir: str, force_download=False, interactive=True):
+def get_physicell(target_dir: str, force_download=False, interactive=False):
     """
     Download PhysiCell from GitHub and extract it to the target directory.
     
@@ -585,7 +587,9 @@ def get_physicell(target_dir: str, force_download=False, interactive=True):
         # Check if PhysiCell already exists
         physicell_dir = target_path / "PhysiCell-master"
         if physicell_dir.exists():
-            print(f"PhysiCell already exists at: {physicell_dir.resolve()}")
+            # Show path relative to current working directory for privacy
+            rel_path = os.path.relpath(str(physicell_dir.resolve()), os.getcwd())
+            print(f"PhysiCell already exists at: {rel_path}")
             
             if not force_download:
                 if interactive:

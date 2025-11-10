@@ -1,3 +1,4 @@
+from uq_physicell import PhysiCell_Model, get_physicell
 from uq_physicell.model_analysis import ModelAnalysisContext, run_simulations
 from uq_physicell.model_analysis.utils import calculate_qoi_statistics
 from uq_physicell.database.ma_db import load_structure
@@ -46,6 +47,12 @@ if __name__ == "__main__":
         }
         # Define the name of sampler
         sampler = "Sobol"
+
+        # Get PhysiCell, if not exist, it will be downloaded - Alternatively, you can change the paths in the Model_Struct.ini file to a PhysiCell folder on your system.
+        get_physicell(target_dir=".")
+
+        # Create a PhysiCell model structure just for checking the settings
+        model = PhysiCell_Model(model_config['ini_path'], model_config['struc_name'])
         
         # Setup the context and number of workers to run simulations in MPI (inter-node parallel)
         context = ModelAnalysisContext(db_path, model_config, sampler, params_info, qois_info={}, num_workers=size, parallel_method="inter-node") 

@@ -123,7 +123,7 @@ VERSION=$(python -c "try:
 except ImportError:
     print('unknown')
 ")
-VERSION_STR="v$VERSION"
+VERSION_STR="v$VERSION (GitHub link)"
 VERSION_REF="https://github.com/heberlr/UQ_PhysiCell/releases/tag/$VERSION_STR"
 print_status "Building documentation for UQ-PhysiCell version: $VERSION"
 

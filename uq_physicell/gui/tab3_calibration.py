@@ -7,7 +7,8 @@ import sys
 from PyQt5.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, QLineEdit, QTextEdit, QDialog, QFileDialog, QListWidget, QSpacerItem, QSizePolicy, QTableWidget, QTableWidgetItem, QMessageBox
 )
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QTimer
+from threading import Thread
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
@@ -20,6 +21,226 @@ from ..bo.plots import (
 )
 from ..bo.utils import analyze_pareto_results
 
+
+def on_run_calibration_clicked(main_window):
+    """Toggle handler for run/cancel calibration button. Shows options dialog, starts
+    a background worker thread for calibration, or requests cancellation if running.
+    """
+    # If a calibration thread is running, request cancellation
+    if getattr(main_window, 'calibration_thread', None) and main_window.calibration_thread.is_alive():
+        main_window.calibration_cancelled = True
+        # If a CalibrationContext exists for the running job, set its cancel flag as well
+        if hasattr(main_window, 'calib_context') and main_window.calib_context is not None:
+            try:
+                main_window.calib_context.cancel_requested = True
+            except Exception:
+                pass
+        if hasattr(main_window, 'post_message'):
+            main_window.post_message('tab3', "Calibration cancellation requested.")
+        else:
+            main_window.output_text_tab3.append("Calibration cancellation requested.")
+        return
+
+    # Otherwise display options dialog and start calibration
+    class BOOptionsDialog(QDialog):
+        def __init__(self, parent=None):
+            super().__init__(parent)
+            self.setWindowTitle("Set Bayesian Optimization Options")
+            self.setMinimumSize(350, 200)
+            layout = QVBoxLayout()
+            # Background info
+            xml_path_omp_threads = ".//parallel/omp_num_threads"
+            try:
+                num_replicates = main_window.num_replicates_input.text().strip()
+            except Exception:
+                num_replicates = "1"
+            try:
+                omp_threads = main_window.xml_tree.find(xml_path_omp_threads).text.strip()
+            except Exception:
+                omp_threads = "1"
+            total_threads_label = QLabel(f"OpenMP Threads per Model: {omp_threads}")
+            layout.addWidget(total_threads_label)
+            number_of_replicates_label = QLabel(f"Number of Replicates: {num_replicates}")
+            layout.addWidget(number_of_replicates_label)
+            # Separator line
+            layout.addWidget(QLabel("<hr>"))
+
+            # num_initial_samples
+            hbox1 = QHBoxLayout()
+            hbox1.addWidget(QLabel("Initial samples:"))
+            self.initial_samples_input = QLineEdit("5")
+            hbox1.addWidget(self.initial_samples_input)
+            layout.addLayout(hbox1)
+            # num_iterations
+            hbox2 = QHBoxLayout()
+            hbox2.addWidget(QLabel("Iterations:"))
+            self.iterations_input = QLineEdit("10")
+            hbox2.addWidget(self.iterations_input)
+            layout.addLayout(hbox2)
+            # max_workers
+            hbox3 = QHBoxLayout()
+            hbox3.addWidget(QLabel("Max workers:"))
+            self.max_workers_input = QLineEdit("4")
+            hbox3.addWidget(self.max_workers_input)
+            layout.addLayout(hbox3)
+            # use_exponential_fitness
+            hbox4 = QHBoxLayout()
+            hbox4.addWidget(QLabel("Use exponential fitness:"))
+            self.exp_fitness_combo = QComboBox()
+            self.exp_fitness_combo.addItems(["True", "False"])
+            hbox4.addWidget(self.exp_fitness_combo)
+            layout.addLayout(hbox4)
+            # OK/Cancel
+            btn_hbox = QHBoxLayout()
+            ok_btn = QPushButton("OK")
+            cancel_btn = QPushButton("Cancel")
+            btn_hbox.addWidget(ok_btn)
+            btn_hbox.addWidget(cancel_btn)
+            layout.addLayout(btn_hbox)
+            self.setLayout(layout)
+            ok_btn.clicked.connect(self.accept)
+            cancel_btn.clicked.connect(self.reject)
+
+        def get_options(self):
+            return {
+                "num_initial_samples": int(self.initial_samples_input.text()),
+                "num_iterations": int(self.iterations_input.text()),
+                "max_workers": int(self.max_workers_input.text()),
+                "use_exponential_fitness": self.exp_fitness_combo.currentText() == "True"
+            }
+
+    dialog = BOOptionsDialog(main_window)
+    if dialog.exec_() != QDialog.Accepted:
+        main_window.output_text_tab3.append("Calibration cancelled.")
+        return
+
+    bo_options = dialog.get_options()
+    main_window.output_text_tab3.append(f"Starting calibration with options: {bo_options}")
+
+    # Start the background worker
+    main_window.calibration_cancelled = False
+    worker = Thread(target=run_calibration_worker, args=(main_window, bo_options), daemon=True)
+    main_window.calibration_thread = worker
+    worker.start()
+
+    # update UI to show cancel state
+    try:
+        main_window.run_calibration_button.setText("Cancel Calibration")
+        main_window.run_calibration_button.setStyleSheet("background-color: salmon; color: black")
+    except Exception:
+        pass
+
+    # Poll for completion and restore UI
+    if getattr(main_window, '_calib_completion_timer', None) is None:
+        timer = QTimer(main_window)
+        timer.setInterval(500)
+
+        def _poll():
+            if not getattr(main_window, 'calibration_thread', None) or not main_window.calibration_thread.is_alive():
+                timer.stop()
+                main_window._calib_completion_timer = None
+                try:
+                    main_window.run_calibration_button.setText("Run Calibration")
+                    main_window.run_calibration_button.setStyleSheet("background-color: lightgreen; color: black")
+                    # enable plot results if a BO file path exists
+                    if getattr(main_window, 'bo_file_path', None):
+                        main_window.plot_calibration_button.setEnabled(True)
+                except Exception:
+                    pass
+
+        timer.timeout.connect(_poll)
+        main_window._calib_completion_timer = timer
+        timer.start()
+
+
+def run_calibration_worker(main_window, bo_options):
+    """Background worker that performs the Bayesian Optimization.
+    UI updates that must run on the main thread are scheduled via QTimer.singleShot.
+    """
+    try:
+        # Set up logging handlers that write to the GUI
+        gui_handler = QtTextEditLogHandler(main_window.output_text_tab3)
+        gui_handler.setLevel(logging.INFO)
+        gui_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setLevel(logging.DEBUG)
+        console_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+        main_window.logger_tab3 = logging.getLogger(__name__ + '.calib')
+        main_window.logger_tab3.setLevel(logging.INFO)
+        main_window.logger_tab3.handlers = [gui_handler, console_handler]
+
+        # Build search space and fixed params
+        search_space = {}
+        fixed_params = {}
+        for param_name in main_window.df_param_space['Parameter']:
+            try:
+                fixed_val = main_window.df_param_space.loc[main_window.df_param_space['Parameter'] == param_name, "Fixed"].values[0]
+            except Exception:
+                fixed_val = None
+            if pd.notna(fixed_val):
+                fixed_params[param_name] = fixed_val
+            else:
+                search_space[param_name] = {
+                    "type": main_window.df_param_space.loc[main_window.df_param_space['Parameter'] == param_name, "Type"].values[0],
+                    "lower_bound": main_window.df_param_space.loc[main_window.df_param_space['Parameter'] == param_name, "Lower Bound"].values[0],
+                    "upper_bound": main_window.df_param_space.loc[main_window.df_param_space['Parameter'] == param_name, "Upper Bound"].values[0]
+                }
+
+        main_window.calib_context = CalibrationContext(
+            db_path=main_window.calibration_file_input.text(),
+            obsData=main_window.obs_file_name_input.text(),
+            obsData_columns={**dict(zip(main_window.df_qois['QoI_Name'], main_window.df_qois['ObsData_Column'])), 'time': 'Time'},
+            model_config={"ini_path": main_window.ini_file_path, "struc_name": main_window.struc_name_input.text().strip(),
+                          "numReplicates": int(main_window.num_replicates_input.text().strip())},
+            qoi_functions=main_window.qoi_funcs,
+            distance_functions={qoi_name: {"function": main_window.df_qois.loc[main_window.df_qois['QoI_Name'] == qoi_name, "QoI_distanceFunction"].values[0],
+                                           "weight": main_window.df_qois.loc[main_window.df_qois['QoI_Name'] == qoi_name, "QoI_distanceWeight"].values[0]} for qoi_name in main_window.df_qois['QoI_Name']},
+            search_space=search_space,
+            bo_options=bo_options,
+            logger=main_window.logger_tab3
+        )
+        if fixed_params:
+            main_window.calib_context.fixed_params = fixed_params
+
+        # Quick cancellation check before starting
+        if getattr(main_window, 'calibration_cancelled', False):
+            main_window.logger_tab3.info('Calibration cancelled before start')
+            return
+
+        # Run the heavy Bayesian Optimization routine (may be long-running)
+        try:
+            run_bayesian_optimization(main_window.calib_context)
+        except Exception as e:
+            main_window.logger_tab3.error(f"Error occurred during calibration: {e}")
+
+        # Schedule GUI updates on the main thread after completion
+        def _on_done():
+            try:
+                main_window.bo_file_path = main_window.calibration_file_input.text()
+                main_window.load_bo_database(main_window)
+            except Exception as e:
+                # Best effort to notify the user
+                try:
+                    main_window.output_text_tab3.append(f"Error loading Bayesian Optimization results: {e}")
+                except Exception:
+                    pass
+            try:
+                main_window.run_calibration_button.setText("Run Calibration")
+                main_window.run_calibration_button.setStyleSheet("background-color: lightgreen; color: black")
+                main_window.plot_calibration_button.setEnabled(True)
+            except Exception:
+                pass
+
+        QTimer.singleShot(0, _on_done)
+
+    finally:
+        # attempt to remove handlers to avoid duplicate logs on repeated runs
+        try:
+            main_window.logger_tab3.handlers = []
+        except Exception:
+            pass
+
+
 def create_tab3(main_window):
     # Add methods to the main_window instance
     main_window.load_ini_calibration = load_ini_calibration
@@ -27,7 +248,6 @@ def create_tab3(main_window):
     main_window.load_bo_database = load_bo_database
     main_window.define_parameter_space = define_parameter_space
     main_window.define_qois = define_qois
-    main_window.run_calibration = run_calibration
     main_window.plot_calibration_results = plot_calibration_results
 
     layout_tab3 = QVBoxLayout()
@@ -126,7 +346,12 @@ def create_tab3(main_window):
     main_window.run_calibration_button = QPushButton("Run Calibration")
     main_window.run_calibration_button.setStyleSheet("background-color: lightgreen; color: black")
     main_window.run_calibration_button.setEnabled(True)
-    main_window.run_calibration_button.clicked.connect(lambda: main_window.run_calibration(main_window))
+    # initialize calibration threading state
+    main_window.calibration_thread = None
+    main_window.calibration_cancelled = False
+    main_window._calib_completion_timer = None
+    # Connect to a run/cancel handler (toggles between starting and requesting cancellation)
+    main_window.run_calibration_button.clicked.connect(lambda: on_run_calibration_clicked(main_window))
     calibration_buttons_hbox.addWidget(main_window.run_calibration_button)
 
     main_window.plot_calibration_button = QPushButton("Plot Results")
@@ -231,10 +456,21 @@ def define_parameter_space(main_window):
         param_type = param_type_combo.currentText()
         lower_bound = param_lower_bound_input.text()
         upper_bound = param_upper_bound_input.text()
+        fixed_value = param_fixed_input.text()
+
         # Overwrite parameter
         main_window.df_param_space.loc[main_window.df_param_space['Parameter'] == param_name, 'Type'] = param_type
-        main_window.df_param_space.loc[main_window.df_param_space['Parameter'] == param_name, 'Lower Bound'] = float(lower_bound)
-        main_window.df_param_space.loc[main_window.df_param_space['Parameter'] == param_name, 'Upper Bound'] = float(upper_bound)
+        if lower_bound != "":
+            main_window.df_param_space.loc[main_window.df_param_space['Parameter'] == param_name, 'Lower Bound'] = float(lower_bound)
+            main_window.df_param_space.loc[main_window.df_param_space['Parameter'] == param_name, 'Upper Bound'] = float(upper_bound)
+            main_window.df_param_space.loc[main_window.df_param_space['Parameter'] == param_name, 'Fixed'] = None
+        elif fixed_value != "":
+            main_window.df_param_space.loc[main_window.df_param_space['Parameter'] == param_name, 'Fixed'] = float(fixed_value)
+            main_window.df_param_space.loc[main_window.df_param_space['Parameter'] == param_name, 'Lower Bound'] = None
+            main_window.df_param_space.loc[main_window.df_param_space['Parameter'] == param_name, 'Upper Bound'] = None
+        else:
+            QMessageBox.warning(main_window, "Input Error", "Please provide either lower and upper bounds or a fixed value for the parameter.")
+            return
 
         # Update the table display
         update_param_table()
@@ -248,6 +484,7 @@ def define_parameter_space(main_window):
                 param_table.setItem(i, 1, QTableWidgetItem(str(row['Type'])))
                 param_table.setItem(i, 2, QTableWidgetItem(str(row['Lower Bound'])))
                 param_table.setItem(i, 3, QTableWidgetItem(str(row['Upper Bound'])))
+                param_table.setItem(i, 4, QTableWidgetItem(str(row['Fixed'])))
         else:
             param_table.setRowCount(0)
 
@@ -290,6 +527,14 @@ def define_parameter_space(main_window):
     param_upper_bound_hbox.addWidget(param_upper_bound_input)
     layout.addLayout(param_upper_bound_hbox)
 
+    # Fixed Parameter
+    param_fixed_hbox = QHBoxLayout()
+    param_fixed_label = QLabel("Fixed:")
+    param_fixed_hbox.addWidget(param_fixed_label)
+    param_fixed_input = QLineEdit()
+    param_fixed_hbox.addWidget(param_fixed_input)
+    layout.addLayout(param_fixed_hbox)
+
     # Button Overwrite
     add_param_button = QPushButton("Overwrite Parameter")
     layout.addWidget(add_param_button)
@@ -297,20 +542,21 @@ def define_parameter_space(main_window):
 
     # Table view
     param_table = QTableWidget()
-    param_table.setColumnCount(4)
-    param_table.setHorizontalHeaderLabels(["Parameter", "Type", "Lower Bound", "Upper Bound"])
+    param_table.setColumnCount(5)
+    param_table.setHorizontalHeaderLabels(["Parameter", "Type", "Lower Bound", "Upper Bound", "Fixed"])
     param_table.setEditTriggers(QTableWidget.NoEditTriggers)  # Make table non-editable
     layout.addWidget(param_table)
 
     # Initialize df_param_space if it doesn't exist
     if not hasattr(main_window, 'df_param_space'):
-        main_window.df_param_space = pd.DataFrame(columns=['Parameter', 'Type', 'Lower Bound', 'Upper Bound'])
+        main_window.df_param_space = pd.DataFrame(columns=['Parameter', 'Type', 'Lower Bound', 'Upper Bound', 'Fixed'])
         # Explicitly set dtypes to prevent future warnings
         main_window.df_param_space = main_window.df_param_space.astype({
             'Parameter': 'object',
             'Type': 'object', 
             'Lower Bound': 'float64',
-            'Upper Bound': 'float64'
+            'Upper Bound': 'float64',
+            'Fixed': 'float64'
         })
     
     # Initialize upper and lower bound inputs
@@ -320,14 +566,14 @@ def define_parameter_space(main_window):
             ref_value = float(main_window.get_parameter_value_xml(main_window, key))  # Get the default XML value - string
             lower_bound = float(ref_value) * 0.8
             upper_bound = float(ref_value) * 1.2
-            new_row = pd.DataFrame([{'Parameter': value[1], 'Type': 'real', 'Lower Bound': lower_bound, 'Upper Bound': upper_bound}])
+            new_row = pd.DataFrame([{'Parameter': value[1], 'Type': 'real', 'Lower Bound': lower_bound, 'Upper Bound': upper_bound, 'Fixed': None}])
             main_window.df_param_space = pd.concat([main_window.df_param_space, new_row], ignore_index=True)
         # From rules
         for key, value in main_window.analysis_rules_parameters.items():
             ref_value = float(main_window.get_rule_value(main_window, key))  # Get the default rule value - string
             lower_bound = float(ref_value) * 0.8
             upper_bound = float(ref_value) * 1.2
-            new_row = pd.DataFrame([{'Parameter': value[1], 'Type': 'real', 'Lower Bound': lower_bound, 'Upper Bound': upper_bound}])
+            new_row = pd.DataFrame([{'Parameter': value[1], 'Type': 'real', 'Lower Bound': lower_bound, 'Upper Bound': upper_bound, 'Fixed': None}])
             main_window.df_param_space = pd.concat([main_window.df_param_space, new_row], ignore_index=True)
     # Populate ComboBox
     param_combo.addItems(main_window.df_param_space['Parameter'].values)
@@ -501,113 +747,6 @@ def define_qois(main_window):
 
     qoi_window.setLayout(layout)
     qoi_window.exec_()
-
-
-def run_calibration(main_window):
-    # Show dialog to set BO options before running calibration
-    class BOOptionsDialog(QDialog):
-        def __init__(self, parent=None):
-            super().__init__(parent)
-            self.setWindowTitle("Set Bayesian Optimization Options")
-            self.setMinimumSize(350, 200)
-            layout = QVBoxLayout()
-            # Background info
-            xml_path_omp_threads = ".//parallel/omp_num_threads"
-            num_replicates = main_window.num_replicates_input.text().strip()
-            omp_threads = main_window.xml_tree.find(xml_path_omp_threads).text.strip()
-            total_threads_label = QLabel(f"OpenMP Threads per Model: {omp_threads}")
-            layout.addWidget(total_threads_label)
-            number_of_replicates_label = QLabel(f"Number of Replicates: {num_replicates}")
-            layout.addWidget(number_of_replicates_label)
-            # Separator line
-            layout.addWidget(QLabel("<hr>"))
-
-            # num_initial_samples
-            hbox1 = QHBoxLayout()
-            hbox1.addWidget(QLabel("Initial samples:"))
-            self.initial_samples_input = QLineEdit("5")
-            hbox1.addWidget(self.initial_samples_input)
-            layout.addLayout(hbox1)
-            # num_iterations
-            hbox2 = QHBoxLayout()
-            hbox2.addWidget(QLabel("Iterations:"))
-            self.iterations_input = QLineEdit("10")
-            hbox2.addWidget(self.iterations_input)
-            layout.addLayout(hbox2)
-            # max_workers
-            hbox3 = QHBoxLayout()
-            hbox3.addWidget(QLabel("Max workers:"))
-            self.max_workers_input = QLineEdit("4")
-            hbox3.addWidget(self.max_workers_input)
-            layout.addLayout(hbox3)
-            # use_exponential_fitness
-            hbox4 = QHBoxLayout()
-            hbox4.addWidget(QLabel("Use exponential fitness:"))
-            self.exp_fitness_combo = QComboBox()
-            self.exp_fitness_combo.addItems(["True", "False"])
-            hbox4.addWidget(self.exp_fitness_combo)
-            layout.addLayout(hbox4)
-            # OK/Cancel
-            btn_hbox = QHBoxLayout()
-            ok_btn = QPushButton("OK")
-            cancel_btn = QPushButton("Cancel")
-            btn_hbox.addWidget(ok_btn)
-            btn_hbox.addWidget(cancel_btn)
-            layout.addLayout(btn_hbox)
-            self.setLayout(layout)
-            ok_btn.clicked.connect(self.accept)
-            cancel_btn.clicked.connect(self.reject)
-        def get_options(self):
-            return {
-                "num_initial_samples": int(self.initial_samples_input.text()),
-                "num_iterations": int(self.iterations_input.text()),
-                "max_workers": int(self.max_workers_input.text()),
-                "use_exponential_fitness": self.exp_fitness_combo.currentText() == "True"
-            }
-
-    dialog = BOOptionsDialog(main_window)
-    if dialog.exec_() == QDialog.Accepted:
-        bo_options = dialog.get_options()
-        main_window.output_text_tab3.append(f"Running calibration with options: {bo_options}")
-        # Create custom handler that writes to the GUI output text area
-        gui_handler = QtTextEditLogHandler(main_window.output_text_tab3)
-        gui_handler.setLevel(logging.INFO)
-        gui_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-        # Create console handler for stdout
-        console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setLevel(logging.DEBUG)
-        console_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-        # Configure logging
-        main_window.logger_tab3 = logging.getLogger(__name__)
-        main_window.logger_tab3.setLevel(logging.INFO)
-        main_window.logger_tab3.handlers = [gui_handler, console_handler]
-        context = CalibrationContext(
-            db_path=main_window.calibration_file_input.text(), 
-            obsData=main_window.obs_file_name_input.text(), 
-            obsData_columns={**dict(zip(main_window.df_qois['QoI_Name'], main_window.df_qois['ObsData_Column'])), 'time': 'Time'}, # The time here is a artifact
-            model_config={"ini_path": main_window.ini_file_path, 
-                          "struc_name": main_window.struc_name_input.text().strip(),
-                          "numReplicates": int(main_window.num_replicates_input.text().strip())}, 
-            qoi_functions=main_window.qoi_funcs,
-            distance_functions={qoi_name: {"function": main_window.df_qois.loc[main_window.df_qois['QoI_Name'] == qoi_name, "QoI_distanceFunction"].values[0], 
-                                                 "weight": main_window.df_qois.loc[main_window.df_qois['QoI_Name'] == qoi_name, "QoI_distanceWeight"].values[0]} for qoi_name in main_window.df_qois['QoI_Name']},
-            search_space={param_name: {"type": main_window.df_param_space.loc[main_window.df_param_space['Parameter'] == param_name, "Type"].values[0], 
-                                             "lower_bound": main_window.df_param_space.loc[main_window.df_param_space['Parameter'] == param_name, "Lower Bound"].values[0], 
-                                             "upper_bound": main_window.df_param_space.loc[main_window.df_param_space['Parameter'] == param_name, "Upper Bound"].values[0]} for param_name in main_window.df_param_space['Parameter']},
-            bo_options=bo_options,
-            logger=main_window.logger_tab3
-        )
-        # Run Bayesian Optimization
-        try:
-            run_bayesian_optimization(context)
-        except Exception as e:
-            main_window.output_text_tab3.append(f"Error occurred: {e}")
-
-        # Load calibration results
-        main_window.bo_file_path = main_window.calibration_file_input.text()
-        main_window.load_bo_database(main_window)
-    else:
-        main_window.output_text_tab3.append("Calibration cancelled.")
 
 
 def plot_calibration_results(main_window):
