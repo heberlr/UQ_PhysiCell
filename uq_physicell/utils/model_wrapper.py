@@ -159,6 +159,8 @@ def run_replicate(PhysiCellModel: PhysiCell_Model, sample_id: int, replicate_id:
                 qoi_name: create_named_function_from_string(qoi_value, qoi_name)
                 for qoi_name, qoi_value in qoi_functions.items()
             }
+        else:
+            recreated_qoi_funcs = None
 
         # According qoi_functions run PhysiCellModel, if qoi_functions=NONE will return a list of MCDS objects
         result_data = PhysiCellModel.RunModel(
