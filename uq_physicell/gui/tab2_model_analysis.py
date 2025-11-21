@@ -919,6 +919,10 @@ def load_ma_database(main_window):
         # print a message in the output fields of Tab 2
         message = f"Database file loaded: {main_window.ma_file_path}"
         main_window.update_output_tab2(main_window, message)
+
+        # Active the run simulations button
+        main_window.run_simulations_button.setEnabled(True)
+        
     except ValueError:
         # Re-raise ValueError (from .ini file loading) to propagate it up
         raise
@@ -964,12 +968,24 @@ def update_sampling_type(main_window):
 
         # Populate local_SA_parameters with reference values and default perturbations
         for key, value in main_window.analysis_parameters.items():
-            ref_value = float(main_window.get_parameter_value_xml(main_window, key))  # Get the default XML value - string
-            main_window.local_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": [1, 10, 20]}
+            # Get the default XML value - string
+            string_value = main_window.get_parameter_value_xml(main_window, key)
+            try: # Try to convert to float
+                ref_value = float(string_value) 
+                main_window.local_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": [1, 10, 20]}
+            except ValueError: # If conversion fails, assign boolean values
+                ref_value = 0.0 if string_value.lower() == 'false' else 1.0
+                main_window.local_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": [100]}
 
         for key, value in main_window.analysis_rules_parameters.items():
-            ref_value = main_window.get_rule_value(main_window, key)  # Get the default rule value
-            main_window.local_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": [1, 10, 20]}
+            # Get the default rule value - string
+            string_value = main_window.get_rule_value(main_window, key)
+            try: # Try to convert to float
+                ref_value = float(string_value)
+                main_window.local_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": [1, 10, 20]}
+            except ValueError: # # If conversion fails, assign boolean values
+                ref_value = 0.0 if string_value.lower() == 'false' else 1.0
+                main_window.local_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": [100]}
 
         # Add friendly names to the combo box
         main_window.local_param_combo.addItems(list(main_window.local_SA_parameters.keys()))
@@ -1020,14 +1036,26 @@ def update_sampling_type(main_window):
 
         # Populate global_SA_parameters with reference values and default range percentage
         for key, value in main_window.analysis_parameters.items():
-            ref_value = float(main_window.get_parameter_value_xml(main_window, key))  # Get the default XML value - string
-            # print(f"Update Analysis type - {key}: {ref_value}")
-            main_window.global_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": 20.0, "lower_bound": float(ref_value) * 0.8, "upper_bound": float(ref_value) * 1.2}
+            # Get the default XML value - string
+            string_value = main_window.get_parameter_value_xml(main_window, key)
+            try: # Try to convert to float
+                ref_value = float(string_value)
+                # print(f"Update Analysis type - {key}: {ref_value}")
+                main_window.global_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": 20.0, "lower_bound": ref_value * 0.8, "upper_bound": ref_value * 1.2}
+            except ValueError: # If conversion fails, assign boolean values
+                ref_value = 0.0 if string_value.lower() == 'false' else 1.0
+                main_window.global_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": 100.0, "lower_bound": 0.0, "upper_bound": 1.0}
 
         for key, value in main_window.analysis_rules_parameters.items():
-            ref_value = main_window.get_rule_value(main_window, key)  # Get the default rule value
-            # print(f"Update Analysis type - {key}: {ref_value}")
-            main_window.global_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": 20.0, "lower_bound": float(ref_value) * 0.8, "upper_bound": float(ref_value) * 1.2}
+            # Get the default rule value
+            string_value = main_window.get_rule_value(main_window, key)
+            try: # Try to convert to float
+                ref_value = float(string_value)
+                # print(f"Update Analysis type - {key}: {ref_value}")
+                main_window.global_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": 20.0, "lower_bound": ref_value * 0.8, "upper_bound": ref_value * 1.2}
+            except ValueError: # If conversion fails, assign boolean values
+                ref_value = 0.0 if string_value.lower() == 'false' else 1.0
+                main_window.global_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": 100.0, "lower_bound": 0.0, "upper_bound": 1.0}
 
         # Add friendly names to the combo box
         main_window.global_param_combo.addItems(list(main_window.global_SA_parameters.keys()))
