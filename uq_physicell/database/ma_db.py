@@ -301,7 +301,7 @@ def insert_output(db_file: str, sample_id: int, replicate_id: int, result_data: 
     except sqlite3.Error as e:
         raise RuntimeError(f"Error inserting output into the database: {e}")
     
-def load_structure(db_file: str) -> tuple:
+def load_structure(db_file: str, load_result: bool = True) -> tuple:
     """Load the complete database structure and return all data components.
     
     This function retrieves all stored information from the SQLite database
@@ -356,6 +356,13 @@ def load_structure(db_file: str) -> tuple:
     df_samples = pd.DataFrame(samples, columns=['SampleID', 'ParamName', 'ParamValue'])
     # Convert df_samples to a dictionary of dictionaries with external keys sampleID and internal keys ParamName - sorted by sampleID
     dic_samples = df_samples.pivot(index="SampleID", columns="ParamName", values="ParamValue").sort_index().to_dict(orient="index")
+    
+    if not load_result:
+        # Instead of loading all data just return SampleID and ReplicateID
+        cursor.execute('SELECT SampleID, ReplicateID FROM Output')
+        output = cursor.fetchall()
+        conn.close()
+        return df_metadata, df_parameter_space, df_qois, dic_samples, pd.DataFrame(output, columns=['SampleID', 'ReplicateID'])
     
     # Load Output
     cursor.execute('SELECT * FROM Output')
@@ -423,7 +430,7 @@ def check_simulations_db(PhysiCellModel: PhysiCell_Model, sampler: str, param_di
 
     try:
         # Load the database structure
-        df_metadata, df_parameter_space, df_qois, dic_samples_db, df_data_unserialized = load_structure(db_file)
+        df_metadata, df_parameter_space, df_qois, dic_samples_db, df_data_unserialized = load_structure(db_file, load_result=False)
 
         # Check if Metadata matches the expected values
         metadata_checks = {
