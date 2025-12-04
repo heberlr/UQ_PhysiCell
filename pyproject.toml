@@ -36,7 +36,7 @@ readme = "README.md"
 
 requires-python = ">=3.10"
 
-license = {text = "MIT"}
+license = {file = "uq_physicell/LICENSE.md"}
 
 authors = [
     {name = "Heber L. Rocha", email = "heberonly@gmail.com"}
