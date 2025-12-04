@@ -18,6 +18,7 @@ def compute_persistent_homology(df:pd.DataFrame, Plot=False) -> pd.Series:
     Returns:
     - pd.Series -> Vectorized persistent homology features.
     """
+    import matplotlib.pyplot as plt
     try:
         import muspan
     except ImportError:
@@ -35,25 +36,129 @@ def compute_persistent_homology(df:pd.DataFrame, Plot=False) -> pd.Series:
     # Query to select cells of types 'A', 'B', ... in each domain
     q_cell_types = muspan.query.query(domain, ('label', 'Celltype'), 'in', df['cell_type'].unique().tolist())
 
-    # Plot domain with cell types (optional)
-    if Plot:
-        import matplotlib.pyplot as plt
-        fig, ax = plt.subplots(figsize=(6, 6))
-        muspan.visualise.visualise(domain, 'Celltype', ax=ax, add_cbar=False, marker_size=2.5, objects_to_plot=q_cell_types)
-
     # Compute Vietoris-Rips filtrations
     feature_persistence = muspan.topology.vietoris_rips_filtration(domain, population=q_cell_types, max_dimension=1)
 
     # Plot persistence diagram (optional)
+    figure = None
     if Plot:
-        fig, ax = plt.subplots(figsize=(6, 6))
-        muspan.visualise.persistence_diagram(feature_persistence, ax=ax)
-        plt.show()
+        fig, axes = plt.subplots(figsize=(15, 6), nrows=1, ncols=2)
+        # Plot domain with cell types
+        muspan.visualise.visualise(domain, 'Celltype', ax=axes[0], add_cbar=False, marker_size=2.5, objects_to_plot=q_cell_types)
+        # Plot persistence diagram
+        muspan.visualise.persistence_diagram(feature_persistence, ax=axes[1])
+        figure = [fig, axes]
+        
 
     # Vectorise the persistence homology diagram for the domain using statistical method
     vectorised_ph,name_of_features = muspan.topology.vectorise_persistence(feature_persistence, method='statistics')
+    return pd.Series(vectorised_ph, index=name_of_features), figure
 
-    return pd.Series(vectorised_ph, index=name_of_features)
+def compute_relational_ph( df: pd.DataFrame, landmark_type: str, witness_type: str, max_dim: int = 1, mode: str = "distance", ax = None) -> pd.Series:
+    """
+    Relational Persistent Homology using Dowker/Witness idea.
+    A→B (A as vertices, B as witnesses) describes how B are arranged around A geometry.
+
+    Parameters
+    ----------
+    df : DataFrame with columns ['position_x','position_y','cell_type']
+    landmark_type : cell type to use as landmarks (A)
+    witness_type : cell type to use as witnesses (B)
+    max_dim : PH dimension (0 or 1)
+    mode: 'distance' or 'count'
+    ax : matplotlib axis for plotting  (optional)
+
+    Returns
+    -------
+    vectorized_PH : pd.Series
+    figure : matplotlib figure or None
+    """
+    from scipy.spatial.distance import cdist
+    from scipy.spatial import Delaunay
+    import gudhi, muspan
+    import matplotlib.pyplot as plt
+
+    # Extract A = Landmarks, B = Witnesses
+    A_points = df[df["cell_type"] == landmark_type][["position_x","position_y"]].to_numpy()
+    B_points = df[df["cell_type"] == witness_type][["position_x","position_y"]].to_numpy()
+    if len(A_points) == 0 or len(B_points) == 0:
+        raise ValueError("Both landmark_type and witness_type must be present.")
+    # Pairwise distances B×A
+    D = cdist(B_points, A_points)
+
+    # Build candidate simplex list from landmarks
+    if len(A_points) < 3:
+        raise ValueError("At least 3 landmark points are required for relational PH.")
+    # Use Delaunay to match Python repo behavior
+    tri = Delaunay(A_points)
+    # vertices = all points
+    vertices = list(range(len(A_points)))
+    # edges from Delaunay
+    edges = set()
+    faces = set()
+    for simplex in tri.simplices:
+        simplex = list(simplex)
+        # all edges
+        for i in range(3):
+            for j in range(i+1, 3):
+                edges.add(tuple(sorted([simplex[i], simplex[j]])))
+        # triangle
+        faces.add(tuple(sorted(simplex)))
+    edges = list(edges)
+    faces = list(faces)
+
+    # Compute filtration values
+    def dowker_distance(simplex):
+        """Distance-based Dowker: min_w max_a d(a,w)."""
+        return np.min(np.max(D[:, simplex], axis=1))
+    
+    def dowker_count(simplex):
+        """Count-based Dowker: number of witnesses covering all simplex vertices."""
+        return -np.sum(np.all(D[:, simplex] <= np.max(D[:, simplex], axis=0), axis=1))
+    
+    # Compute filtration values based on the distance
+    fil_func = dowker_distance if mode == "distance" else dowker_count
+    f_vertex = np.array([fil_func([i]) for i in vertices])
+    f_edge   = np.array([fil_func(list(e)) for e in edges])
+    if max_dim >= 2:
+        f_face   = np.array([fil_func(list(f)) for f in faces])
+
+    # Build GUDHI SimplexTree
+    st = gudhi.SimplexTree()
+    # vertices
+    for i, fv in enumerate(f_vertex):
+        st.insert([i], filtration=float(fv))
+    # edges
+    for (e, fv) in zip(edges, f_edge):
+        st.insert(list(e), filtration=float(fv))
+    # faces
+    if max_dim >= 2:
+        for (f, fv) in zip(faces, f_face):
+            st.insert(list(f), filtration=float(fv))
+    st.initialize_filtration()
+
+    # Compute persistence
+    diag = st.persistence()
+
+    # Convert GUDHI persistence output to muspan-style dict {'dgms': [array_dim0, array_dim1, ...]}
+    dgms = []
+    for d in range(max_dim + 1):
+        intervals = [pair for dim, pair in diag if dim == d]
+        if len(intervals) == 0:
+            dgms.append(np.zeros((0, 2)))
+        else:
+            dgms.append(np.array(intervals))
+    feature_persistence = {'dgms': dgms}
+
+    # Vectorize diagram using muspan's statistics
+    vec, names = muspan.topology.vectorise_persistence(feature_persistence, method="statistics")
+    vec = pd.Series(vec, index=names)
+
+    # Plot
+    if ax is not None:
+        axes = gudhi.plot_persistence_diagram(diag, axes=ax)
+
+    return vec, diag
 
 # Helper function to create named functions from strings
 def create_named_function_from_string(func_str: str, qoi_name: str) -> callable:
