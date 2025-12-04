@@ -6,7 +6,7 @@
 
 [![Run Unit Tests](https://github.com/heberlr/UQ_PhysiCell/actions/workflows/test-examples.yml/badge.svg)](https://github.com/heberlr/UQ_PhysiCell/actions/workflows/test-examples.yml)
 [![Documentation Status](https://readthedocs.org/projects/uq-physicell/badge/?version=latest)](https://uq-physicell.readthedocs.io/en/latest/?badge=latest)
-[![PyPI](https://badge.fury.io/py/uq-physicell.svg?updated=20241106)](https://badge.fury.io/py/uq-physicell)
+[![PyPI](https://badge.fury.io/py/uq-physicell.svg?updated=20251204)](https://badge.fury.io/py/uq-physicell)
 [![Python](https://img.shields.io/badge/Python-%3E%3D3.10-blue?logo=python&logoColor=green)](https://python.org)
 [![License](https://img.shields.io/badge/License-BSD_3--Clause-blue.svg)](https://github.com/heberlr/UQ_PhysiCell/tree/development/uq_physicell/LICENSE.md)
 
