@@ -259,7 +259,7 @@ def load_structure(db_file:str) -> tuple:
     # Load Parameter Space
     cursor.execute('SELECT * FROM ParameterSpace')
     param_space = cursor.fetchall()
-    df_param_space = pd.DataFrame(param_space, columns=['ParamName', 'Type', 'Lower_Bound', 'Upper_Bound', 'Regulates'])
+    df_param_space = pd.DataFrame(param_space, columns=['ParamName', 'type', 'lower_bound', 'upper_bound', 'regulates'])
     
     # Load QoIs
     cursor.execute('SELECT * FROM QoIs')

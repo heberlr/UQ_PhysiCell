@@ -15,7 +15,7 @@ def normalize_params_df(df_params, df_search_space) -> pd.DataFrame:
     # Merge parameter values with their corresponding bounds
     df_merged = pd.merge(df_params, df_search_space, on='ParamName', how='left')
     # Normalize each parameter value
-    df_merged['ParamValue'] = (df_merged['ParamValue'] - df_merged['Lower_Bound']) / (df_merged['Upper_Bound'] - df_merged['Lower_Bound'])
+    df_merged['ParamValue'] = (df_merged['ParamValue'] - df_merged['lower_bound']) / (df_merged['upper_bound'] - df_merged['lower_bound'])
     # Return only the relevant columns
     df_norm = df_merged[['SampleID', 'ParamName', 'ParamValue']]
     return df_norm

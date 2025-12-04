@@ -91,9 +91,9 @@ class TestModularLoadFunctions:
         assert 'param1' in df_params['ParamName'].values
         assert 'param2' in df_params['ParamName'].values
         
-        # Check that Perturbation is converted to numpy array
-        assert isinstance(df_params['Perturbation'].iloc[0], np.ndarray)
-        assert len(df_params['Perturbation'].iloc[0]) == 2
+        # Check that perturbation is converted to numpy array
+        assert isinstance(df_params['perturbation'].iloc[0], np.ndarray)
+        assert len(df_params['perturbation'].iloc[0]) == 2
     
     def test_load_qois(self, sample_database):
         """Test load_qois function."""

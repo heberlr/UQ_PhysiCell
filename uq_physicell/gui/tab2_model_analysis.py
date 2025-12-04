@@ -863,10 +863,10 @@ def load_ma_database(main_window):
             main_window.local_SA_parameters = {}
             main_window.local_SA_parameters["samples"] = dic_input
             for id, param in enumerate(df_parameter_space['ParamName']):
-                if type(df_parameter_space['Perturbation'].iloc[id]) == list:
-                    df_parameter_space['Perturbation'].iloc[id] = [float(x) for x in df_parameter_space['Perturbation'].iloc[id]]
+                if type(df_parameter_space['perturbation'].iloc[id]) == list:
+                    df_parameter_space['perturbation'].iloc[id] = [float(x) for x in df_parameter_space['perturbation'].iloc[id]]
                 main_window.local_SA_parameters[param] = {"ref_value": df_parameter_space['ReferenceValue'].iloc[id], 
-                                                            "perturbation": df_parameter_space['Perturbation'].iloc[id]}
+                                                            "perturbation": df_parameter_space['perturbation'].iloc[id]}
             # Update the local parameters
             main_window.update_local_inputs(main_window)
     
@@ -1231,15 +1231,15 @@ def plot_samples(main_window):
                     perturbations_df[col] - main_window.local_SA_parameters[col]["ref_value"]
                 ) / main_window.local_SA_parameters[col]["ref_value"]
             perturbations_df = perturbations_df.reset_index().melt(
-                id_vars="index", var_name="Parameter", value_name="Perturbation"
+                id_vars="index", var_name="Parameter", value_name="perturbation"
             )
             perturbations_df = perturbations_df.rename(columns={"index": "SampleID"})
             perturbations_df['Frequency'] = perturbations_df.groupby(
-                ['Perturbation', 'Parameter']
+                ['perturbation', 'Parameter']
             )['SampleID'].transform('count')
             scatter_plot = sns.scatterplot(
                 data=perturbations_df,
-                x="Perturbation",
+                x="perturbation",
                 y="Parameter",
                 hue="SampleID",
                 size="Frequency",
