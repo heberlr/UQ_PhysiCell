@@ -6,20 +6,25 @@
 # https://hatch.pypa.io/latest/
 #
 # releasing a next version on pypi:
-# 0. change uq_physicell/VERSION.py  # increase version number in file
+# 0. change uq_physicell/VERSION.py  # increase version number in file - # If there is no changes in the core module DO NOT CREATE A NEW VERSION
+# 1. Run bash doc/rebuild_docs.sh --clean # Update version on documentation
+# 2. Change the badge of pypi on README.md https://badge.fury.io/py/uq-physicell.svg?updated=xxxxxxxx
+# 3. Commit and push the changes
+# 4. Create a PR to development branch from your branch
+# Development branch
+# 5. Check if rebuild the documentation in : https://app.readthedocs.org/projects/uq-physicell/
+# 6. Pull request from dev to main
+# Main branch
+# 7. Create the release tag (make sure the release tag is vx.x.x to match with GitHub link from documentation)
 # Prepate to update pypi version
-# 1. rm -r dist # clean previous distribution
-# 2. python -m build --sdist  # make source distribution
-# 3. python -m build --wheel  # make binary distribution python wheel
-# 4. python -m twine upload dist/* --verbose # publising python package
-# 5. Change the badge of pypi on README.md https://badge.fury.io/py/uq-physicell.svg?updated=xxxxxxxx
-# Prepare to reload the documentation - (Execute from here just for documentation update).
-# 6. Run bash doc/rebuild_docs.sh --clean
-# 7. Check if rebuild the documentation in : https://app.readthedocs.org/projects/uq-physicell/ 
-# 8. git push origin
-# If there is no changes in the core module DO NOT CREATE A NEW VERSION
-# 9. Pull request from dev to main
-# 10. Create the release tag (make sure the release tag is vx.x.x to match with GitHub link from documentation)
+# 8. rm -r dist # clean previous distribution
+# 9. python -m build --sdist  # make source distribution
+# 10. python -m build --wheel  # make binary distribution python wheel
+# 11. python -m twine upload dist/* --verbose # publising python package
+
+
+
+
 
 ##### do not use conda env #######
 
