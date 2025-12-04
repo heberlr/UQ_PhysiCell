@@ -1,7 +1,7 @@
 import sqlite3
 from typing import Union
 
-def _update_db_value(db_file:str, table_name:str, column_name:str, new_value:Union[str, int, float], old_value:Union[str, int, float]):
+def update_db_value(db_file:str, table_name:str, column_name:str, new_value:Union[str, int, float], old_value:Union[str, int, float]):
     """
     Update a specific value in the database.
     Parameters: 
@@ -18,7 +18,7 @@ def _update_db_value(db_file:str, table_name:str, column_name:str, new_value:Uni
     conn.commit()
     conn.close()
 
-def _add_db_entry(db_file:str, table_name:str, column_name:str, value:Union[str, int, float]):
+def add_db_entry(db_file:str, table_name:str, column_name:str, value:Union[str, int, float]):
     """
     Add a new entry to the database.
     Parameters:
@@ -42,7 +42,7 @@ def _add_db_entry(db_file:str, table_name:str, column_name:str, value:Union[str,
     conn.commit()
     conn.close()
 
-def _remove_db_entry(db_file:str, table_name:str, column_name:str, value:Union[str, int, float]):
+def remove_db_entry(db_file:str, table_name:str, column_name:str, value:Union[str, int, float]):
     """
     Remove an entry from the database.
     Parameters:
@@ -57,7 +57,7 @@ def _remove_db_entry(db_file:str, table_name:str, column_name:str, value:Union[s
     conn.commit()
     conn.close()
 
-def _remove_db_table(db_file:str, table_name:str):
+def remove_db_table(db_file:str, table_name:str):
     """
     Remove a table from the database.
     Parameters:

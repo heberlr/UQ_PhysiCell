@@ -843,10 +843,10 @@ def load_ma_database(main_window):
             main_window.global_SA_parameters = {}
             main_window.global_SA_parameters["samples"] = dic_input
             for id, param in enumerate(df_parameter_space['ParamName']):
-                main_window.global_SA_parameters[param] = {"lower_bound": df_parameter_space['Lower_Bound'].iloc[id],
-                                                            "upper_bound": df_parameter_space['Upper_Bound'].iloc[id],
-                                                            "ref_value": df_parameter_space['ReferenceValue'].iloc[id], 
-                                                            "perturbation": float(df_parameter_space['Perturbation'].iloc[id])}
+                main_window.global_SA_parameters[param] = {"lower_bound": df_parameter_space['lower_bound'].iloc[id],
+                                                            "upper_bound": df_parameter_space['upper_bound'].iloc[id],
+                                                            "ref_value": df_parameter_space['ref_value'].iloc[id], 
+                                                            "perturbation": float(df_parameter_space['perturbation'].iloc[id])}
             # Update the global parameters
             main_window.update_global_inputs(main_window)
         else: 
@@ -863,10 +863,10 @@ def load_ma_database(main_window):
             main_window.local_SA_parameters = {}
             main_window.local_SA_parameters["samples"] = dic_input
             for id, param in enumerate(df_parameter_space['ParamName']):
-                if type(df_parameter_space['Perturbation'].iloc[id]) == list:
-                    df_parameter_space['Perturbation'].iloc[id] = [float(x) for x in df_parameter_space['Perturbation'].iloc[id]]
+                if type(df_parameter_space['perturbation'].iloc[id]) == list:
+                    df_parameter_space['perturbation'].iloc[id] = [float(x) for x in df_parameter_space['perturbation'].iloc[id]]
                 main_window.local_SA_parameters[param] = {"ref_value": df_parameter_space['ReferenceValue'].iloc[id], 
-                                                            "perturbation": df_parameter_space['Perturbation'].iloc[id]}
+                                                            "perturbation": df_parameter_space['perturbation'].iloc[id]}
             # Update the local parameters
             main_window.update_local_inputs(main_window)
     
@@ -919,6 +919,10 @@ def load_ma_database(main_window):
         # print a message in the output fields of Tab 2
         message = f"Database file loaded: {main_window.ma_file_path}"
         main_window.update_output_tab2(main_window, message)
+
+        # Active the run simulations button
+        main_window.run_simulations_button.setEnabled(True)
+        
     except ValueError:
         # Re-raise ValueError (from .ini file loading) to propagate it up
         raise
@@ -964,12 +968,24 @@ def update_sampling_type(main_window):
 
         # Populate local_SA_parameters with reference values and default perturbations
         for key, value in main_window.analysis_parameters.items():
-            ref_value = float(main_window.get_parameter_value_xml(main_window, key))  # Get the default XML value - string
-            main_window.local_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": [1, 10, 20]}
+            # Get the default XML value - string
+            string_value = main_window.get_parameter_value_xml(main_window, key)
+            try: # Try to convert to float
+                ref_value = float(string_value) 
+                main_window.local_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": [1, 10, 20]}
+            except ValueError: # If conversion fails, assign boolean values
+                ref_value = 0.0 if string_value.lower() == 'false' else 1.0
+                main_window.local_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": [100]}
 
         for key, value in main_window.analysis_rules_parameters.items():
-            ref_value = main_window.get_rule_value(main_window, key)  # Get the default rule value
-            main_window.local_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": [1, 10, 20]}
+            # Get the default rule value - string
+            string_value = main_window.get_rule_value(main_window, key)
+            try: # Try to convert to float
+                ref_value = float(string_value)
+                main_window.local_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": [1, 10, 20]}
+            except ValueError: # # If conversion fails, assign boolean values
+                ref_value = 0.0 if string_value.lower() == 'false' else 1.0
+                main_window.local_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": [100]}
 
         # Add friendly names to the combo box
         main_window.local_param_combo.addItems(list(main_window.local_SA_parameters.keys()))
@@ -1020,14 +1036,26 @@ def update_sampling_type(main_window):
 
         # Populate global_SA_parameters with reference values and default range percentage
         for key, value in main_window.analysis_parameters.items():
-            ref_value = float(main_window.get_parameter_value_xml(main_window, key))  # Get the default XML value - string
-            # print(f"Update Analysis type - {key}: {ref_value}")
-            main_window.global_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": 20.0, "lower_bound": float(ref_value) * 0.8, "upper_bound": float(ref_value) * 1.2}
+            # Get the default XML value - string
+            string_value = main_window.get_parameter_value_xml(main_window, key)
+            try: # Try to convert to float
+                ref_value = float(string_value)
+                # print(f"Update Analysis type - {key}: {ref_value}")
+                main_window.global_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": 20.0, "lower_bound": ref_value * 0.8, "upper_bound": ref_value * 1.2}
+            except ValueError: # If conversion fails, assign boolean values
+                ref_value = 0.0 if string_value.lower() == 'false' else 1.0
+                main_window.global_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": 100.0, "lower_bound": 0.0, "upper_bound": 1.0}
 
         for key, value in main_window.analysis_rules_parameters.items():
-            ref_value = main_window.get_rule_value(main_window, key)  # Get the default rule value
-            # print(f"Update Analysis type - {key}: {ref_value}")
-            main_window.global_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": 20.0, "lower_bound": float(ref_value) * 0.8, "upper_bound": float(ref_value) * 1.2}
+            # Get the default rule value
+            string_value = main_window.get_rule_value(main_window, key)
+            try: # Try to convert to float
+                ref_value = float(string_value)
+                # print(f"Update Analysis type - {key}: {ref_value}")
+                main_window.global_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": 20.0, "lower_bound": ref_value * 0.8, "upper_bound": ref_value * 1.2}
+            except ValueError: # If conversion fails, assign boolean values
+                ref_value = 0.0 if string_value.lower() == 'false' else 1.0
+                main_window.global_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": 100.0, "lower_bound": 0.0, "upper_bound": 1.0}
 
         # Add friendly names to the combo box
         main_window.global_param_combo.addItems(list(main_window.global_SA_parameters.keys()))
@@ -1203,15 +1231,15 @@ def plot_samples(main_window):
                     perturbations_df[col] - main_window.local_SA_parameters[col]["ref_value"]
                 ) / main_window.local_SA_parameters[col]["ref_value"]
             perturbations_df = perturbations_df.reset_index().melt(
-                id_vars="index", var_name="Parameter", value_name="Perturbation"
+                id_vars="index", var_name="Parameter", value_name="perturbation"
             )
             perturbations_df = perturbations_df.rename(columns={"index": "SampleID"})
             perturbations_df['Frequency'] = perturbations_df.groupby(
-                ['Perturbation', 'Parameter']
+                ['perturbation', 'Parameter']
             )['SampleID'].transform('count')
             scatter_plot = sns.scatterplot(
                 data=perturbations_df,
-                x="Perturbation",
+                x="perturbation",
                 y="Parameter",
                 hue="SampleID",
                 size="Frequency",
