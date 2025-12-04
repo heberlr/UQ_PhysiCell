@@ -32,8 +32,8 @@ class TestBOUtils(unittest.TestCase):
         
         self.df_search_space = pd.DataFrame({
             'ParamName': ['param1', 'param2'],
-            'Lower_Bound': [0.0, 1.0],
-            'Upper_Bound': [1.0, 2.0]
+            'lower_bound': [0.0, 1.0],
+            'upper_bound': [1.0, 2.0]
         })
         
         self.search_space = {

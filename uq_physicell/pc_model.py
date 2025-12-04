@@ -469,30 +469,45 @@ def _run_model(model: PhysiCell_Model, SampleID: int, ReplicateID: int, Paramete
     except Exception as e:
         raise ValueError(f"An unexpected error occurred in RunModel: {e}")
 
+_attr_name_re = re.compile(r"\[@([A-Za-z_:][\w:.\-]*)")
 def _get_xml_element_value(xml_root: ET.Element, key: str) -> str:
-    elem = xml_root.findall(key)
-    if len(elem) != 1:
+    elems = xml_root.findall(key)
+    if len(elems) != 1:
         raise ValueError(f""" Error in getting XML element!
-                Multiples occurrences or none found to this key: {key}, occurrences: {[pos.text for pos in elem]}.
+                Multiples occurrences or none found to this key: {key}, occurrences: {[pos.text for pos in elems]}.
                 Key examples:
                 # key cell cycle example: ".//*[@name='CD8 Tcell']/phenotype/cycle/phase_transition_rates/rate[4]"
                 # key substrates example: ".//*[@name='TNF']/physical_parameter_set/diffusion_coefficient"
                 # key parameter example: ".//random_seed"
                 """)
-    return elem[0].text
+    # Get last segment of the key to extract the attribute name
+    last_seg = key.rsplit("/", 1)[-1]
+    # Check and extract the attribute name using regex
+    attribute = _attr_name_re.search(last_seg)
+    elem = elems[0]
+    if attribute:
+        return elem.get(attribute.group(1))
+    return elem.text
 
 def _set_xml_element_value(xml_root: ET.Element, key: str, val: Union[str, int, float]) -> None:
-    elem = xml_root.findall(key)
-    if len(elem) != 1:
+    elems = xml_root.findall(key)
+    if len(elems) != 1:
         raise ValueError(f""" Error in setting XML element!
-                Multiples occurrences or none found to this key: {key}, occurrences: {[pos.text for pos in elem]}.
+                Multiples occurrences or none found to this key: {key}, occurrences: {[pos.text for pos in elems]}.
                 Key examples:
                 # key cell cycle example: ".//*[@name='CD8 Tcell']/phenotype/cycle/phase_transition_rates/rate[4]"
                 # key substrates example: ".//*[@name='TNF']/physical_parameter_set/diffusion_coefficient"
                 # key parameter example: ".//random_seed"
                 """)
+    # Get last segment of the key to extract the attribute name
+    last_seg = key.rsplit("/", 1)[-1]
+    # Check and extract the attribute name using regex
+    attribute = _attr_name_re.search(last_seg)
+    elem = elems[0]
+    if attribute:
+        elem.set(attribute.group(1), str(val))
     else:
-        elem[0].text = str(val)
+        elem.text = str(val)
 
 def _generate_xml_file(xml_file_in: str, xml_file_out: str, dic_parameters: dict, max_wait_time: float) -> None:
     shutil.copyfile(xml_file_in, xml_file_out)
@@ -552,7 +567,7 @@ def _generate_csv_file(rules: list, csv_file_out: str, dic_parameters_rules: dic
                     raise ValueError(f"Error! Parameter {param_name} not found in RULE: {key_rule}. Available parameters: {fieldNames} and inactive option.")
                 # if the parameter is 'inactive', remove the rule or ignore it
                 if (param_name == "inactive"):
-                    if ( value == 1 ): rules_inactived.append(index_rule)
+                    if ( value == 1 or value == 'true' or value == 'True' or value == True ): rules_inactived.append(index_rule)
                     continue
                 else:
                     rules_temp[index_rule][param_name] = value

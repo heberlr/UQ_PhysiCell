@@ -300,15 +300,288 @@ def insert_output(db_file: str, sample_id: int, replicate_id: int, result_data: 
         conn.close()
     except sqlite3.Error as e:
         raise RuntimeError(f"Error inserting output into the database: {e}")
-    
-def load_structure(db_file: str) -> tuple:
-    """Load the complete database structure and return all data components.
-    
-    This function retrieves all stored information from the SQLite database
-    including metadata, parameter space, QoIs, samples, and simulation results.
+
+def load_metadata(db_file: str) -> pd.DataFrame:
+    """Load metadata from the database.
     
     Args:
         db_file (str): Path to the SQLite database file.
+    
+    Returns:
+        pd.DataFrame: DataFrame with columns ['Sampler', 'Ini_File_Path', 'StructureName'].
+    
+    Raises:
+        sqlite3.Error: If database connection or query fails.
+    
+    Example:
+        >>> df_metadata = load_metadata('study.db')
+        >>> print(df_metadata['Sampler'].values[0])
+    """
+    conn = sqlite3.connect(db_file)
+    cursor = conn.cursor()
+    try:
+        cursor.execute('SELECT * FROM Metadata')
+        metadata = cursor.fetchall()
+        df_metadata = pd.DataFrame(metadata, columns=['Sampler', 'Ini_File_Path', 'StructureName'])
+        return df_metadata
+    except sqlite3.Error as e:
+        raise RuntimeError(f"Error loading metadata: {e}")
+    finally:
+        conn.close()
+
+def load_parameter_space(db_file: str) -> pd.DataFrame:
+    """Load parameter space from the database.
+    
+    Args:
+        db_file (str): Path to the SQLite database file.
+    
+    Returns:
+        pd.DataFrame: DataFrame with columns ['ParamName', 'lower_bound', 'upper_bound', 
+                      'ref_value', 'perturbation']. Perturbation column is converted 
+                      from string to numpy array.
+    
+    Raises:
+        sqlite3.Error: If database connection or query fails.
+    
+    Example:
+        >>> df_params = load_parameter_space('study.db')
+        >>> print(df_params[['ParamName', 'ReferenceValue']])
+    """
+    conn = sqlite3.connect(db_file)
+    cursor = conn.cursor()
+    try:
+        cursor.execute('SELECT * FROM ParameterSpace')
+        parameter_space = cursor.fetchall()
+        df_parameter_space = pd.DataFrame(parameter_space, 
+                                         columns=['ParamName', 'lower_bound', 'upper_bound', 
+                                                 'ref_value', 'perturbation'])
+        # Convert Perturbation column from string representation to numpy array
+        df_parameter_space['perturbation'] = df_parameter_space['perturbation'].apply(
+            lambda x: np.array(eval(x)) if isinstance(x, str) else x
+        )
+        return df_parameter_space
+    except sqlite3.Error as e:
+        raise RuntimeError(f"Error loading parameter space: {e}")
+    finally:
+        conn.close()
+
+def load_qois(db_file: str) -> pd.DataFrame:
+    """Load quantities of interest (QoIs) from the database.
+    
+    Args:
+        db_file (str): Path to the SQLite database file.
+    
+    Returns:
+        pd.DataFrame: DataFrame with columns ['QOI_Name', 'QOI_Function']. 
+                     Returns DataFrame with None values if no QoIs are defined.
+    
+    Raises:
+        sqlite3.Error: If database connection or query fails.
+    
+    Example:
+        >>> df_qois = load_qois('study.db')
+        >>> print(df_qois['QOI_Name'].to_list())
+    """
+    conn = sqlite3.connect(db_file)
+    cursor = conn.cursor()
+    try:
+        cursor.execute('SELECT * FROM QoIs')
+        qois = cursor.fetchall()
+        if qois:
+            df_qois = pd.DataFrame(qois, columns=['QOI_Name', 'QOI_Function'])
+        else:
+            df_qois = pd.DataFrame(columns=['QOI_Name', 'QOI_Function'])
+            df_qois.loc[0] = [None, None]
+        return df_qois
+    except sqlite3.Error as e:
+        raise RuntimeError(f"Error loading QoIs: {e}")
+    finally:
+        conn.close()
+
+def load_samples(db_file: str) -> dict:
+    """Load parameter samples from the database.
+    
+    Args:
+        db_file (str): Path to the SQLite database file.
+    
+    Returns:
+        dict: Dictionary where keys are sample IDs and values are dictionaries 
+              of parameter names and values.
+    
+    Raises:
+        sqlite3.Error: If database connection or query fails.
+    
+    Example:
+        >>> dic_samples = load_samples('study.db')
+        >>> print(f"Sample 0 parameters: {dic_samples[0]}")
+    """
+    conn = sqlite3.connect(db_file)
+    cursor = conn.cursor()
+    try:
+        cursor.execute('SELECT * FROM Samples')
+        samples = cursor.fetchall()
+        df_samples = pd.DataFrame(samples, columns=['SampleID', 'ParamName', 'ParamValue'])
+        # Convert to dictionary of dictionaries sorted by SampleID
+        dic_samples = df_samples.pivot(index="SampleID", columns="ParamName", 
+                                      values="ParamValue").sort_index().to_dict(orient="index")
+        return dic_samples
+    except sqlite3.Error as e:
+        raise RuntimeError(f"Error loading samples: {e}")
+    finally:
+        conn.close()
+
+def load_output(db_file: str, sample_ids: list = None, replicate_ids: list = None, 
+                load_data: bool = True) -> pd.DataFrame:
+    """Load simulation output from the database with flexible filtering options.
+    
+    This function allows selective loading of simulation results, which is useful
+    for memory efficiency and performance when working with large databases.
+    
+    Args:
+        db_file (str): Path to the SQLite database file.
+        sample_ids (list, optional): List of specific sample IDs to load. 
+                                    If None, loads all samples.
+        replicate_ids (list, optional): List of specific replicate IDs to load. 
+                                       If None, loads all replicates.
+        load_data (bool, optional): If True, deserializes the Data column. 
+                                   If False, only loads SampleID and ReplicateID. 
+                                   Default is True.
+    
+    Returns:
+        pd.DataFrame: DataFrame with columns ['SampleID', 'ReplicateID', 'Data'] if load_data=True,
+                     or ['SampleID', 'ReplicateID'] if load_data=False. 
+                     When load_data=True, the Data column contains deserialized objects.
+    
+    Raises:
+        sqlite3.Error: If database connection or query fails.
+        RuntimeError: If data deserialization fails.
+    
+    Examples:
+        >>> # Load only metadata (SampleID, ReplicateID)
+        >>> df = load_output('study.db', load_data=False)
+        >>> 
+        >>> # Load specific sample
+        >>> df = load_output('study.db', sample_ids=[0, 1])
+        >>> 
+        >>> # Load specific replicate across all samples
+        >>> df = load_output('study.db', replicate_ids=[0])
+        >>> 
+        >>> # Load specific sample and replicate combination
+        >>> df = load_output('study.db', sample_ids=[5], replicate_ids=[0])
+    """
+    conn = sqlite3.connect(db_file)
+    cursor = conn.cursor()
+    
+    try:
+        # Build the SQL query with optional filters
+        query = 'SELECT SampleID, ReplicateID{} FROM Output'.format(
+            ', Data' if load_data else ''
+        )
+        conditions = []
+        params = []
+        
+        if sample_ids is not None:
+            placeholders = ','.join('?' * len(sample_ids))
+            conditions.append(f'SampleID IN ({placeholders})')
+            params.extend(sample_ids)
+        
+        if replicate_ids is not None:
+            placeholders = ','.join('?' * len(replicate_ids))
+            conditions.append(f'ReplicateID IN ({placeholders})')
+            params.extend(replicate_ids)
+        
+        if conditions:
+            query += ' WHERE ' + ' AND '.join(conditions)
+        
+        cursor.execute(query, params)
+        output = cursor.fetchall()
+        
+        if load_data:
+            df_output = pd.DataFrame(output, columns=['SampleID', 'ReplicateID', 'Data'])
+            # Deserialize the Data column
+            df_output['Data'] = df_output['Data'].apply(safe_pickle_loads)
+        else:
+            df_output = pd.DataFrame(output, columns=['SampleID', 'ReplicateID'])
+        
+        return df_output
+    
+    except sqlite3.Error as e:
+        raise RuntimeError(f"Error loading output: {e}")
+    finally:
+        conn.close()
+
+def load_data_unserialized(db_file: str, sample_ids: list = None, 
+                          replicate_ids: list = None) -> pd.DataFrame:
+    """Load and expand simulation output into time-series columns based on QoIs.
+    
+    This function loads the output data and, if QoIs are defined, expands each QoI
+    and time array into separate columns (e.g., 'qoi_0', 'qoi_1', 'time_0', 'time_1').
+    If no QoIs are defined, returns the raw deserialized data.
+    
+    Args:
+        db_file (str): Path to the SQLite database file.
+        sample_ids (list, optional): List of specific sample IDs to load. 
+                                    If None, loads all samples.
+        replicate_ids (list, optional): List of specific replicate IDs to load. 
+                                       If None, loads all replicates.
+    
+    Returns:
+        pd.DataFrame: DataFrame with SampleID, ReplicateID, and either:
+                     - Expanded QoI time-series columns if QoIs are defined
+                     - Raw Data column if no QoIs are defined
+    
+    Raises:
+        RuntimeError: If data loading or processing fails.
+    
+    Examples:
+        >>> # Load all data with QoI expansion
+        >>> df = load_data_unserialized('study.db')
+        >>> print(df.columns)  # ['SampleID', 'ReplicateID', 'total_cells_0', 'time_0', ...]
+        >>> 
+        >>> # Load specific sample
+        >>> df = load_data_unserialized('study.db', sample_ids=[0])
+    """
+    # Load QoIs and output data
+    df_qois = load_qois(db_file)
+    df_output = load_output(db_file, sample_ids=sample_ids, 
+                           replicate_ids=replicate_ids, load_data=True)
+    
+    # Initialize result DataFrame
+    df_data_unserialized = df_output.copy()
+    
+    # If QoIs are defined, expand them into columns
+    if df_qois['QOI_Name'].values[0] is not None:
+        df_data_unserialized.drop(columns=['Data'], inplace=True)
+        
+        for qoi in df_qois['QOI_Name']:
+            for i in range(df_output.shape[0]):
+                qoi_values = df_output.at[i, 'Data'][qoi].to_numpy()
+                time_values = df_output.at[i, 'Data']['time'].to_numpy()
+                
+                # Save time series data as separate columns
+                for idx in range(len(qoi_values)):
+                    df_data_unserialized.at[i, f"{qoi}_{idx}"] = qoi_values[idx]
+                    df_data_unserialized.at[i, f"time_{idx}"] = time_values[idx]
+    
+    return df_data_unserialized
+    
+def load_structure(db_file: str, load_result: bool = True) -> tuple:
+    """Load the complete database structure and return all data components.
+    
+    This is a convenience wrapper function that calls all modular load functions.
+    For more control over what data is loaded, use the individual load functions:
+    - load_metadata(db_file)
+    - load_parameter_space(db_file)
+    - load_qois(db_file)
+    - load_samples(db_file)
+    - load_output(db_file, sample_ids=None, replicate_ids=None, load_data=True)
+    - load_data_unserialized(db_file, sample_ids=None, replicate_ids=None)
+    
+    Args:
+        db_file (str): Path to the SQLite database file.
+        load_result (bool, optional): If True, loads and deserializes all output data 
+                                     with QoI expansion. If False, only loads SampleID 
+                                     and ReplicateID. Default is True.
     
     Returns:
         tuple: A 5-tuple containing:
@@ -316,78 +589,34 @@ def load_structure(db_file: str) -> tuple:
             - df_parameter_space (pd.DataFrame): Parameter space definitions
             - df_qois (pd.DataFrame): Quantities of interest definitions
             - dic_samples (dict): Dictionary of parameter samples by sample ID
-            - df_results (pd.DataFrame): Simulation results with deserialized data
+            - df_results (pd.DataFrame): Simulation results (expanded or metadata only)
     
     Raises:
-        sqlite3.Error: If database connection or data retrieval fails.
+        RuntimeError: If database loading fails.
     
-    Example:
+    Examples:
+        >>> # Load everything with full data
         >>> metadata, params, qois, samples, results = load_structure('study.db')
         >>> print(f"Loaded {len(samples)} samples with {len(results)} results")
+        >>> 
+        >>> # Load only metadata (no deserialization)
+        >>> metadata, params, qois, samples, ids = load_structure('study.db', load_result=False)
+        >>> print(f"Found {len(ids)} simulation results")
     """
-    conn = sqlite3.connect(db_file)
-    cursor = conn.cursor()
+    # Load all components using modular functions
+    df_metadata = load_metadata(db_file)
+    df_parameter_space = load_parameter_space(db_file)
+    df_qois = load_qois(db_file)
+    dic_samples = load_samples(db_file)
     
-    # Load Metadata
-    cursor.execute('SELECT * FROM Metadata')
-    metadata = cursor.fetchall()         
-    df_metadata = pd.DataFrame(metadata, columns=['Sampler', 'Ini_File_Path', 'StructureName'])
-    
-    # Load Parameter Space
-    cursor.execute('SELECT * FROM ParameterSpace')
-    parameter_space = cursor.fetchall()
-    df_parameter_space = pd.DataFrame(parameter_space, columns=['ParamName', 'Lower_Bound', 'Upper_Bound', 'ReferenceValue', 'Perturbation'])
-    # Convert Perturbation column from string representation of lists to a numpy array of floats
-    # This assumes that Perturbation is stored as a string representation of a list, e.g., "[0.1, 0.2, 0.3]"
-    df_parameter_space['Perturbation'] = df_parameter_space['Perturbation'].apply(lambda x: np.array(eval(x)) if isinstance(x, str) else x)
-
-    # Load QoIs
-    cursor.execute('SELECT * FROM QoIs')
-    qois = cursor.fetchall()
-    if qois:
-        df_qois = pd.DataFrame(qois, columns=['QOI_Name', 'QOI_Function'])
+    if not load_result:
+        # Only load SampleID and ReplicateID without data
+        df_results = load_output(db_file, load_data=False)
     else:
-        df_qois = pd.DataFrame(columns=['QOI_Name', 'QOI_Function'])
-        df_qois.loc[0] = [None, None]  # Add a row with None values if no QoIs are defined
+        # Load and expand all data with QoI processing
+        df_results = load_data_unserialized(db_file)
     
-    # Load Samples
-    cursor.execute('SELECT * FROM Samples')
-    samples = cursor.fetchall()
-    df_samples = pd.DataFrame(samples, columns=['SampleID', 'ParamName', 'ParamValue'])
-    # Convert df_samples to a dictionary of dictionaries with external keys sampleID and internal keys ParamName - sorted by sampleID
-    dic_samples = df_samples.pivot(index="SampleID", columns="ParamName", values="ParamValue").sort_index().to_dict(orient="index")
-    
-    # Load Output
-    cursor.execute('SELECT * FROM Output')
-    output = cursor.fetchall()
-    conn.close()
-    df_output = pd.DataFrame(output, columns=['SampleID', 'ReplicateID', 'Data'])
-    
-    # Deserialize the Data column using the external safe_pickle_loads function
-    df_output['Data'] = df_output['Data'].apply(safe_pickle_loads)
-    
-    # Initialize df_data_unserialized as a copy of df_output
-    df_data_unserialized = df_output.copy()
-    
-    # If QoIs are not None - converts df_output['Data'] to qois columns
-    # print("df_qois['QOI_Name'].values[0]:", df_qois['QOI_Name'].values[0])
-    if df_qois['QOI_Name'].values[0] != None: 
-        # Convert Data column to qois
-        df_data_unserialized.drop(columns=['Data'], inplace=True)
-        for qoi in df_qois['QOI_Name']:
-            for i in range(df_output.shape[0]):
-                # print(f"index: {i} Extracting {qoi} from Data for SampleID: {df_output.at[i, 'SampleID']}, ReplicateID: {df_output.at[i, 'ReplicateID']} Results: {df_output.at[i, 'Data'][qoi].to_numpy()}")
-                qoi_values = df_output.at[i, 'Data'][qoi].to_numpy()
-                time_values = df_output.at[i, 'Data']['time'].to_numpy()
-                # Save time series data
-                for id in range(len(qoi_values)):
-                    df_data_unserialized.at[i, f"{qoi}_{id}"] = qoi_values[id]
-                    df_data_unserialized.at[i, f"time_{id}"] = time_values[id]
-    # If QoIs are None - keep the Data column as is
-    else:
-        df_data_unserialized = df_output
-
-    return df_metadata, df_parameter_space, df_qois, dic_samples, df_data_unserialized
+    return df_metadata, df_parameter_space, df_qois, dic_samples, df_results
 
 def check_simulations_db(PhysiCellModel: PhysiCell_Model, sampler: str, param_dict: dict, 
                         dic_samples: dict, qois_dic: dict, db_file: str) -> tuple:
@@ -423,7 +652,7 @@ def check_simulations_db(PhysiCellModel: PhysiCell_Model, sampler: str, param_di
 
     try:
         # Load the database structure
-        df_metadata, df_parameter_space, df_qois, dic_samples_db, df_data_unserialized = load_structure(db_file)
+        df_metadata, df_parameter_space, df_qois, dic_samples_db, df_data_unserialized = load_structure(db_file, load_result=False)
 
         # Check if Metadata matches the expected values
         metadata_checks = {
