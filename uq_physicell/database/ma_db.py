@@ -336,8 +336,8 @@ def load_parameter_space(db_file: str) -> pd.DataFrame:
         db_file (str): Path to the SQLite database file.
     
     Returns:
-        pd.DataFrame: DataFrame with columns ['ParamName', 'Lower_Bound', 'Upper_Bound', 
-                      'ReferenceValue', 'Perturbation']. Perturbation column is converted 
+        pd.DataFrame: DataFrame with columns ['ParamName', 'lower_bound', 'upper_bound', 
+                      'ref_value', 'perturbation']. Perturbation column is converted 
                       from string to numpy array.
     
     Raises:
@@ -353,10 +353,10 @@ def load_parameter_space(db_file: str) -> pd.DataFrame:
         cursor.execute('SELECT * FROM ParameterSpace')
         parameter_space = cursor.fetchall()
         df_parameter_space = pd.DataFrame(parameter_space, 
-                                         columns=['ParamName', 'Lower_Bound', 'Upper_Bound', 
-                                                 'ReferenceValue', 'Perturbation'])
+                                         columns=['ParamName', 'lower_bound', 'upper_bound', 
+                                                 'ref_value', 'perturbation'])
         # Convert Perturbation column from string representation to numpy array
-        df_parameter_space['Perturbation'] = df_parameter_space['Perturbation'].apply(
+        df_parameter_space['perturbation'] = df_parameter_space['perturbation'].apply(
             lambda x: np.array(eval(x)) if isinstance(x, str) else x
         )
         return df_parameter_space

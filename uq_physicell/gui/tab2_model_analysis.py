@@ -843,10 +843,10 @@ def load_ma_database(main_window):
             main_window.global_SA_parameters = {}
             main_window.global_SA_parameters["samples"] = dic_input
             for id, param in enumerate(df_parameter_space['ParamName']):
-                main_window.global_SA_parameters[param] = {"lower_bound": df_parameter_space['Lower_Bound'].iloc[id],
-                                                            "upper_bound": df_parameter_space['Upper_Bound'].iloc[id],
-                                                            "ref_value": df_parameter_space['ReferenceValue'].iloc[id], 
-                                                            "perturbation": float(df_parameter_space['Perturbation'].iloc[id])}
+                main_window.global_SA_parameters[param] = {"lower_bound": df_parameter_space['lower_bound'].iloc[id],
+                                                            "upper_bound": df_parameter_space['upper_bound'].iloc[id],
+                                                            "ref_value": df_parameter_space['ref_value'].iloc[id], 
+                                                            "perturbation": float(df_parameter_space['perturbation'].iloc[id])}
             # Update the global parameters
             main_window.update_global_inputs(main_window)
         else: 
