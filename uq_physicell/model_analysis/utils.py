@@ -3,7 +3,7 @@ import pandas as pd
 from typing import Union
 
 # My local modules
-from ..database.ma_db import load_structure
+from ..database.ma_db import load_output, load_samples
 from ..utils.model_wrapper import create_named_function_from_string
 
 def reshape_sa_expanded_data(expanded_data: pd.DataFrame, qoi_columns: list) -> pd.DataFrame:
@@ -57,16 +57,19 @@ def reshape_sa_expanded_data(expanded_data: pd.DataFrame, qoi_columns: list) -> 
     except Exception as e:
         raise ValueError(f"Error reshaping expanded data: {e}")
 
-def calculate_qoi_from_sa_db(db_file: str, qoi_functions: str) -> pd.DataFrame:
+def calculate_qoi_from_sa_db(db_file: str, qoi_functions: str, chunk_size: int = 10) -> pd.DataFrame:
     """Calculate quantities of interest from sensitivity analysis database results.
     
-    This function loads simulation results from a database and applies QoI functions
-    to extract meaningful metrics from the time-series data.
+    This function loads simulation results from a database in chunks and applies QoI 
+    functions to extract meaningful metrics from the time-series data. Processing in 
+    chunks helps avoid excessive memory usage for large databases.
     
     Args:
         db_file (str): Path to the SQLite database containing simulation results.
         qoi_functions (str): Dictionary of QoI functions where keys are QoI names
                            and values are lambda functions or string representations.
+        chunk_size (int, optional): Number of samples to process at a time. Default is 10.
+                                   Adjust based on available memory and data size.
     
     Returns:
         pd.DataFrame: DataFrame with calculated QoI values indexed by SampleID
@@ -77,35 +80,45 @@ def calculate_qoi_from_sa_db(db_file: str, qoi_functions: str) -> pd.DataFrame:
         ...     'final_cells': 'lambda data: data[-1]["cell_count"]',
         ...     'max_growth': 'lambda data: max(d["cell_count"] for d in data)'
         ... }
-        >>> qoi_df = calculate_qoi_from_sa_db('study.db', qoi_funcs)
+        >>> qoi_df = calculate_qoi_from_sa_db('study.db', qoi_funcs, chunk_size=20)
     """
-    # Load the database structure
-    _, _, _, _, df_output = load_structure(db_file)
+
+    # Load sample IDs to determine what to process
+    dic_samples = load_samples(db_file)
+    all_sample_ids = sorted(dic_samples.keys())
+    
     # Recreate QoI functions from their string representations
     recreated_qoi_funcs = {
         qoi_name: create_named_function_from_string(qoi_value, qoi_name)
         for qoi_name, qoi_value in qoi_functions.items()
     }
+    
     df_qois = pd.DataFrame()
-    for SampleID in df_output['SampleID'].unique():
-        df_sample = df_output[df_output['SampleID'] == SampleID]
-        for ReplicateID in df_sample['ReplicateID'].unique():
-            mcds_ts_list = df_sample[df_sample['ReplicateID'] == ReplicateID]['Data'].values[0]
-            # print(f"SampleID: {SampleID}, ReplicateID: {ReplicateID} - mcds_ts_list: {mcds_ts_list}")
-            data = {'SampleID': SampleID, 'ReplicateID': ReplicateID}
-            for id_time, mcds in enumerate(mcds_ts_list):
-                data[f"time_{id_time}"] = mcds.get_time()
-                # cell dataframe
-                df_cell = mcds.get_cell_df()
-                try: 
-                    for qoi_name, qoi_func in recreated_qoi_funcs.items():
-                        # Store the QoI value in the data dictionary
-                        data[f"{qoi_name}_{id_time}"] =  qoi_func(df_cell)
-                except Exception as e:
-                    raise RuntimeError(f"Error calculating QoIs for SampleID: {SampleID}, ReplicateID: {ReplicateID} - QoI: {qoi_name}_{id_time}: {e}")
-            # Store the data in a DataFrame
-            df_qoi_replicate = pd.DataFrame({key: [value] for key, value in data.items()})
-            df_qois = pd.concat([df_qois, df_qoi_replicate], ignore_index=True)
+    # Process samples in chunks to avoid memory issues
+    for i in range(0, len(all_sample_ids), chunk_size):
+        chunk_sample_ids = all_sample_ids[i:i + chunk_size]
+        # Load only this chunk of data
+        df_output = load_output(db_file, sample_ids=chunk_sample_ids, load_data=True)
+        for SampleID in df_output['SampleID'].unique():
+            df_sample = df_output[df_output['SampleID'] == SampleID]
+            for ReplicateID in df_sample['ReplicateID'].unique():
+                mcds_ts_list = df_sample[df_sample['ReplicateID'] == ReplicateID]['Data'].values[0]
+                # print(f"SampleID: {SampleID}, ReplicateID: {ReplicateID} - mcds_ts_list: {mcds_ts_list}")
+                data = {'SampleID': SampleID, 'ReplicateID': ReplicateID}
+                for id_time, mcds in enumerate(mcds_ts_list):
+                    data[f"time_{id_time}"] = mcds.get_time()
+                    # cell dataframe
+                    df_cell = mcds.get_cell_df()
+                    try: 
+                        for qoi_name, qoi_func in recreated_qoi_funcs.items():
+                            # Store the QoI value in the data dictionary
+                            data[f"{qoi_name}_{id_time}"] =  qoi_func(df_cell)
+                    except Exception as e:
+                        raise RuntimeError(f"Error calculating QoIs for SampleID: {SampleID}, ReplicateID: {ReplicateID} - QoI: {qoi_name}_{id_time}: {e}")
+                # Store the data in a DataFrame
+                df_qoi_replicate = pd.DataFrame({key: [value] for key, value in data.items()})
+                df_qois = pd.concat([df_qois, df_qoi_replicate], ignore_index=True)
+    
     df_qois = df_qois.reset_index(drop=True)
     return df_qois
  
@@ -134,7 +147,6 @@ def calculate_qoi_statistics(df_qois_data: pd.DataFrame, qoi_funcs: dict, db_fil
         >>> stats_df = calculate_qoi_statistics(qoi_data, qoi_funcs, 'study.db')
         >>> print(stats_df[['cell_count_mean', 'cell_count_std']])
     """
-    
     # Check if 'Data' column in df_qois_data is a DataFrame - Case of db generated by custom summary function
     if ('Data' in df_qois_data.columns):
         qoi_columns = list(qoi_funcs.keys())
@@ -166,7 +178,7 @@ def calculate_qoi_statistics(df_qois_data: pd.DataFrame, qoi_funcs: dict, db_fil
             except Exception as e:
                 raise ValueError(f"Error calculating QoIs from DataFrame: {e}")
         # Check if 'Data' column in df_qois_data is a series of mcds list - Case of db generated by generic summary function with NO QoI functions
-        elif ('Data' in df_qois_data.columns) and isinstance(df_qois_data['Data'].iloc[0], list):
+        elif isinstance(df_qois_data['Data'].iloc[0], list):
             print("Calculating QoIs from mcds list...")
             try:
                 df_qois = calculate_qoi_from_sa_db(db_file_path, qoi_funcs)
