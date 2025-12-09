@@ -619,7 +619,7 @@ def open_qoi_definition_window(main_window):
     # Predefined QoIs dictionary based on the database structure
     predefined_qoi_funcs = {}
     custom_qoi_option = True
-    if not main_window.df_output.empty:
+    if not main_window.df_output.empty and 'Data' in main_window.df_output.columns:
         if isinstance(main_window.df_output['Data'].iloc[0], pd.DataFrame):
             predefined_qoi_funcs = {qoi_name: None for qoi_name in main_window.df_output['Data'].iloc[0].columns if qoi_name not in ['time'] }
             custom_qoi_option = False
@@ -808,7 +808,7 @@ def load_ma_database(main_window):
         
         # Load the database structure
         main_window.update_output_tab2(main_window, f"Loading database file {main_window.ma_file_path} ...")
-        df_metadata, df_parameter_space, df_qois, dic_input, main_window.df_output = load_structure(main_window.ma_file_path)
+        df_metadata, df_parameter_space, df_qois, dic_input, main_window.df_output = load_structure(main_window.ma_file_path, load_result=False)
         
         # Verify that data was loaded correctly
         if df_metadata.empty:
@@ -845,8 +845,14 @@ def load_ma_database(main_window):
             for id, param in enumerate(df_parameter_space['ParamName']):
                 main_window.global_SA_parameters[param] = {"lower_bound": df_parameter_space['lower_bound'].iloc[id],
                                                             "upper_bound": df_parameter_space['upper_bound'].iloc[id],
-                                                            "ref_value": df_parameter_space['ref_value'].iloc[id], 
-                                                            "perturbation": float(df_parameter_space['perturbation'].iloc[id])}
+                                                            "ref_value": df_parameter_space['ref_value'].iloc[id]}
+                perturbation = df_parameter_space['perturbation'].iloc[id]
+                try:
+                    main_window.global_SA_parameters[param]["perturbation"] = float(perturbation)
+                except Exception as e:
+                    print(f"Warning: Could not convert perturbation ({perturbation}) to float for parameter {param}.")
+                    # Calculate perturbation as percentage based on bounds and ref_value
+                    main_window.global_SA_parameters[param]["perturbation"] = 100.0 * (df_parameter_space['upper_bound'].iloc[id]/df_parameter_space['ref_value'].iloc[id] - 1.0)
             # Update the global parameters
             main_window.update_global_inputs(main_window)
         else: 
@@ -854,18 +860,22 @@ def load_ma_database(main_window):
             main_window.SA_method_combo.clear()
             main_window.SA_method_combo.addItems(samplers_to_method[Sampler])
             main_window.SA_method_combo.setCurrentText(main_window.SA_method_combo.itemText(0))
+            main_window.sampler_combo.clear()
+            main_window.sampler_combo.addItems([Sampler])
             main_window.sampler_combo.setCurrentText(Sampler)
-            # Activate local fields
+            print("Setting local sampler to:", main_window.sampler_combo.itemText(0))
+            # Deactivate local fields
+            main_window.sampler_combo.setEnabled(False)
             main_window.local_param_combo.setEnabled(True)
-            main_window.local_ref_value_input.setEnabled(True)
-            main_window.local_perturb_input.setEnabled(True)
+            main_window.local_ref_value_input.setEnabled(False)
+            main_window.local_perturb_input.setEnabled(False)
             # Populate the local_SA_parameters dictionary with values from the database
             main_window.local_SA_parameters = {}
             main_window.local_SA_parameters["samples"] = dic_input
             for id, param in enumerate(df_parameter_space['ParamName']):
                 if type(df_parameter_space['perturbation'].iloc[id]) == list:
                     df_parameter_space['perturbation'].iloc[id] = [float(x) for x in df_parameter_space['perturbation'].iloc[id]]
-                main_window.local_SA_parameters[param] = {"ref_value": df_parameter_space['ReferenceValue'].iloc[id], 
+                main_window.local_SA_parameters[param] = {"ref_value": df_parameter_space['ref_value'].iloc[id], 
                                                             "perturbation": df_parameter_space['perturbation'].iloc[id]}
             # Update the local parameters
             main_window.update_local_inputs(main_window)
