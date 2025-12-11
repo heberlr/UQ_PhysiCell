@@ -61,6 +61,8 @@ def load_csv_file(main_window):
                 # Predefine column names
                 column_names = ["cell", "signal", "direction", "behavior", "saturation", "half-max", "hill-power", "apply-dead"]
                 main_window.csv_data = pd.read_csv(main_window.rule_path, names=column_names, header=None)
+                # Add 'inactive' column as False by default - All rules in the CSV are active
+                main_window.csv_data['inactive'] = False
                 # print(main_window.csv_data)
                 main_window.update_output_tab1(main_window, f"Loaded CSV file: {main_window.rule_path}")
                 main_window.create_rule_section(main_window)  # Create the rules section

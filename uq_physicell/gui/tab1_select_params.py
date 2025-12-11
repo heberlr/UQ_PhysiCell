@@ -342,7 +342,7 @@ def create_rule_section(main_window):
     main_window.behavior_combo.addItems(main_window.csv_data.iloc[:, 3].unique())
 
     # Populate the fifth combo box with options for parameters
-    main_window.parameter_combo.addItems(["saturation", "half_max", "hill_power", "dead"])
+    main_window.parameter_combo.addItems(["saturation", "half_max", "hill_power", "dead", "inactive"])
 
     # Connect combo boxes to handle selection
     main_window.cell_combo.currentIndexChanged.connect(lambda: main_window.handle_combo_selection_for_rules(main_window))
@@ -466,6 +466,8 @@ def handle_combo_selection_for_rules(main_window):
             value = rule_row.iloc[0, 6]
         elif parameter == "dead":
             value = rule_row.iloc[0, 7]
+        elif parameter == "inactive":
+            value = rule_row.iloc[0, 8]
         else:
             value = "None"
 
@@ -518,6 +520,8 @@ def set_rule_parameter(main_window):
             column_index = 6
         elif parameter == "dead":
             column_index = 7
+        elif parameter == "inactive":
+            column_index = 8
         else:
             main_window.update_output_tab1(main_window, "Error: Invalid parameter selected.")
             return
@@ -563,6 +567,8 @@ def add_rule_to_analysis(main_window):
             old_value = rule_row.iloc[0, 6]
         elif parameter == "dead":
             old_value = rule_row.iloc[0, 7]
+        elif parameter == "inactive":
+            old_value = rule_row.iloc[0, 8]
         else:
             main_window.update_output_tab1(main_window, "Error: Invalid parameter selected.")
             return
@@ -655,6 +661,8 @@ def get_rule_value(main_window, rule_key):
                 return rule_row.iloc[0, 6]
             elif parameter == "dead":
                 return rule_row.iloc[0, 7]
+            elif parameter == "inactive":
+                return rule_row.iloc[0, 8]
         else:
             main_window.update_output_tab1(main_window, f"Warning: No matching rule found for key '{rule_key}' in the CSV.")
     except Exception as e:
