@@ -76,7 +76,7 @@ class PhysiCell_Model:
         self.outputs_folder_name = configFile[keyModel].get('outputs_folder_name', fallback="output_S%06d_R%03d/") # structure of output folders
         self.timeout = configFile[keyModel].get('timeout', fallback=60) # timeout for waiting to write files
         self.generate_summary_File = configFile[keyModel].get('generate_summary_file', fallback=False) # generate csv file
-        self.output_summary_Path = self.output_folder+'SummaryFile_%06d_%02d.csv'
+        self.output_summary_Path = self.output_folder+'SummaryFile_%06d_%02d.csv' # path of the summary file
         # Rules files and folder
         self.RULES_RefPath = configFile[keyModel].get('rulesFile_ref', fallback=None)
         self.RULES_name = configFile[keyModel].get('rulesFile_name', fallback="rules_S%06d_R%03d.csv")
@@ -373,10 +373,11 @@ def _setup_model_input(model: PhysiCell_Model, SampleID: int, ReplicateID: int, 
         print(f"\t\t\t>>> Setting up XML input...")
     dic_xml_parameters['.//save/folder'] = model._get_output_path(SampleID, ReplicateID)
     dic_xml_parameters['./parallel/omp_num_threads'] = model.omp_num_threads
-    try:
+    
+    # If not defined in .ini file, set initial condition folder to the folder of the reference XML file
+    if (_get_xml_element_value(model.xml_ref_root, './/initial_conditions/cell_positions[@enabled]') == "true") and ('.//initial_conditions/cell_positions/folder' not in list(model.XML_parameters.keys())):
         dic_xml_parameters['.//initial_conditions/cell_positions/folder'] = os.path.dirname(model.XML_RefPath)
-    except ValueError:
-        pass
+    
     try:
         _get_xml_element_value(model.xml_ref_root, './/options/random_seed')
         dic_xml_parameters['.//options/random_seed'] = "system_clock"
@@ -712,15 +713,16 @@ def compile_physicell(pc_path, model_path, executable_path=None, force_compile=F
         executable_path (str, optional): Path to store the compiled executable. If None, uses model_path.
         force_compile (bool): If True, forces recompilation even if executable exists
     """
-    executable2move = None
-    if executable_path is None:
-        # Get executable name from Makefile before compilation
-        executable2move = get_executable_name_from_makefile(model_path)
-        executable_path = os.path.join(model_path, executable2move)
-
     if not force_compile and os.path.exists(executable_path):
         print(f"Executable already exists in {executable_path}. Skipping compilation.")
         return
+    
+    executable2move = None
+    # If executable_path is not provided or is executable path is equal to model_path, move it to model_path
+    if executable_path is None or pathlib.Path(executable_path).parent == pathlib.Path(model_path):
+        # Get executable name from Makefile before compilation
+        executable2move = get_executable_name_from_makefile(model_path)
+        executable_path = os.path.join(model_path, executable2move)
 
     print(f"Compiling PhysiCell model: {executable_path}...")
     # Check if pc_path exists
