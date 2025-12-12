@@ -806,6 +806,7 @@ def save_ini_file(main_window):
     # Save the parameters to a .ini file
     options = QFileDialog.Options()
     file_path, _ = QFileDialog.getSaveFileName(main_window, "Save .ini File", "", "INI Files (*.ini);;All Files (*)", options=options)
+    file_path = os.path.relpath(file_path, os.getcwd())  # Convert to relative path
     if file_path:
         try:
             config = configparser.ConfigParser()
@@ -825,8 +826,8 @@ def save_ini_file(main_window):
 
             # Add the new section
             config[struc_name] = {
-                "executable": executable_path,
-                "configFile_ref": main_window.xml_file_path,
+                "executable":  os.path.relpath(executable_path, os.getcwd()),
+                "configFile_ref": os.path.relpath(main_window.xml_file_path, os.getcwd()),
                 "numReplicates": num_replicates
             }
 
@@ -838,7 +839,7 @@ def save_ini_file(main_window):
 
             # Add rules if applicable
             if (main_window.fixed_rules_parameters or main_window.analysis_rules_parameters):
-                config[struc_name]["rulesFile_ref"] = main_window.rule_path
+                config[struc_name]["rulesFile_ref"] = os.path.relpath(main_window.rule_path, os.getcwd())
                 rules_parameters = {key: value for key, value in main_window.fixed_rules_parameters.items()}
                 rules_parameters.update({key: value for key, value in main_window.analysis_rules_parameters.items()})
                 config[struc_name]["parameters_rules"] = str(rules_parameters)
