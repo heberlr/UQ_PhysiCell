@@ -154,6 +154,8 @@ def calculate_qoi_statistics(df_qois_data: pd.DataFrame, qoi_funcs: dict, db_fil
             raise ValueError("Error: No QoI functions defined.")
         if isinstance(df_qois_data['Data'].iloc[0], pd.DataFrame):
             print("Calculating QoIs from DataFrame...")
+            # Load the full output data to extract time column and reshape
+            df_qois_data = load_output(db_file_path, load_data=True)
             try:
                 # Extract the consistent 'time' column from the first DataFrame
                 time_column = df_qois_data['Data'].iloc[0]['time'].values
