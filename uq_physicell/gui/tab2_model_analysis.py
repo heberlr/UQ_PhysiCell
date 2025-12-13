@@ -912,8 +912,8 @@ def load_ma_database(main_window):
             main_window.update_output_tab2(main_window, "No samples found in database. You may need to run parameter sampling.")
 
         # Load QoIs from database if available
-        if not df_qois.empty and 'QoI_Name' in df_qois.columns and 'QoI_Function' in df_qois.columns:
-            main_window.qoi_funcs = {row['QoI_Name']: row['QoI_Function'] for _, row in df_qois.iterrows() if row['QoI_Name'] is not None}
+        if not df_qois.empty and 'QOI_Name' in df_qois.columns and 'QOI_Function' in df_qois.columns:
+            main_window.qoi_funcs = {row['QOI_Name']: row['QOI_Function'] for _, row in df_qois.iterrows() if row['QOI_Name'] is not None}
             if main_window.qoi_funcs:
                 main_window.current_qoi_label.setText("Current QoI(s): " + ", ".join(main_window.qoi_funcs.keys()))
             else:
@@ -982,20 +982,20 @@ def update_sampling_type(main_window):
             string_value = main_window.get_parameter_value_xml(main_window, key)
             try: # Try to convert to float
                 ref_value = float(string_value) 
-                main_window.local_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": [1, 10, 20]}
+                main_window.local_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": [1, 10, 20], "type": "float"}
             except ValueError: # If conversion fails, assign boolean values
                 ref_value = 0.0 if string_value.lower() == 'false' else 1.0
-                main_window.local_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": [100]}
+                main_window.local_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": [100], "type": "bool"}
 
         for key, value in main_window.analysis_rules_parameters.items():
             # Get the default rule value - string
             string_value = main_window.get_rule_value(main_window, key)
             try: # Try to convert to float
                 ref_value = float(string_value)
-                main_window.local_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": [1, 10, 20]}
+                main_window.local_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": [1, 10, 20], "type": "float"}
             except ValueError: # # If conversion fails, assign boolean values
                 ref_value = 0.0 if string_value.lower() == 'false' else 1.0
-                main_window.local_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": [100]}
+                main_window.local_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": [100], "type": "bool"}
 
         # Add friendly names to the combo box
         main_window.local_param_combo.addItems(list(main_window.local_SA_parameters.keys()))
@@ -1051,10 +1051,10 @@ def update_sampling_type(main_window):
             try: # Try to convert to float
                 ref_value = float(string_value)
                 # print(f"Update Analysis type - {key}: {ref_value}")
-                main_window.global_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": 20.0, "lower_bound": ref_value * 0.8, "upper_bound": ref_value * 1.2}
+                main_window.global_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": 20.0, "lower_bound": ref_value * 0.8, "upper_bound": ref_value * 1.2, "type": "float"}
             except ValueError: # If conversion fails, assign boolean values
                 ref_value = 0.0 if string_value.lower() == 'false' else 1.0
-                main_window.global_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": 100.0, "lower_bound": 0.0, "upper_bound": 1.0}
+                main_window.global_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": 100.0, "lower_bound": 0.0, "upper_bound": 1.0, "type": "bool"}
 
         for key, value in main_window.analysis_rules_parameters.items():
             # Get the default rule value
@@ -1062,10 +1062,10 @@ def update_sampling_type(main_window):
             try: # Try to convert to float
                 ref_value = float(string_value)
                 # print(f"Update Analysis type - {key}: {ref_value}")
-                main_window.global_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": 20.0, "lower_bound": ref_value * 0.8, "upper_bound": ref_value * 1.2}
+                main_window.global_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": 20.0, "lower_bound": ref_value * 0.8, "upper_bound": ref_value * 1.2, "type": "float"}
             except ValueError: # If conversion fails, assign boolean values
                 ref_value = 0.0 if string_value.lower() == 'false' else 1.0
-                main_window.global_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": 100.0, "lower_bound": 0.0, "upper_bound": 1.0}
+                main_window.global_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": 100.0, "lower_bound": 0.0, "upper_bound": 1.0, "type": "bool"}
 
         # Add friendly names to the combo box
         main_window.global_param_combo.addItems(list(main_window.global_SA_parameters.keys()))
@@ -1156,12 +1156,30 @@ def update_global_SA_range_percentage(main_window):
         except ValueError:
             main_window.update_output_tab2(main_window, "Error: Invalid range percentage.")
 
+def check_bounds(dic_parameters):
+    # Check that all lower bounds are less than upper bounds
+    for param, values in dic_parameters.items():
+        if param == "samples":
+            continue
+        if values["lower_bound"] >= values["upper_bound"]:
+            raise ValueError(f"Lower bound {values['lower_bound']} is not less than upper bound {values['upper_bound']} for parameter {param}.")
+    return True
+
+def check_ref_values(dic_parameters):
+    # Check that all reference values are within bounds
+    for param, values in dic_parameters.items():
+        if param == "samples":
+            continue
+        if values["ref_value"] == 0 and values["type"] == "float": # Prevent zero reference values for float parameters
+            raise ValueError(f"Reference value for parameter {param} cannot be zero.")
+    return True
+
 def sample_parameters(main_window):
     # Sample parameters based on the selected SA
     if main_window.sampling_type_dropdown.currentText() == "Local":
         # Check the validator for the reference value and perturbation inputs
-        if not main_window.local_ref_value_input.hasAcceptableInput():
-            QMessageBox.warning(main_window, "Invalid Input", "Reference value must be a non-zero number.")
+        if check_ref_values(main_window.local_SA_parameters) == False:
+            QMessageBox.warning(main_window, "Invalid Input", "Reference value must be a non-zero number for float parameters.")
             return
         main_window.update_output_tab2(main_window, f"Sampling parameters using One-At-A-Time approach...")
         # Check if samples already exist, if so, delete them
@@ -1174,9 +1192,9 @@ def sample_parameters(main_window):
             main_window.update_output_tab2(main_window, f"Error in local sampler: {e}")
             return
     elif main_window.sampling_type_dropdown.currentText() == "Global":
-        # Check the validator for the reference value and range percentage inputs
-        if not main_window.global_ref_value_input.hasAcceptableInput():
-            QMessageBox.warning(main_window, "Invalid Input", "Reference value must be a non-zero number.")
+        # Check the validator for the parameter bounds inputs
+        if check_bounds(main_window.global_SA_parameters) == False:
+            QMessageBox.warning(main_window, "Invalid Input", "Check that all lower bounds are less than upper bounds.")
             return
         sampler = main_window.sampler_combo.currentText()
         main_window.update_output_tab2(main_window, f"Sampling parameters using {sampler}...")
@@ -1237,9 +1255,13 @@ def plot_samples(main_window):
             # print(main_window.local_SA_parameters)
             perturbations_df = pd.DataFrame(main_window.local_SA_parameters["samples"]).T
             for col in perturbations_df.columns:
-                perturbations_df[col] = 100.0 * (
-                    perturbations_df[col] - main_window.local_SA_parameters[col]["ref_value"]
-                ) / main_window.local_SA_parameters[col]["ref_value"]
+                if 'type' in main_window.local_SA_parameters[col] and main_window.local_SA_parameters[col]["type"] == "bool":
+                    # For boolean parameters, map 0/1 to 0%/+100%
+                    perturbations_df[col] = perturbations_df[col] * 100.0
+                else:
+                    perturbations_df[col] = 100.0 * (
+                        perturbations_df[col] - main_window.local_SA_parameters[col]["ref_value"]
+                    ) / main_window.local_SA_parameters[col]["ref_value"]
             perturbations_df = perturbations_df.reset_index().melt(
                 id_vars="index", var_name="Parameter", value_name="perturbation"
             )
