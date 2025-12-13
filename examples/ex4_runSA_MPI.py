@@ -45,6 +45,7 @@ if __name__ == "__main__":
             "cycle_duration_stem_cell": {"lower_bound": 1152.0, "upper_bound": 1728.0, "ref_value":1440.0 },
             "asym_div_to_prog_1_sat": {"lower_bound": 0.0, "upper_bound": 1.0, "ref_value": 0.0}
         }
+        qoi_funcs = {'frac_proj1_cells':None, 'frac_proj2_cells':None, 'run_time_sec':None}
         # Define the name of sampler
         sampler = "Sobol"
 
@@ -55,7 +56,7 @@ if __name__ == "__main__":
         model = PhysiCell_Model(model_config['ini_path'], model_config['struc_name'])
         
         # Setup the context and number of workers to run simulations in MPI (inter-node parallel)
-        context = ModelAnalysisContext(db_path, model_config, sampler, params_info, qois_info={}, num_workers=size, parallel_method="inter-node") 
+        context = ModelAnalysisContext(db_path, model_config, sampler, params_info, qois_info=qoi_funcs, num_workers=size, parallel_method="inter-node") 
         # Assign custom summary function in ModelAnalysisContext
         context.summary_function = summ_func_FinalFraction
         # Generate the samples using the specified sampler
