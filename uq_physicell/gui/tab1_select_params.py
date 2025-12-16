@@ -204,7 +204,7 @@ def create_tab1(main_window):
     main_window.executable_path_input.setPlaceholderText("Enter executable path")
     main_window.executable_path_browse_button = QPushButton("Select")
     main_window.executable_path_browse_button.setStyleSheet("background-color: lightgreen; color: black")
-    main_window.executable_path_browse_button.clicked.connect(lambda: main_window.executable_path_input.setText(QFileDialog.getOpenFileName(main_window, "Select Executable", "", "Executable Files (*)")[0]))
+    main_window.executable_path_browse_button.clicked.connect(lambda: main_window.executable_path_input.setText( os.path.relpath(QFileDialog.getOpenFileName(main_window, "Select Executable", "", "Executable Files (*)")[0], os.getcwd()) ))
     main_window.executable_path_input.setPlaceholderText("Enter executable path")
     main_window.save_hbox.addWidget(main_window.executable_path_input)
     main_window.save_hbox.addWidget(main_window.executable_path_browse_button)
@@ -826,7 +826,7 @@ def save_ini_file(main_window):
 
             # Add the new section
             config[struc_name] = {
-                "executable":  os.path.relpath(executable_path, os.getcwd()),
+                "executable":  "./" + os.path.relpath(executable_path, os.getcwd()), # Ensure executable path is relative and prefixed with ./
                 "configFile_ref": os.path.relpath(main_window.xml_file_path, os.getcwd()),
                 "numReplicates": num_replicates
             }
