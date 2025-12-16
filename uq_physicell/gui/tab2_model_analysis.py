@@ -1009,9 +1009,9 @@ def update_sampling_type(main_window):
     elif main_window.sampling_type_dropdown.currentText() == "Global":
         # Update the sensitivity analysis method combo box
         main_window.SA_method_combo.clear()
-        main_window.SA_method_combo.addItems(["FAST - Fourier Amplitude Sensitivity Test",
+        main_window.SA_method_combo.addItems(["Sobol Sensitivity Analysis",
+            "FAST - Fourier Amplitude Sensitivity Test",
             "RBD-FAST - Random Balance Designs Fourier Amplitude Sensitivity Test",
-            "Sobol Sensitivity Analysis",
             "Delta Moment-Independent Measure",
             "Derivative-based Global Sensitivity Measure (DGSM)",
             "Fractional Factorial",
@@ -1712,6 +1712,10 @@ def run_analysis(main_window):
     main_window.update_output_tab2(main_window, "Sensitivity analysis completed.")
 
 def plot_sa_results(main_window):
+    if hasattr(main_window, 'sa_results') == False or not main_window.sa_results or hasattr(main_window, 'qoi_time_values') == False or not main_window.qoi_time_values:
+        main_window.update_output_tab2(main_window, "Error: No sensitivity analysis results found. Please run the analysis first.")
+        QMessageBox.warning(main_window, "No SA Results", "Please run sensitivity analysis before plotting results.")
+        return
     # Plot the results
     main_window.update_output_tab2(main_window, f"Plotting results for {main_window.SA_method_combo.currentText()}")
     # Create a new dialog window for the plot
