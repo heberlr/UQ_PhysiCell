@@ -67,7 +67,12 @@ def create_tab1(main_window):
     layout_tab1.addWidget(main_window.parameter_selection_label)
 
     # Horizontal layout for combo box
-    main_window.combo_hbox = QHBoxLayout()
+    main_window.combo_scroll = QScrollArea()
+    main_window.combo_scroll.setWidgetResizable(True)
+    main_window.combo_scroll_widget = QWidget()
+    main_window.combo_hbox = QHBoxLayout(main_window.combo_scroll_widget)
+    main_window.combo_scroll.setWidget(main_window.combo_scroll_widget)
+    layout_tab1.addWidget(main_window.combo_scroll)
     main_window.combo_hbox.setAlignment(Qt.AlignLeft)
     main_window.combo_label = QLabel("Select Parameter:")
     main_window.combo_hbox.addWidget(main_window.combo_label)
@@ -76,7 +81,6 @@ def create_tab1(main_window):
     main_window.combo_box.setEnabled(False)
     main_window.combo_hbox.addWidget(main_window.combo_box)
     main_window.combo_hbox.addStretch()
-    layout_tab1.addLayout(main_window.combo_hbox)
     
     # Create a group box for parameter details
     main_window.param_details_groupbox = QGroupBox("Parameter Details")
@@ -166,13 +170,6 @@ def create_tab1(main_window):
     header.setStyleSheet("QHeaderView::section { background-color: lightgray; color: black; font-weight: bold; }")
     layout_tab1.addWidget(main_window.preview_table)
 
-    # main_window.ini_preview_scroll = QVBoxLayout()
-    # main_window.ini_preview_text = QTextEdit()
-    # main_window.ini_preview_text.setReadOnly(True)
-    # main_window.ini_preview_text.setMinimumHeight(150)
-    # main_window.ini_preview_scroll.addWidget(main_window.ini_preview_text)
-    # layout_tab1.addLayout(main_window.ini_preview_scroll)
-
     # Separator line
     layout_tab1.addWidget(QLabel("<hr>"))
 
@@ -204,7 +201,7 @@ def create_tab1(main_window):
     main_window.executable_path_input.setPlaceholderText("Enter executable path")
     main_window.executable_path_browse_button = QPushButton("Select")
     main_window.executable_path_browse_button.setStyleSheet("background-color: lightgreen; color: black")
-    main_window.executable_path_browse_button.clicked.connect(lambda: main_window.executable_path_input.setText(QFileDialog.getOpenFileName(main_window, "Select Executable", "", "Executable Files (*)")[0]))
+    main_window.executable_path_browse_button.clicked.connect(lambda: main_window.executable_path_input.setText( os.path.relpath(QFileDialog.getOpenFileName(main_window, "Select Executable", "", "Executable Files (*)")[0], os.getcwd()) ))
     main_window.executable_path_input.setPlaceholderText("Enter executable path")
     main_window.save_hbox.addWidget(main_window.executable_path_input)
     main_window.save_hbox.addWidget(main_window.executable_path_browse_button)
@@ -342,7 +339,7 @@ def create_rule_section(main_window):
     main_window.behavior_combo.addItems(main_window.csv_data.iloc[:, 3].unique())
 
     # Populate the fifth combo box with options for parameters
-    main_window.parameter_combo.addItems(["saturation", "half_max", "hill_power", "dead"])
+    main_window.parameter_combo.addItems(["saturation", "half_max", "hill_power", "dead", "inactive"])
 
     # Connect combo boxes to handle selection
     main_window.cell_combo.currentIndexChanged.connect(lambda: main_window.handle_combo_selection_for_rules(main_window))
@@ -466,6 +463,8 @@ def handle_combo_selection_for_rules(main_window):
             value = rule_row.iloc[0, 6]
         elif parameter == "dead":
             value = rule_row.iloc[0, 7]
+        elif parameter == "inactive":
+            value = rule_row.iloc[0, 8]
         else:
             value = "None"
 
@@ -518,6 +517,8 @@ def set_rule_parameter(main_window):
             column_index = 6
         elif parameter == "dead":
             column_index = 7
+        elif parameter == "inactive":
+            column_index = 8
         else:
             main_window.update_output_tab1(main_window, "Error: Invalid parameter selected.")
             return
@@ -563,6 +564,8 @@ def add_rule_to_analysis(main_window):
             old_value = rule_row.iloc[0, 6]
         elif parameter == "dead":
             old_value = rule_row.iloc[0, 7]
+        elif parameter == "inactive":
+            old_value = rule_row.iloc[0, 8]
         else:
             main_window.update_output_tab1(main_window, "Error: Invalid parameter selected.")
             return
@@ -655,6 +658,8 @@ def get_rule_value(main_window, rule_key):
                 return rule_row.iloc[0, 6]
             elif parameter == "dead":
                 return rule_row.iloc[0, 7]
+            elif parameter == "inactive":
+                return rule_row.iloc[0, 8]
         else:
             main_window.update_output_tab1(main_window, f"Warning: No matching rule found for key '{rule_key}' in the CSV.")
     except Exception as e:
@@ -798,6 +803,7 @@ def save_ini_file(main_window):
     # Save the parameters to a .ini file
     options = QFileDialog.Options()
     file_path, _ = QFileDialog.getSaveFileName(main_window, "Save .ini File", "", "INI Files (*.ini);;All Files (*)", options=options)
+    file_path = os.path.relpath(file_path, os.getcwd())  # Convert to relative path
     if file_path:
         try:
             config = configparser.ConfigParser()
@@ -817,8 +823,8 @@ def save_ini_file(main_window):
 
             # Add the new section
             config[struc_name] = {
-                "executable": executable_path,
-                "configFile_ref": main_window.xml_file_path,
+                "executable":  "./" + os.path.relpath(executable_path, os.getcwd()), # Ensure executable path is relative and prefixed with ./
+                "configFile_ref": os.path.relpath(main_window.xml_file_path, os.getcwd()),
                 "numReplicates": num_replicates
             }
 
@@ -830,7 +836,7 @@ def save_ini_file(main_window):
 
             # Add rules if applicable
             if (main_window.fixed_rules_parameters or main_window.analysis_rules_parameters):
-                config[struc_name]["rulesFile_ref"] = main_window.rule_path
+                config[struc_name]["rulesFile_ref"] = os.path.relpath(main_window.rule_path, os.getcwd())
                 rules_parameters = {key: value for key, value in main_window.fixed_rules_parameters.items()}
                 rules_parameters.update({key: value for key, value in main_window.analysis_rules_parameters.items()})
                 config[struc_name]["parameters_rules"] = str(rules_parameters)

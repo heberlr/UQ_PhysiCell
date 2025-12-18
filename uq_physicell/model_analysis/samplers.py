@@ -118,11 +118,20 @@ def run_local_sampler(params_dict: dict, sampler: str = 'OAT') -> dict:
     local_samples_dict = {0: params_ref}
     for id, par in enumerate(params_dict.keys()):
         perturbations = np.array(params_dict[par]["perturbation"])
-        perturbations = np.concatenate((-perturbations, perturbations))  # Combine negative and positive perturbations
-        for idx, var in enumerate(perturbations):
-            sample_id = id * len(perturbations) + idx + 1  # Unique sample ID for each perturbation
-            if sample_id not in local_samples_dict: # Avoid overwriting existing samples
+        if params_dict[par].get("type") == "bool":
+            sample_id = len(local_samples_dict)
+            local_samples_dict[sample_id] = params_ref.copy()  # Start with reference values
+            # Apply perturbation to the specific parameter                
+            local_samples_dict[sample_id][par] = 1 - params_ref[par]
+            # print(sample_id, par, perturbations, local_samples_dict[sample_id][par])
+            continue
+        else: # Combine negative and positive perturbations
+            perturbations = np.concatenate((-perturbations, perturbations))  
+            for idx, var in enumerate(perturbations):
+                sample_id = len(local_samples_dict)  # Unique sample ID for each perturbation
                 local_samples_dict[sample_id] = params_ref.copy()  # Start with reference values
-            local_samples_dict[sample_id][par] = params_ref[par] * (1 + var / 100.0)
+                # Apply perturbation to the specific parameter                
+                local_samples_dict[sample_id][par] = params_ref[par] * (1 + var / 100.0)
+                # print(sample_id, par, perturbations, local_samples_dict[sample_id][par])
 
     return local_samples_dict

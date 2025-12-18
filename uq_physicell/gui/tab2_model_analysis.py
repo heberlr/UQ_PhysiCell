@@ -619,7 +619,7 @@ def open_qoi_definition_window(main_window):
     # Predefined QoIs dictionary based on the database structure
     predefined_qoi_funcs = {}
     custom_qoi_option = True
-    if not main_window.df_output.empty:
+    if not main_window.df_output.empty and 'Data' in main_window.df_output.columns:
         if isinstance(main_window.df_output['Data'].iloc[0], pd.DataFrame):
             predefined_qoi_funcs = {qoi_name: None for qoi_name in main_window.df_output['Data'].iloc[0].columns if qoi_name not in ['time'] }
             custom_qoi_option = False
@@ -628,12 +628,17 @@ def open_qoi_definition_window(main_window):
             'total_cells': "lambda df: len(df)",
             'live_cells': "lambda df: len(df[df['dead'] == False])",
             'dead_cells': "lambda df: len(df[df['dead'] == True])",
+            'mean_radial_distance': "lambda df: df[['position_x', 'position_y', 'position_z']].apply(lambda row: ((row['position_x']**2 + row['position_y']**2 + row['position_z']**2)**0.5), axis=1).mean()",
             'max_volume': "lambda df: df['total_volume'].max()",
             'min_volume': "lambda df: df['total_volume'].min()",
             'mean_volume': "lambda df: df['total_volume'].mean()",
             'std_volume': "lambda df: df['total_volume'].std()",
             'total_volume': "lambda df: df['total_volume'].sum()",
-            'template_cellType_live': "lambda df: len( df[ (df['dead'] == False) & (df['cell_type'] == <cellType>) ])",
+            'run_time': "lambda mcds: mcds.get_runtime()", # no argument needed
+            'template_cellType_live': "lambda df: len( df[ (df['dead'] == False) & (df['cell_type'] == <cellType>) ])\n # Replace <cellType> with the desired cell type name",
+            'template_meanSubstrate': "lambda df_subs: df_subs[ <substrateName>].mean() \n # Replace <substrateName> with the desired substrate name",
+            'template_stdSubstrate': "lambda df_subs: df_subs[ <substrateName>].std() \n # Replace <substrateName> with the desired substrate name",
+            'template_cellType_meanRadialDistance': "lambda df: df[ df['cell_type'] == <cellType> ][['position_x', 'position_y', 'position_z']].apply(lambda row: ((row['position_x']**2 + row['position_y']**2 + row['position_z']**2)**0.5), axis=1).mean() \n # Replace <cellType> with the desired cell type name",
             # 'Persistent homology - Vectorisation (muspan - topological data analysis)': "lambda df: compute_persistent_homology(df)",
         }
 
@@ -808,7 +813,7 @@ def load_ma_database(main_window):
         
         # Load the database structure
         main_window.update_output_tab2(main_window, f"Loading database file {main_window.ma_file_path} ...")
-        df_metadata, df_parameter_space, df_qois, dic_input, main_window.df_output = load_structure(main_window.ma_file_path)
+        df_metadata, df_parameter_space, df_qois, dic_input, main_window.df_output = load_structure(main_window.ma_file_path, load_result=False)
         
         # Verify that data was loaded correctly
         if df_metadata.empty:
@@ -845,8 +850,14 @@ def load_ma_database(main_window):
             for id, param in enumerate(df_parameter_space['ParamName']):
                 main_window.global_SA_parameters[param] = {"lower_bound": df_parameter_space['lower_bound'].iloc[id],
                                                             "upper_bound": df_parameter_space['upper_bound'].iloc[id],
-                                                            "ref_value": df_parameter_space['ref_value'].iloc[id], 
-                                                            "perturbation": float(df_parameter_space['perturbation'].iloc[id])}
+                                                            "ref_value": df_parameter_space['ref_value'].iloc[id]}
+                perturbation = df_parameter_space['perturbation'].iloc[id]
+                try:
+                    main_window.global_SA_parameters[param]["perturbation"] = float(perturbation)
+                except Exception as e:
+                    print(f"Warning: Could not convert perturbation ({perturbation}) to float for parameter {param}.")
+                    # Calculate perturbation as percentage based on bounds and ref_value
+                    main_window.global_SA_parameters[param]["perturbation"] = 100.0 * (df_parameter_space['upper_bound'].iloc[id]/df_parameter_space['ref_value'].iloc[id] - 1.0)
             # Update the global parameters
             main_window.update_global_inputs(main_window)
         else: 
@@ -854,18 +865,22 @@ def load_ma_database(main_window):
             main_window.SA_method_combo.clear()
             main_window.SA_method_combo.addItems(samplers_to_method[Sampler])
             main_window.SA_method_combo.setCurrentText(main_window.SA_method_combo.itemText(0))
+            main_window.sampler_combo.clear()
+            main_window.sampler_combo.addItems([Sampler])
             main_window.sampler_combo.setCurrentText(Sampler)
-            # Activate local fields
+            print("Setting local sampler to:", main_window.sampler_combo.itemText(0))
+            # Deactivate local fields
+            main_window.sampler_combo.setEnabled(False)
             main_window.local_param_combo.setEnabled(True)
-            main_window.local_ref_value_input.setEnabled(True)
-            main_window.local_perturb_input.setEnabled(True)
+            main_window.local_ref_value_input.setEnabled(False)
+            main_window.local_perturb_input.setEnabled(False)
             # Populate the local_SA_parameters dictionary with values from the database
             main_window.local_SA_parameters = {}
             main_window.local_SA_parameters["samples"] = dic_input
             for id, param in enumerate(df_parameter_space['ParamName']):
                 if type(df_parameter_space['perturbation'].iloc[id]) == list:
                     df_parameter_space['perturbation'].iloc[id] = [float(x) for x in df_parameter_space['perturbation'].iloc[id]]
-                main_window.local_SA_parameters[param] = {"ref_value": df_parameter_space['ReferenceValue'].iloc[id], 
+                main_window.local_SA_parameters[param] = {"ref_value": df_parameter_space['ref_value'].iloc[id], 
                                                             "perturbation": df_parameter_space['perturbation'].iloc[id]}
             # Update the local parameters
             main_window.update_local_inputs(main_window)
@@ -902,8 +917,8 @@ def load_ma_database(main_window):
             main_window.update_output_tab2(main_window, "No samples found in database. You may need to run parameter sampling.")
 
         # Load QoIs from database if available
-        if not df_qois.empty and 'QoI_Name' in df_qois.columns and 'QoI_Function' in df_qois.columns:
-            main_window.qoi_funcs = {row['QoI_Name']: row['QoI_Function'] for _, row in df_qois.iterrows() if row['QoI_Name'] is not None}
+        if not df_qois.empty and 'QOI_Name' in df_qois.columns and 'QOI_Function' in df_qois.columns:
+            main_window.qoi_funcs = {row['QOI_Name']: row['QOI_Function'] for _, row in df_qois.iterrows() if row['QOI_Name'] is not None}
             if main_window.qoi_funcs:
                 main_window.current_qoi_label.setText("Current QoI(s): " + ", ".join(main_window.qoi_funcs.keys()))
             else:
@@ -972,20 +987,20 @@ def update_sampling_type(main_window):
             string_value = main_window.get_parameter_value_xml(main_window, key)
             try: # Try to convert to float
                 ref_value = float(string_value) 
-                main_window.local_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": [1, 10, 20]}
+                main_window.local_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": [1, 10, 20], "type": "float"}
             except ValueError: # If conversion fails, assign boolean values
                 ref_value = 0.0 if string_value.lower() == 'false' else 1.0
-                main_window.local_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": [100]}
+                main_window.local_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": [100], "type": "bool"}
 
         for key, value in main_window.analysis_rules_parameters.items():
             # Get the default rule value - string
             string_value = main_window.get_rule_value(main_window, key)
             try: # Try to convert to float
                 ref_value = float(string_value)
-                main_window.local_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": [1, 10, 20]}
+                main_window.local_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": [1, 10, 20], "type": "float"}
             except ValueError: # # If conversion fails, assign boolean values
                 ref_value = 0.0 if string_value.lower() == 'false' else 1.0
-                main_window.local_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": [100]}
+                main_window.local_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": [100], "type": "bool"}
 
         # Add friendly names to the combo box
         main_window.local_param_combo.addItems(list(main_window.local_SA_parameters.keys()))
@@ -999,9 +1014,9 @@ def update_sampling_type(main_window):
     elif main_window.sampling_type_dropdown.currentText() == "Global":
         # Update the sensitivity analysis method combo box
         main_window.SA_method_combo.clear()
-        main_window.SA_method_combo.addItems(["FAST - Fourier Amplitude Sensitivity Test",
+        main_window.SA_method_combo.addItems(["Sobol Sensitivity Analysis",
+            "FAST - Fourier Amplitude Sensitivity Test",
             "RBD-FAST - Random Balance Designs Fourier Amplitude Sensitivity Test",
-            "Sobol Sensitivity Analysis",
             "Delta Moment-Independent Measure",
             "Derivative-based Global Sensitivity Measure (DGSM)",
             "Fractional Factorial",
@@ -1041,10 +1056,10 @@ def update_sampling_type(main_window):
             try: # Try to convert to float
                 ref_value = float(string_value)
                 # print(f"Update Analysis type - {key}: {ref_value}")
-                main_window.global_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": 20.0, "lower_bound": ref_value * 0.8, "upper_bound": ref_value * 1.2}
+                main_window.global_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": 20.0, "lower_bound": ref_value * 0.8, "upper_bound": ref_value * 1.2, "type": "float"}
             except ValueError: # If conversion fails, assign boolean values
                 ref_value = 0.0 if string_value.lower() == 'false' else 1.0
-                main_window.global_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": 100.0, "lower_bound": 0.0, "upper_bound": 1.0}
+                main_window.global_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": 100.0, "lower_bound": 0.0, "upper_bound": 1.0, "type": "bool"}
 
         for key, value in main_window.analysis_rules_parameters.items():
             # Get the default rule value
@@ -1052,10 +1067,10 @@ def update_sampling_type(main_window):
             try: # Try to convert to float
                 ref_value = float(string_value)
                 # print(f"Update Analysis type - {key}: {ref_value}")
-                main_window.global_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": 20.0, "lower_bound": ref_value * 0.8, "upper_bound": ref_value * 1.2}
+                main_window.global_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": 20.0, "lower_bound": ref_value * 0.8, "upper_bound": ref_value * 1.2, "type": "float"}
             except ValueError: # If conversion fails, assign boolean values
                 ref_value = 0.0 if string_value.lower() == 'false' else 1.0
-                main_window.global_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": 100.0, "lower_bound": 0.0, "upper_bound": 1.0}
+                main_window.global_SA_parameters[value[1]] = {"ref_value": ref_value, "perturbation": 100.0, "lower_bound": 0.0, "upper_bound": 1.0, "type": "bool"}
 
         # Add friendly names to the combo box
         main_window.global_param_combo.addItems(list(main_window.global_SA_parameters.keys()))
@@ -1146,12 +1161,30 @@ def update_global_SA_range_percentage(main_window):
         except ValueError:
             main_window.update_output_tab2(main_window, "Error: Invalid range percentage.")
 
+def check_bounds(dic_parameters):
+    # Check that all lower bounds are less than upper bounds
+    for param, values in dic_parameters.items():
+        if param == "samples":
+            continue
+        if values["lower_bound"] >= values["upper_bound"]:
+            raise ValueError(f"Lower bound {values['lower_bound']} is not less than upper bound {values['upper_bound']} for parameter {param}.")
+    return True
+
+def check_ref_values(dic_parameters):
+    # Check that all reference values are within bounds
+    for param, values in dic_parameters.items():
+        if param == "samples":
+            continue
+        if values["ref_value"] == 0 and values["type"] == "float": # Prevent zero reference values for float parameters
+            raise ValueError(f"Reference value for parameter {param} cannot be zero.")
+    return True
+
 def sample_parameters(main_window):
     # Sample parameters based on the selected SA
     if main_window.sampling_type_dropdown.currentText() == "Local":
         # Check the validator for the reference value and perturbation inputs
-        if not main_window.local_ref_value_input.hasAcceptableInput():
-            QMessageBox.warning(main_window, "Invalid Input", "Reference value must be a non-zero number.")
+        if check_ref_values(main_window.local_SA_parameters) == False:
+            QMessageBox.warning(main_window, "Invalid Input", "Reference value must be a non-zero number for float parameters.")
             return
         main_window.update_output_tab2(main_window, f"Sampling parameters using One-At-A-Time approach...")
         # Check if samples already exist, if so, delete them
@@ -1164,9 +1197,9 @@ def sample_parameters(main_window):
             main_window.update_output_tab2(main_window, f"Error in local sampler: {e}")
             return
     elif main_window.sampling_type_dropdown.currentText() == "Global":
-        # Check the validator for the reference value and range percentage inputs
-        if not main_window.global_ref_value_input.hasAcceptableInput():
-            QMessageBox.warning(main_window, "Invalid Input", "Reference value must be a non-zero number.")
+        # Check the validator for the parameter bounds inputs
+        if check_bounds(main_window.global_SA_parameters) == False:
+            QMessageBox.warning(main_window, "Invalid Input", "Check that all lower bounds are less than upper bounds.")
             return
         sampler = main_window.sampler_combo.currentText()
         main_window.update_output_tab2(main_window, f"Sampling parameters using {sampler}...")
@@ -1227,9 +1260,13 @@ def plot_samples(main_window):
             # print(main_window.local_SA_parameters)
             perturbations_df = pd.DataFrame(main_window.local_SA_parameters["samples"]).T
             for col in perturbations_df.columns:
-                perturbations_df[col] = 100.0 * (
-                    perturbations_df[col] - main_window.local_SA_parameters[col]["ref_value"]
-                ) / main_window.local_SA_parameters[col]["ref_value"]
+                if 'type' in main_window.local_SA_parameters[col] and main_window.local_SA_parameters[col]["type"] == "bool":
+                    # For boolean parameters, map 0/1 to 0%/+100%
+                    perturbations_df[col] = perturbations_df[col] * 100.0
+                else:
+                    perturbations_df[col] = 100.0 * (
+                        perturbations_df[col] - main_window.local_SA_parameters[col]["ref_value"]
+                    ) / main_window.local_SA_parameters[col]["ref_value"]
             perturbations_df = perturbations_df.reset_index().melt(
                 id_vars="index", var_name="Parameter", value_name="perturbation"
             )
@@ -1680,6 +1717,10 @@ def run_analysis(main_window):
     main_window.update_output_tab2(main_window, "Sensitivity analysis completed.")
 
 def plot_sa_results(main_window):
+    if hasattr(main_window, 'sa_results') == False or not main_window.sa_results or hasattr(main_window, 'qoi_time_values') == False or not main_window.qoi_time_values:
+        main_window.update_output_tab2(main_window, "Error: No sensitivity analysis results found. Please run the analysis first.")
+        QMessageBox.warning(main_window, "No SA Results", "Please run sensitivity analysis before plotting results.")
+        return
     # Plot the results
     main_window.update_output_tab2(main_window, f"Plotting results for {main_window.SA_method_combo.currentText()}")
     # Create a new dialog window for the plot

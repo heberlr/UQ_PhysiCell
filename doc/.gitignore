@@ -1,6 +1,5 @@
 # Sphinx documentation build files
 _build/
-_static/
 _templates/
 
 # OS generated files

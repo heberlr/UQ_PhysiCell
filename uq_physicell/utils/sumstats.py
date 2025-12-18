@@ -14,15 +14,17 @@ def check_functions_need_microenv(qoi_funcs):
     Returns:
     - bool: True if any function needs microenvironment data
     """
+    # If no functions provided, return True (default to loading microenvironment)
     if not qoi_funcs:
-        return False
-        
+        return True
+    
+    # If any function needs microenvironment data, return True
     for func in qoi_funcs.values():
         # Check if any parameter name indicates substrate/concentration data
         param_lower = func.__param_name__.lower()
         if 'subs' in param_lower or 'conc' in param_lower or 'micro' in param_lower:
                 return True
-    
+    # If none need it,
     return False
 
 def safe_call_qoi_function(func, df_cell, df_subs=None):

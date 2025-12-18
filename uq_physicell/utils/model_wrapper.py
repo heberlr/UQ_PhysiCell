@@ -170,13 +170,12 @@ def create_named_function_from_string(func_str: str, qoi_name: str) -> callable:
     Return:
     - The created function with preserved parameter inspection capability.
     """
-    # Extract parameter name from lambda (e.g., "lambda df_subs:" -> "df_subs")
-    param_match = re.search(r'lambda\s+(\w+):', func_str)
-    if param_match:
-        param_name = param_match.group(1)
+    # Extract arg name from lambda (e.g., "lambda df_subs:" -> "df_subs")
+    arg_match = re.search(r'lambda\s+(\w+):', func_str)
+    if arg_match:
+        arg_name = arg_match.group(1)
     else:
-        # Default parameter name if parsing fails
-        param_name = 'df'
+        arg_name = 'mcds'
     
     # Create a namespace with necessary imports
     namespace = {'pd': pd, 'np': np, 'len': len}
@@ -189,7 +188,7 @@ def create_named_function_from_string(func_str: str, qoi_name: str) -> callable:
         return func(*args, **kwargs)
     
     # Store the original parameter name as an attribute for inspection
-    wrapper.__param_name__ = param_name
+    wrapper.__param_name__ = arg_name
     wrapper.__name__ = f"named_{qoi_name}"
     
     return wrapper

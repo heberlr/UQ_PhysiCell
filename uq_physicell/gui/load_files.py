@@ -61,6 +61,8 @@ def load_csv_file(main_window):
                 # Predefine column names
                 column_names = ["cell", "signal", "direction", "behavior", "saturation", "half-max", "hill-power", "apply-dead"]
                 main_window.csv_data = pd.read_csv(main_window.rule_path, names=column_names, header=None)
+                # Add 'inactive' column as False by default - All rules in the CSV are active
+                main_window.csv_data['inactive'] = 'false'
                 # print(main_window.csv_data)
                 main_window.update_output_tab1(main_window, f"Loaded CSV file: {main_window.rule_path}")
                 main_window.create_rule_section(main_window)  # Create the rules section
@@ -97,6 +99,8 @@ def load_ini_file(main_window, filePath=None, strucName=None):
         main_window.tabs.setCurrentIndex(1)
     else:
         main_window.ini_file_path = filePath
+    # Convert to relative path
+    main_window.ini_file_path = os.path.relpath(main_window.ini_file_path, os.getcwd())
     if main_window.ini_file_path:
         try:
             # Read the .ini file
@@ -224,6 +228,8 @@ def load_db_file(main_window, filePath=None):
         if db_file_path:
             try:
                 db_type = get_database_type(db_file_path)  # Check if the file is a valid database
+                # Convert to relative path
+                db_file_path = os.path.relpath(db_file_path, os.getcwd())
                 print(f"Loading Model Analysis database from {db_file_path} - type: {db_type}")
                 # Model Analysis database
                 if db_type == 'MA':
