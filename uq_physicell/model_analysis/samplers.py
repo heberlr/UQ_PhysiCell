@@ -127,11 +127,11 @@ def run_local_sampler(params_dict: dict, sampler: str = 'OAT') -> dict:
             continue
         else: # Combine negative and positive perturbations
             perturbations = np.concatenate((-perturbations, perturbations))  
-        for idx, var in enumerate(perturbations):
-            sample_id = len(local_samples_dict)  # Unique sample ID for each perturbation
-            local_samples_dict[sample_id] = params_ref.copy()  # Start with reference values
-            # Apply perturbation to the specific parameter                
-            local_samples_dict[sample_id][par] = params_ref[par] * (1 + var / 100.0)
-            # print(sample_id, par, perturbations, local_samples_dict[sample_id][par])
+            for idx, var in enumerate(perturbations):
+                sample_id = len(local_samples_dict)  # Unique sample ID for each perturbation
+                local_samples_dict[sample_id] = params_ref.copy()  # Start with reference values
+                # Apply perturbation to the specific parameter                
+                local_samples_dict[sample_id][par] = params_ref[par] * (1 + var / 100.0)
+                # print(sample_id, par, perturbations, local_samples_dict[sample_id][par])
 
     return local_samples_dict
