@@ -118,7 +118,7 @@ def run_local_sampler(params_dict: dict, sampler: str = 'OAT') -> dict:
     local_samples_dict = {0: params_ref}
     for id, par in enumerate(params_dict.keys()):
         perturbations = np.array(params_dict[par]["perturbation"])
-        if params_dict[par]["type"] == "bool":
+        if params_dict[par].get("type") == "bool":
             sample_id = len(local_samples_dict)
             local_samples_dict[sample_id] = params_ref.copy()  # Start with reference values
             # Apply perturbation to the specific parameter                
