@@ -228,6 +228,8 @@ def load_db_file(main_window, filePath=None):
         if db_file_path:
             try:
                 db_type = get_database_type(db_file_path)  # Check if the file is a valid database
+                # Convert to relative path
+                db_file_path = os.path.relpath(db_file_path, os.getcwd())
                 print(f"Loading Model Analysis database from {db_file_path} - type: {db_type}")
                 # Model Analysis database
                 if db_type == 'MA':
