@@ -67,7 +67,12 @@ def create_tab1(main_window):
     layout_tab1.addWidget(main_window.parameter_selection_label)
 
     # Horizontal layout for combo box
-    main_window.combo_hbox = QHBoxLayout()
+    main_window.combo_scroll = QScrollArea()
+    main_window.combo_scroll.setWidgetResizable(True)
+    main_window.combo_scroll_widget = QWidget()
+    main_window.combo_hbox = QHBoxLayout(main_window.combo_scroll_widget)
+    main_window.combo_scroll.setWidget(main_window.combo_scroll_widget)
+    layout_tab1.addWidget(main_window.combo_scroll)
     main_window.combo_hbox.setAlignment(Qt.AlignLeft)
     main_window.combo_label = QLabel("Select Parameter:")
     main_window.combo_hbox.addWidget(main_window.combo_label)
@@ -76,7 +81,6 @@ def create_tab1(main_window):
     main_window.combo_box.setEnabled(False)
     main_window.combo_hbox.addWidget(main_window.combo_box)
     main_window.combo_hbox.addStretch()
-    layout_tab1.addLayout(main_window.combo_hbox)
     
     # Create a group box for parameter details
     main_window.param_details_groupbox = QGroupBox("Parameter Details")
@@ -165,13 +169,6 @@ def create_tab1(main_window):
     header = main_window.preview_table.horizontalHeader()
     header.setStyleSheet("QHeaderView::section { background-color: lightgray; color: black; font-weight: bold; }")
     layout_tab1.addWidget(main_window.preview_table)
-
-    # main_window.ini_preview_scroll = QVBoxLayout()
-    # main_window.ini_preview_text = QTextEdit()
-    # main_window.ini_preview_text.setReadOnly(True)
-    # main_window.ini_preview_text.setMinimumHeight(150)
-    # main_window.ini_preview_scroll.addWidget(main_window.ini_preview_text)
-    # layout_tab1.addLayout(main_window.ini_preview_scroll)
 
     # Separator line
     layout_tab1.addWidget(QLabel("<hr>"))
