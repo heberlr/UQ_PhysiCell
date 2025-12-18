@@ -146,15 +146,15 @@ def run_global_sa(params_dict: dict, method: str, all_times_label: list, all_qoi
     # Generate params_np - it is sorted by sample ID
     params_np = np.array([[param_sample_dic[param] for param in problem['names']] for param_sample_dic in params_dict["samples"].values()])
     # Set the times labels sorted by time values
-    if not qoi_time_values: 
+    if qoi_time_values is None: 
         qoi_time_values = _set_time_labels(all_times_label, df_qois)
     # SA results dictionary
     sa_results_dict = { qoi: {} for qoi in all_qois_names }
     for qoi in all_qois_names: 
         for time_id, time_label in enumerate(qoi_time_values.keys()):
             # Generate qoi_result_np - it is sorted by sample ID
-            if not qoi_time_values: qoi_result_np = df_qois[f"{qoi}_{time_id}"].to_numpy()
-            else: qoi_result_np = df_qois[f"{qoi}_{time_label}"].to_numpy()
+            if qoi_time_values is None: qoi_result_np = df_qois[f"{qoi}_{time_label}"].to_numpy()
+            else: qoi_result_np = df_qois[f"{qoi}_{time_id}"].to_numpy()
             if len(qoi_result_np) != len(params_np):
                 raise ValueError(f"Error: Mismatch between number of samples ({len(params_np)}) and QoI results ({len(qoi_result_np)})!")
             print(f"Running {method} for QoI: {qoi} and time: {qoi_time_values[time_label]}") 

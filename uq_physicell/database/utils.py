@@ -32,6 +32,8 @@ def add_db_entry(db_file:str, table_name:str, column_name:str, value:Union[str, 
     # If table does not exits, add it
     if not cursor.fetchall():
         _create_table(db_file, table_name)
+    # Get existing columns
+    cursor.execute(f'''PRAGMA table_info({table_name})''')
     columns = [column[1] for column in cursor.fetchall()]
     if column_name in columns:
         cursor.execute(f'''INSERT INTO {table_name} ({column_name}) VALUES (?)''', (value,))

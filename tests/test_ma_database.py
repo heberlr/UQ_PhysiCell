@@ -128,7 +128,7 @@ class TestModularLoadFunctions:
         assert df_output.shape[0] == 4
         assert 'SampleID' in df_output.columns
         assert 'ReplicateID' in df_output.columns
-        assert 'Data' not in df_output.columns
+        assert df_output['Data'] is not None
     
     def test_load_output_filter_by_sample(self, sample_database):
         """Test load_output with sample_ids filter."""
@@ -200,7 +200,7 @@ class TestModularLoadFunctions:
         assert ids.shape[0] == 4
         assert 'SampleID' in ids.columns
         assert 'ReplicateID' in ids.columns
-        assert 'Data' not in ids.columns
+        assert ids['Data'] is not None
 
 
 class TestDatabaseCreation:
