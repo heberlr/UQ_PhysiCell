@@ -107,12 +107,18 @@ def calculate_qoi_from_sa_db(db_file: str, qoi_functions: str, chunk_size: int =
                 data = {'SampleID': SampleID, 'ReplicateID': ReplicateID}
                 for id_time, mcds in enumerate(mcds_ts_list):
                     data[f"time_{id_time}"] = mcds.get_time()
-                    # cell dataframe
-                    df_cell = mcds.get_cell_df()
                     try: 
                         for qoi_name, qoi_func in recreated_qoi_funcs.items():
                             # Store the QoI value in the data dictionary
-                            data[f"{qoi_name}_{id_time}"] =  qoi_func(df_cell)
+                            if qoi_func.__param_name__ in ["df_cell", "df"]: # Function expects cell dataframe
+                                data[f"{qoi_name}_{id_time}"] =  qoi_func(mcds.get_cell_df())
+                            elif qoi_func.__param_name__ == 'df_subs': # Function expects substrate dataframe
+                                print(mcds.get_conc_df())
+                                data[f"{qoi_name}_{id_time}"] =  qoi_func(mcds.get_conc_df())
+                            elif qoi_func.__param_name__ == 'mcds': # Function expects the mcds object
+                                data[f"{qoi_name}_{id_time}"] =  qoi_func(mcds)
+                            else:
+                                raise ValueError(f"Unknown parameter name '{qoi_func.__param_name__}' for QoI function '{qoi_name}'")
                     except Exception as e:
                         raise RuntimeError(f"Error calculating QoIs for SampleID: {SampleID}, ReplicateID: {ReplicateID} - QoI: {qoi_name}_{id_time}: {e}")
                 # Store the data in a DataFrame
