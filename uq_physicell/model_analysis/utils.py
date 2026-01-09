@@ -215,7 +215,7 @@ def calculate_qoi_statistics(df_qois_data: pd.DataFrame, qoi_funcs: dict, db_fil
         # Calculate the relative Monte Carlo Standard Error (MCSE)
         df_relative_mcse = df_stds/np.sqrt(num_replicates)
         # Small epsilon to avoid division by zero
-        epsilon = 0.01 * np.median(df_mean.abs().to_numpy().flatten())
+        epsilon = max(0.01 * np.nanmedian(df_mean.abs().to_numpy().flatten()), 1e-12)
         # Relative MCSE
         df_relative_mcse = df_relative_mcse.div(df_mean + epsilon)
         # Replace the columns relative to time as the real value from df_mean
