@@ -99,9 +99,10 @@ def load_ini_file(main_window, filePath=None, strucName=None):
         main_window.tabs.setCurrentIndex(1)
     else:
         main_window.ini_file_path = filePath
-    # Convert to relative path
-    main_window.ini_file_path = os.path.relpath(main_window.ini_file_path, os.getcwd())
+    
     if main_window.ini_file_path:
+        # Convert to relative path
+        main_window.ini_file_path = os.path.relpath(main_window.ini_file_path, os.getcwd())
         try:
             # Read the .ini file
             config = configparser.ConfigParser()
