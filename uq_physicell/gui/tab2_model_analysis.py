@@ -22,6 +22,7 @@ from ..model_analysis.sensitivity_analysis import run_global_sa, run_local_sa, s
 from ..model_analysis.ma_context import ModelAnalysisContext, run_simulations
 from ..model_analysis.utils import calculate_qoi_statistics
 from ..database.ma_db import load_structure
+from ..gui.utils import get_global_SA_parameters, get_local_SA_parameters, plot_qoi_over_time, plot_global_sa_results, plot_local_sa_results
 
 class QtTextEditLogHandler(logging.Handler):
     """Thread-safe logging handler that uses signal/slot mechanism."""
@@ -845,19 +846,7 @@ def load_ma_database(main_window):
             main_window.global_range_percentage.setEnabled(False)
             main_window.global_bounds.setEnabled(False)
             # Populate the global_SA_parameters dictionary with values from the database
-            main_window.global_SA_parameters = {}
-            main_window.global_SA_parameters["samples"] = dic_input
-            for id, param in enumerate(df_parameter_space['ParamName']):
-                main_window.global_SA_parameters[param] = {"lower_bound": df_parameter_space['lower_bound'].iloc[id],
-                                                            "upper_bound": df_parameter_space['upper_bound'].iloc[id],
-                                                            "ref_value": df_parameter_space['ref_value'].iloc[id]}
-                perturbation = df_parameter_space['perturbation'].iloc[id]
-                try:
-                    main_window.global_SA_parameters[param]["perturbation"] = float(perturbation)
-                except Exception as e:
-                    print(f"Warning: Could not convert perturbation ({perturbation}) to float for parameter {param}.")
-                    # Calculate perturbation as percentage based on bounds and ref_value
-                    main_window.global_SA_parameters[param]["perturbation"] = 100.0 * (df_parameter_space['upper_bound'].iloc[id]/df_parameter_space['ref_value'].iloc[id] - 1.0)
+            main_window.global_SA_parameters = get_global_SA_parameters(main_window.ma_file_path)
             # Update the global parameters
             main_window.update_global_inputs(main_window)
         else: 
@@ -875,13 +864,7 @@ def load_ma_database(main_window):
             main_window.local_ref_value_input.setEnabled(False)
             main_window.local_perturb_input.setEnabled(False)
             # Populate the local_SA_parameters dictionary with values from the database
-            main_window.local_SA_parameters = {}
-            main_window.local_SA_parameters["samples"] = dic_input
-            for id, param in enumerate(df_parameter_space['ParamName']):
-                if type(df_parameter_space['perturbation'].iloc[id]) == list:
-                    df_parameter_space['perturbation'].iloc[id] = [float(x) for x in df_parameter_space['perturbation'].iloc[id]]
-                main_window.local_SA_parameters[param] = {"ref_value": df_parameter_space['ref_value'].iloc[id], 
-                                                            "perturbation": df_parameter_space['perturbation'].iloc[id]}
+            main_window.local_SA_parameters = get_local_SA_parameters(main_window.ma_file_path)
             # Update the local parameters
             main_window.update_local_inputs(main_window)
     
@@ -1092,7 +1075,10 @@ def update_local_inputs(main_window):
     if selected_param in main_window.local_SA_parameters:
         param_data = main_window.local_SA_parameters[selected_param]
         main_window.local_ref_value_input.setText(str(param_data["ref_value"]))
-        main_window.local_perturb_input.setText(",".join(map(str, param_data["perturbation"])))
+        if isinstance(param_data["perturbation"], (list, tuple)):
+            main_window.local_perturb_input.setText(",".join(map(str, param_data["perturbation"])))
+        else:
+            main_window.local_perturb_input.setText(str(param_data["perturbation"]))
 
         # Connect signals to update local_SA_parameters when editing is finished
         main_window.local_ref_value_input.editingFinished.connect(lambda: main_window.update_local_SA_reference(main_window))
@@ -1602,7 +1588,6 @@ def run_simulations_function(main_window):
         # Load the database file to display results
         main_window.ma_file_path = db_file_name
         main_window.load_ma_database(main_window)
-    
 
 def plot_qois(main_window):
     main_window.update_output_tab2(main_window, "Plotting QoIs...")
@@ -1648,23 +1633,8 @@ def plot_qois(main_window):
         if selected_qoi in main_window.qoi_funcs.keys():
             if plot_qoi_mcse_checkbox.isChecked(): df_plot = main_window.df_relative_mcse
             else: df_plot = main_window.df_summary_qois
-            print(f"Columns: {df_plot.columns}")
-            qoi_columns = sorted([col for col in df_plot.columns if col.startswith(selected_qoi)])
-            time_columns = sorted([col for col in df_plot.columns if col.startswith("time_")])
-            # Prepare the data for seaborn
-            plot_data = pd.DataFrame({
-                "Time": df_plot[time_columns].values.flatten(),
-                selected_qoi: df_plot[qoi_columns].values.flatten(),
-                "SampleID": df_plot.index.repeat(len(qoi_columns))
-            })
-            # Plot using seaborn
-            sns.lineplot(data=plot_data, x="Time", y=selected_qoi, hue="SampleID", ax=ax)
-            ax.set_xlabel("Time (min)")
-            ax.set_ylabel(selected_qoi)
-            # Only add legend if there are labeled artists
-            handles, labels = ax.get_legend_handles_labels()
-            if handles and labels:
-                ax.legend(title="Sample Index")
+            # print(f"Columns: {df_plot.columns}")
+            plot_qoi_over_time(df_plot, selected_qoi, ax)
             canvas.draw()
         else:
             main_window.update_output_tab2(main_window, f"Error: {selected_qoi} not found in the output data.")
@@ -1697,19 +1667,16 @@ def run_analysis(main_window):
             main_window.update_output_tab2(main_window, f"Error calculating QoIs: {e}")
             return
     # Prepare the QoIs for analysis
-    all_qois_names = list(main_window.qoi_funcs.keys())
-    all_times_label = [col for col in main_window.df_summary_qois.columns if col.startswith("time")]
-    print(f"all_qois: {all_qois_names} and all_times: {all_times_label}")
     if main_window.sampling_type_dropdown.currentText() == "Global":
         global_method = main_window.SA_method_combo.currentText()
         try:
-            main_window.sa_results, main_window.qoi_time_values = run_global_sa(main_window.global_SA_parameters, global_method, all_times_label, all_qois_names, main_window.df_summary_qois)
+            main_window.sa_results, main_window.qoi_time_values = run_global_sa(main_window.global_SA_parameters, global_method, main_window.qoi_funcs, main_window.df_summary_qois)
         except Exception as e:
             main_window.update_output_tab2(main_window, f"Error running global sensitivity analysis: {e}")
             return
     elif main_window.sampling_type_dropdown.currentText() == "Local":
         try:
-            main_window.sa_results, main_window.qoi_time_values = run_local_sa(main_window.local_SA_parameters, all_times_label, all_qois_names, main_window.df_summary_qois)
+            main_window.sa_results, main_window.qoi_time_values = run_local_sa(main_window.local_SA_parameters, main_window.qoi_funcs, main_window.df_summary_qois)
         except Exception as e:
             main_window.update_output_tab2(main_window, f"Error running local sensitivity analysis: {e}")
             return
@@ -1779,62 +1746,10 @@ def plot_sa_results(main_window):
         try:
             if main_window.sampling_type_dropdown.currentText() == "Global":
                 SA_method = main_window.SA_method_combo.currentText()
-                # This is necessary because Sobol method does not return the names of the parameters
-                param_names = [key for key in main_window.global_SA_parameters.keys() if key != "samples"]
-                plot_data = pd.DataFrame([
-                    {
-                        "Time": main_window.qoi_time_values[time_label],
-                        "Sensitivity Index": main_window.sa_results[selected_qoi][time_label][selected_sm][param_id],
-                        "Parameter": param
-                    }
-                    for time_label in main_window.sa_results[selected_qoi].keys()
-                    for param_id, param in enumerate(param_names)
-                ])
-                # print(plot_data)
-                # Sort Parameters by the maximum Sensitivity Index in descending order
-                parameter_order = (
-                    plot_data.groupby("Parameter")["Sensitivity Index"]
-                    .max()
-                    .sort_values(ascending=False)
-                    .index
-                )
-                custom_palette = sns.color_palette("tab20", len(plot_data["Parameter"].unique()))
-                sns.lineplot(data=plot_data, x="Time", y="Sensitivity Index", hue="Parameter", ax=ax, palette=custom_palette, hue_order=parameter_order)                
-                ax.set_xlabel("Time (min)")
-                ax.set_ylabel(f"Sensitivity Measure ({selected_sm})")
-                ax.set_title(f"Global SA - {SA_method}", fontsize=8)
-                # Only add legend if there are labeled artists
-                handles, labels = ax.get_legend_handles_labels()
-                if handles and labels:
-                    ax.legend(bbox_to_anchor=(1.05, 1), loc="upper left", title_fontsize=8, fontsize=8)
+                plot_global_sa_results(main_window.global_SA_parameters, SA_method, main_window.qoi_time_values, main_window.sa_results, selected_qoi, selected_sm, ax)
             elif main_window.sampling_type_dropdown.currentText() == "Local":
                 SA_method = main_window.SA_method_combo.currentText()
-                # Prepare the data for seaborn
-                plot_data = pd.DataFrame([
-                    {
-                        "Time": main_window.qoi_time_values[time_label],
-                        "Sensitivity Index": main_window.sa_results[selected_qoi][time_label][param],
-                        "Parameter": param
-                    }
-                    for time_label in main_window.sa_results[selected_qoi].keys()
-                    for param in main_window.sa_results[selected_qoi][time_label].keys()
-                ])
-                # print(plot_data)
-                # Sort Parameters by the maximum Sensitivity Index in descending order
-                parameter_order = (
-                    plot_data.groupby("Parameter")["Sensitivity Index"]
-                    .max()
-                    .sort_values(ascending=False)
-                    .index
-                )
-                custom_palette = sns.color_palette("tab20", len(plot_data["Parameter"].unique()))
-                sns.lineplot(data=plot_data, x="Time", y="Sensitivity Index", hue="Parameter", ax=ax, palette=custom_palette, hue_order=parameter_order)
-                ax.set_xlabel("Time (min)")
-                ax.set_title(f"Local SA - {SA_method}")
-                # Only add legend if there are labeled artists
-                handles, labels = ax.get_legend_handles_labels()
-                if handles and labels:
-                    ax.legend(bbox_to_anchor=(1.05, 1), loc="upper left", title_fontsize=8, fontsize=8)
+                plot_local_sa_results(SA_method, main_window.qoi_time_values, main_window.sa_results, selected_qoi, ax)
             # Adjust layout and draw the canvas
             # figure.tight_layout()
             figure.set_constrained_layout(True)

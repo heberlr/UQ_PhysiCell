@@ -61,11 +61,10 @@ samplers_to_method = {
     ]
 }
 
-def _set_time_labels(all_times_label: list, df_qois: pd.DataFrame) -> dict:
+def _set_time_labels(df_qois: pd.DataFrame) -> dict:
     """Set and validate time labels for QoI values.
     
     Args:
-        all_times_label (list): List of all time labels to be processed.
         df_qois (pd.DataFrame): DataFrame containing the QoI values with time columns.
     
     Returns:
@@ -77,7 +76,8 @@ def _set_time_labels(all_times_label: list, df_qois: pd.DataFrame) -> dict:
     """
     # Check if qoi_time_values is empty
     qoi_time_values = {}
-    
+    all_times_label = [col for col in df_qois.columns if col.startswith("time")]
+
     # Ensure all times are present in the qoi_time_values
     for time_label in all_times_label:
         unique_values = df_qois[time_label].unique()
@@ -116,7 +116,7 @@ def _get_SA_problem(params_dict: dict) -> dict:
     }
     return problem
 
-def run_global_sa(params_dict: dict, method: str, all_times_label: list, all_qois_names: list, df_qois: pd.DataFrame, qoi_time_values: dict = None) -> tuple:
+def run_global_sa(params_dict: dict, method: str, all_qois_func: dict, df_qois: pd.DataFrame, qoi_time_values: dict = None) -> tuple:
     """Run global sensitivity analysis using the specified method.
     
     Args:
@@ -125,8 +125,7 @@ def run_global_sa(params_dict: dict, method: str, all_times_label: list, all_qoi
         method (str): Name of the sensitivity analysis method to use. Supported methods
             include 'FAST - Fourier Amplitude Sensitivity Test', 'Sobol Sensitivity Analysis',
             'PAWN Sensitivity Analysis', etc.
-        all_times_label (list): List of all time labels present in the QoI data.
-        all_qois_names (list): List of all Quantity of Interest names to analyze.
+        all_qois_func (dict): Dictionary of all Quantity of Interest functions to analyze.
         df_qois (pd.DataFrame): DataFrame containing QoI values with columns formatted as
             '{qoi_name}_{time_index}'.
     
@@ -146,11 +145,11 @@ def run_global_sa(params_dict: dict, method: str, all_times_label: list, all_qoi
     # Generate params_np - it is sorted by sample ID
     params_np = np.array([[param_sample_dic[param] for param in problem['names']] for param_sample_dic in params_dict["samples"].values()])
     # Set the times labels sorted by time values
-    if qoi_time_values is None: 
-        qoi_time_values = _set_time_labels(all_times_label, df_qois)
+    if qoi_time_values is None:
+        qoi_time_values = _set_time_labels(df_qois)
     # SA results dictionary
-    sa_results_dict = { qoi: {} for qoi in all_qois_names }
-    for qoi in all_qois_names: 
+    sa_results_dict = { qoi: {} for qoi in all_qois_func.keys() }
+    for qoi in all_qois_func.keys(): 
         for time_id, time_label in enumerate(qoi_time_values.keys()):
             # Generate qoi_result_np - it is sorted by sample ID
             if qoi_time_values is None: qoi_result_np = df_qois[f"{qoi}_{time_label}"].to_numpy()
@@ -224,14 +223,13 @@ def _OAT_analyze(dic_samples: dict, dic_qoi: dict) -> dict:
 
     return dic_results
 
-def run_local_sa(params_dict: dict, all_times_label: list, all_qois_names: list, df_qois: pd.DataFrame, method: str = "OAT") -> tuple:
+def run_local_sa(params_dict: dict, all_qois_func: dict, df_qois: pd.DataFrame, method: str = "OAT") -> tuple:
     """Run local sensitivity analysis using the One-At-a-Time (OAT) method.
     
     Args:
         params_dict (dict): Dictionary containing parameter names, properties, and sample values.
             Must include a 'samples' key with parameter sample dictionaries.
-        all_times_label (list): List of all time labels present in the QoI data.
-        all_qois_names (list): List of all Quantity of Interest names to analyze.
+        all_qois_func (dict): Dictionary of all Quantity of Interest functions to analyze.
         df_qois (pd.DataFrame): DataFrame containing QoI values with columns formatted as
             '{qoi_name}_{time_index}'.
         method (str, optional): Local sensitivity analysis method. Currently only 'OAT'
@@ -252,10 +250,10 @@ def run_local_sa(params_dict: dict, all_times_label: list, all_qois_names: list,
     # Get parameter names
     param_names = [key for key in params_dict.keys() if key != "samples"]
     # Set the times labels sorted by time values
-    qoi_time_values = _set_time_labels(all_times_label, df_qois)
+    qoi_time_values = _set_time_labels(df_qois)
     # SA results dictionary
-    sa_results_dict = { qoi: {} for qoi in all_qois_names }
-    for qoi in all_qois_names:
+    sa_results_dict = { qoi: {} for qoi in all_qois_func.keys() }
+    for qoi in all_qois_func.keys():
         for id_time, time_label in enumerate(qoi_time_values.keys()):
             qoi_result_dict = df_qois[f"{qoi}_{id_time}"].to_dict()
             print(f"Running {method} for QoI: {qoi} and time: {qoi_time_values[time_label]}")
