@@ -8,7 +8,7 @@ from botorch.models.model_list_gp_regression import ModelListGP
 def create_structure(db_path:str):
     """
     Create the Bayesian Optimization (BO) database structure with six tables:
-    1. Metadata: Stores information about the calibration (method, observed data path, enhancement strategy parameters, .ini config path, and model structure name).
+    1. Metadata: Stores information about the calibration (method, observed data path, .ini config path, and model structure name).
     2. ParameterSpace: Stores the parameter space information (ParamName, Type, Lower_Bound, Upper_Bound, Regulates).
     3. QoIs: Stores the quantities of interest (QoI_Name, QoI_Function, ObsData_Column, QoI_distanceFunction, QoI_distanceWeight).
     4. GP_Models: Stores the Gaussian Process models (IterationID, GP_Model, Hypervolume).
@@ -25,10 +25,6 @@ def create_structure(db_path:str):
             CREATE TABLE IF NOT EXISTS Metadata (
                 BO_Method TEXT PRIMARY KEY,
                 ObsData_Path TEXT,
-                Enhancement_Strategy TEXT DEFAULT 'none',
-                Diversity_Weight DOUBLE DEFAULT 0.0,
-                Uncertainty_Weight DOUBLE DEFAULT 0.0,
-                Constraint_Strength DOUBLE DEFAULT 0.0,
                 Ini_File_Path TEXT,
                 StructureName TEXT
             )
@@ -93,14 +89,10 @@ def insert_metadata(db_path:str, metadata:dict):
         conn = sqlite3.connect(db_path, timeout=30.0)
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT OR REPLACE INTO Metadata (BO_Method, ObsData_Path, Enhancement_Strategy, Diversity_Weight, Uncertainty_Weight, Constraint_Strength, Ini_File_Path, StructureName)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO Metadata (BO_Method, ObsData_Path, Ini_File_Path, StructureName)
+            VALUES (?, ?, ?, ?)
         """, (metadata['BO_Method'], 
               metadata['ObsData_Path'], 
-              metadata.get("Enhancement_Strategy", "none"), 
-              metadata.get("Diversity_Weight", 0.0), 
-              metadata.get("Uncertainty_Weight", 0.0),
-              metadata.get("Constraint_Strength", 0.0),
               metadata['Ini_File_Path'], 
               metadata['StructureName']))
         conn.commit()
@@ -224,69 +216,271 @@ def insert_output(db_path:str, sample_id:int, obj_func:bytes, noise_std:bytes, d
     except sqlite3.Error as e:
         raise RuntimeError(f"Error inserting BO Output: {e}")
     
-def load_structure(db_file:str) -> tuple:
-    """
-    Load the structure of the BO database.
-    Parameters:
-    - db_file: Path to the database file.
-    Return:
-    - df_metadata: DataFrame containing metadata.
-    - param_space: DataFrame containing parameter space information.
-    - qois: DataFrame containing QoIs.
-    - gp_models: DataFrame containing GP models.
-    - samples: DataFrame containing samples.
-    - output: DataFrame containing output data.
-    """
+def load_metadata(db_file: str) -> pd.DataFrame:
+    """Load metadata from the BO database.
     
+    Args:
+        db_file (str): Path to the SQLite database file.
+    
+    Returns:
+        pd.DataFrame: DataFrame with metadata information.
+    
+    Raises:
+        sqlite3.Error: If database connection or query fails.
+    
+    Example:
+        >>> df_metadata = load_metadata('calibration.db')
+        >>> print(df_metadata['BO_Method'].values[0])
+    """
     conn = sqlite3.connect(db_file)
     cursor = conn.cursor()
+    try:
+        # Load with flexible column handling for backward compatibility
+        cursor.execute("PRAGMA table_info(Metadata)")
+        metadata_columns_info = cursor.fetchall()
+        metadata_column_names = [col[1] for col in metadata_columns_info]
+        
+        cursor.execute('SELECT * FROM Metadata')
+        metadata = cursor.fetchall()
+        
+        if metadata:
+            df_metadata = pd.DataFrame(metadata, columns=metadata_column_names)
+        else:
+            # Create empty DataFrame with expected schema
+            df_metadata = pd.DataFrame(columns=['BO_Method', 'ObsData_Path', 'Ini_File_Path', 'StructureName'])
+        return df_metadata
+    except sqlite3.Error as e:
+        raise RuntimeError(f"Error loading BO metadata: {e}")
+    finally:
+        conn.close()
+
+def load_parameter_space(db_file: str) -> pd.DataFrame:
+    """Load parameter space from the BO database.
     
-    # Load Metadata with flexible column handling
-    cursor.execute("PRAGMA table_info(Metadata)")
-    metadata_columns_info = cursor.fetchall()
-    metadata_column_names = [col[1] for col in metadata_columns_info]
+    Args:
+        db_file (str): Path to the SQLite database file.
     
-    cursor.execute('SELECT * FROM Metadata')
-    metadata = cursor.fetchall()
+    Returns:
+        pd.DataFrame: DataFrame with columns ['ParamName', 'type', 'lower_bound', 'upper_bound', 'regulates'].
     
-    # Create DataFrame with available columns
-    if metadata:
-        df_metadata = pd.DataFrame(metadata, columns=metadata_column_names)
+    Raises:
+        sqlite3.Error: If database connection or query fails.
+    
+    Example:
+        >>> df_params = load_parameter_space('calibration.db')
+        >>> print(df_params[['ParamName', 'lower_bound', 'upper_bound']])
+    """
+    conn = sqlite3.connect(db_file)
+    cursor = conn.cursor()
+    try:
+        cursor.execute('SELECT * FROM ParameterSpace')
+        param_space = cursor.fetchall()
+        df_param_space = pd.DataFrame(param_space, columns=['ParamName', 'type', 'lower_bound', 'upper_bound', 'regulates'])
+        return df_param_space
+    except sqlite3.Error as e:
+        raise RuntimeError(f"Error loading BO parameter space: {e}")
+    finally:
+        conn.close()
+
+def load_qois(db_file: str) -> pd.DataFrame:
+    """Load quantities of interest (QoIs) from the BO database.
+    
+    Args:
+        db_file (str): Path to the SQLite database file.
+    
+    Returns:
+        pd.DataFrame: DataFrame with columns ['QoI_Name', 'QoI_Type', 'ObsData_Column', 
+                     'QoI_distanceFunction', 'QoI_distanceWeight'].
+    
+    Raises:
+        sqlite3.Error: If database connection or query fails.
+    
+    Example:
+        >>> df_qois = load_qois('calibration.db')
+        >>> print(df_qois['QoI_Name'].to_list())
+    """
+    conn = sqlite3.connect(db_file)
+    cursor = conn.cursor()
+    try:
+        cursor.execute('SELECT * FROM QoIs')
+        qois = cursor.fetchall()
+        df_qois = pd.DataFrame(qois, columns=['QoI_Name', 'QoI_Type', 'ObsData_Column', 
+                                             'QoI_distanceFunction', 'QoI_distanceWeight'])
+        return df_qois
+    except sqlite3.Error as e:
+        raise RuntimeError(f"Error loading BO QoIs: {e}")
+    finally:
+        conn.close()
+
+def load_gp_models(db_file: str) -> pd.DataFrame:
+    """Load Gaussian Process models from the BO database.
+    
+    Args:
+        db_file (str): Path to the SQLite database file.
+    
+    Returns:
+        pd.DataFrame: DataFrame with columns ['IterationID', 'GP_Model', 'Hypervolume'].
+                     GP_Model column contains deserialized torch model objects.
+    
+    Raises:
+        sqlite3.Error: If database connection or query fails.
+    
+    Example:
+        >>> df_gp_models = load_gp_models('calibration.db')
+        >>> print(f"Loaded {len(df_gp_models)} GP models")
+    """
+    conn = sqlite3.connect(db_file)
+    cursor = conn.cursor()
+    try:
+        cursor.execute('SELECT * FROM GP_Models')
+        gp_models = cursor.fetchall()
+        df_gp_models = pd.DataFrame(gp_models, columns=['IterationID', 'GP_Model', 'Hypervolume'])
+        # Deserialize the GP_Model column
+        df_gp_models['GP_Model'] = df_gp_models['GP_Model'].apply(
+            lambda x: torch.load(io.BytesIO(x), map_location=torch.device('cpu'))
+        )
+        return df_gp_models
+    except sqlite3.Error as e:
+        raise RuntimeError(f"Error loading BO GP models: {e}")
+    finally:
+        conn.close()
+
+def load_samples(db_file: str, iteration_ids: list = None) -> pd.DataFrame:
+    """Load parameter samples from the BO database.
+    
+    Args:
+        db_file (str): Path to the SQLite database file.
+        iteration_ids (list, optional): List of specific iteration IDs to load.
+                                       If None, loads all iterations.
+    
+    Returns:
+        pd.DataFrame: DataFrame with columns ['IterationID', 'SampleID', 'ParamName', 'ParamValue'].
+    
+    Raises:
+        sqlite3.Error: If database connection or query fails.
+    
+    Example:
+        >>> df_samples = load_samples('calibration.db')
+        >>> # Load specific iterations
+        >>> df_samples = load_samples('calibration.db', iteration_ids=[0, 1, 2])
+    """
+    conn = sqlite3.connect(db_file)
+    cursor = conn.cursor()
+    try:
+        if iteration_ids is None:
+            cursor.execute('SELECT * FROM Samples')
+        else:
+            placeholders = ','.join('?' * len(iteration_ids))
+            cursor.execute(f'SELECT * FROM Samples WHERE IterationID IN ({placeholders})', iteration_ids)
+        
+        samples = cursor.fetchall()
+        df_samples = pd.DataFrame(samples, columns=['IterationID', 'SampleID', 'ParamName', 'ParamValue'])
+        return df_samples
+    except sqlite3.Error as e:
+        raise RuntimeError(f"Error loading BO samples: {e}")
+    finally:
+        conn.close()
+
+def load_output(db_file: str, sample_ids: list = None, load_data: bool = True) -> pd.DataFrame:
+    """Load simulation output from the BO database.
+    
+    Args:
+        db_file (str): Path to the SQLite database file.
+        sample_ids (list, optional): List of specific sample IDs to load.
+                                    If None, loads all samples.
+        load_data (bool, optional): If True, deserializes the ObjFunc, Noise_Std, and Data columns.
+                                   If False, only loads SampleID metadata.
+                                   Default is True.
+    
+    Returns:
+        pd.DataFrame: DataFrame with columns ['SampleID', 'ObjFunc', 'Noise_Std', 'Data'] if load_data=True,
+                     or ['SampleID'] if load_data=False.
+    
+    Raises:
+        sqlite3.Error: If database connection or query fails.
+    
+    Example:
+        >>> # Load all output with deserialization
+        >>> df_output = load_output('calibration.db')
+        >>> 
+        >>> # Load specific samples without deserialization
+        >>> df_output = load_output('calibration.db', sample_ids=[0, 1, 2], load_data=False)
+    """
+    conn = sqlite3.connect(db_file)
+    cursor = conn.cursor()
+    try:
+        if sample_ids is None:
+            cursor.execute('SELECT * FROM Output')
+        else:
+            placeholders = ','.join('?' * len(sample_ids))
+            cursor.execute(f'SELECT * FROM Output WHERE SampleID IN ({placeholders})', sample_ids)
+        
+        output = cursor.fetchall()
+        
+        if load_data:
+            df_output = pd.DataFrame(output, columns=['SampleID', 'ObjFunc', 'Noise_Std', 'Data'])
+            # Deserialize the columns
+            df_output['ObjFunc'] = df_output['ObjFunc'].apply(pickle.loads)
+            df_output['Noise_Std'] = df_output['Noise_Std'].apply(pickle.loads)
+            df_output['Data'] = df_output['Data'].apply(pickle.loads)
+        else:
+            df_output = pd.DataFrame(output, columns=['SampleID', 'ObjFunc', 'Noise_Std', 'Data'])
+            df_output = df_output[['SampleID']]
+        
+        return df_output
+    except sqlite3.Error as e:
+        raise RuntimeError(f"Error loading BO output: {e}")
+    finally:
+        conn.close()
+
+def load_structure(db_file: str, load_data: bool = True) -> tuple:
+    """Load the complete BO database structure using modular load functions.
+    
+    This is a convenience wrapper that loads all tables from the database.
+    For more control over what data is loaded, use the individual load functions:
+    - load_metadata(db_file)
+    - load_parameter_space(db_file)
+    - load_qois(db_file)
+    - load_gp_models(db_file)
+    - load_samples(db_file, iteration_ids=None)
+    - load_output(db_file, sample_ids=None, load_data=True)
+    
+    Args:
+        db_file (str): Path to the SQLite database file.
+        load_data (bool, optional): If True, deserializes GP models and output data.
+                                   If False, only loads metadata without deserialization.
+                                   Default is True.
+    
+    Returns:
+        tuple: A 6-tuple containing:
+            - df_metadata (pd.DataFrame): Metadata information
+            - df_param_space (pd.DataFrame): Parameter space definitions
+            - df_qois (pd.DataFrame): Quantities of interest definitions
+            - df_gp_models (pd.DataFrame): Gaussian Process models
+            - df_samples (pd.DataFrame): Parameter samples
+            - df_output (pd.DataFrame): Simulation output
+    
+    Raises:
+        RuntimeError: If any database loading fails.
+    
+    Example:
+        >>> # Load everything with full data
+        >>> metadata, params, qois, gp_models, samples, output = load_structure('calibration.db')
+        >>> 
+        >>> # Load only metadata (no deserialization)
+        >>> metadata, params, qois, gp_models, samples, output = load_structure('calibration.db', load_data=False)
+    """
+    df_metadata = load_metadata(db_file)
+    df_param_space = load_parameter_space(db_file)
+    df_qois = load_qois(db_file)
+    
+    if load_data:
+        df_gp_models = load_gp_models(db_file)
+        df_samples = load_samples(db_file)
+        df_output = load_output(db_file, load_data=True)
     else:
-        # Create empty DataFrame with new schema
-        df_metadata = pd.DataFrame(columns=['BO_Method', 'ObsData_Path', 'Enhancement_Strategy', 'Diversity_Weight', 'Uncertainty_Weight', 'Constraint_Strength', 'Ini_File_Path', 'StructureName'])
+        df_gp_models = pd.DataFrame(columns=['IterationID', 'GP_Model', 'Hypervolume'])
+        df_samples = load_samples(db_file)
+        df_output = load_output(db_file, load_data=False)
     
-    # Load Parameter Space
-    cursor.execute('SELECT * FROM ParameterSpace')
-    param_space = cursor.fetchall()
-    df_param_space = pd.DataFrame(param_space, columns=['ParamName', 'type', 'lower_bound', 'upper_bound', 'regulates'])
-    
-    # Load QoIs
-    cursor.execute('SELECT * FROM QoIs')
-    qois = cursor.fetchall()
-    df_qois = pd.DataFrame(qois, columns=['QoI_Name', 'QoI_Type', 'ObsData_Column', 'QoI_distanceFunction', 'QoI_distanceWeight'])
-
-    # Load GP Models
-    cursor.execute('SELECT * FROM GP_Models')
-    gp_models = cursor.fetchall()
-    df_gp_models = pd.DataFrame(gp_models, columns=['IterationID', 'GP_Model', 'Hypervolume'])
-    # Deserialize the GP_Model column
-    df_gp_models['GP_Model'] = df_gp_models['GP_Model'].apply(lambda x: torch.load(io.BytesIO(x), map_location=torch.device('cpu')))
-
-    # Load Samples
-    cursor.execute('SELECT * FROM Samples')
-    samples = cursor.fetchall()
-    df_samples = pd.DataFrame(samples, columns=['IterationID', 'SampleID', 'ParamName', 'ParamValue'])
-
-    # Load Output
-    cursor.execute('SELECT * FROM Output')
-    output = cursor.fetchall()
-    df_output = pd.DataFrame(output, columns=['SampleID', 'ObjFunc', 'Noise_Std', 'Data'])
-    # Deserialize the columns
-    df_output['ObjFunc'] = df_output['ObjFunc'].apply(pickle.loads)
-    df_output['Noise_Std'] = df_output['Noise_Std'].apply(pickle.loads)
-    df_output['Data'] = df_output['Data'].apply(pickle.loads)
-
-    conn.close()
-
     return df_metadata, df_param_space, df_qois, df_gp_models, df_samples, df_output
