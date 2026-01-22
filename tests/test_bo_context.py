@@ -139,49 +139,6 @@ class TestCalibrationContext(unittest.TestCase):
                 logger=self.logger
             )
 
-    def test_invalid_acquisition_strategy(self):
-        """Test error handling for invalid acquisition strategy."""
-        bo_options_bad = self.bo_options.copy()
-        bo_options_bad['acq_func_strategy'] = 'invalid_strategy'
-        
-        with self.assertRaises(Exception):
-            CalibrationContext(
-                db_path='/fake/db.db',
-                obsData=self.temp_file.name,
-                obsData_columns=self.obsData_columns,
-                model_config=self.model_config,
-                qoi_functions=self.qoi_functions,
-                distance_functions=self.distance_functions,
-                search_space=self.search_space,
-                bo_options=bo_options_bad,
-                logger=self.logger
-            )
-
-    def test_valid_acquisition_strategies(self):
-        """Test that all valid acquisition strategies are accepted."""
-        valid_strategies = ["diversity_bonus", "uncertainty_weighting", "soft_constraints", 
-                          "adaptive_scaling", "combined", "none"]
-        
-        for strategy in valid_strategies:
-            bo_options_test = self.bo_options.copy()
-            bo_options_test['acq_func_strategy'] = strategy
-            
-            # This should not raise an exception
-            context = CalibrationContext(
-                db_path='/fake/db.db',
-                obsData=self.temp_file.name,
-                obsData_columns=self.obsData_columns,
-                model_config=self.model_config,
-                qoi_functions=self.qoi_functions,
-                distance_functions=self.distance_functions,
-                search_space=self.search_space,
-                bo_options=bo_options_test,
-                logger=self.logger
-            )
-            
-            # If we got here without exception, the strategy was accepted
-            self.assertIsInstance(context, CalibrationContext)
-
     def test_worker_configuration(self):
         """Test worker configuration calculation."""
         context = CalibrationContext(
@@ -284,9 +241,6 @@ class TestCalibrationContext(unittest.TestCase):
             'summary_function': 'custom_summary',
             'custom_run_single_replicate_func': lambda: None,
             'custom_aggregation_func': lambda: None,
-            'acq_func_strategy': 'combined',
-            'diversity_weight': 0.1,
-            'uncertainty_weight': 0.2
         })
         
         context = CalibrationContext(
@@ -306,11 +260,6 @@ class TestCalibrationContext(unittest.TestCase):
         self.assertEqual(context.summary_function, 'custom_summary')
         self.assertIsNotNone(context.custom_run_single_replicate_func)
         self.assertIsNotNone(context.custom_aggregation_func)
-        
-        # Check metadata includes strategy information
-        self.assertIn('Enhancement_Strategy', context.dic_metadata)
-        self.assertIn('Diversity_Weight', context.dic_metadata)
-        self.assertIn('Uncertainty_Weight', context.dic_metadata)
 
     def test_missing_column_error(self):
         """Test error when observed data column is missing."""
