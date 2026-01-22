@@ -635,7 +635,8 @@ def open_qoi_definition_window(main_window):
             'mean_volume': "lambda df: df['total_volume'].mean()",
             'std_volume': "lambda df: df['total_volume'].std()",
             'total_volume': "lambda df: df['total_volume'].sum()",
-            'run_time': "lambda mcds: mcds.get_runtime()", # no argument needed
+            'run_time': "lambda mcds: mcds.get_runtime()",
+            'sum_total_cells': "lambda mcds_ts: sum(map(lambda mcds: len(mcds.get_cell_df()), mcds_ts))",
             'template_cellType_live': "lambda df: len( df[ (df['dead'] == False) & (df['cell_type'] == <cellType>) ])\n # Replace <cellType> with the desired cell type name",
             'template_meanSubstrate': "lambda df_subs: df_subs[ <substrateName>].mean() \n # Replace <substrateName> with the desired substrate name",
             'template_stdSubstrate': "lambda df_subs: df_subs[ <substrateName>].std() \n # Replace <substrateName> with the desired substrate name",
