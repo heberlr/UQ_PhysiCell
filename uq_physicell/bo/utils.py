@@ -288,14 +288,19 @@ def tensor_to_param_dict(params_tensor: torch.Tensor, search_space: dict):
 
 def param_dict_to_tensor(params_dict:dict, search_space:dict) -> torch.Tensor:
     """
-    Convert a dictionary of parameters to a tensor in the range [0, 1] based on the search space.
+    Convert a dictionary of parameters to a normalized tensor in the range [0, 1] based on the search space.
     Args:
         params_dict (dict): Dictionary containing parameter names and their corresponding values.
-        search_space (dict): Dictionaries defining the search space.
+        search_space (dict): Dictionaries defining the search space with 'lower_bound' and 'upper_bound'.
     Returns:
-        torch.Tensor: Tensor containing parameter values in the range [0, 1].
+        torch.Tensor: Tensor containing normalized parameter values in the range [0, 1].
     """
     params_list = []
     for param in search_space.keys():
-        params_list.append( params_dict[param] )
+        value = params_dict[param]
+        lower_bound = search_space[param]['lower_bound']
+        upper_bound = search_space[param]['upper_bound']
+        # Normalize to [0, 1]
+        normalized_value = (value - lower_bound) / (upper_bound - lower_bound)
+        params_list.append(normalized_value)
     return torch.tensor(params_list, dtype=torch.double)
