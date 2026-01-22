@@ -31,7 +31,9 @@ def plot_qoi_over_time(df_plot, selected_qoi, ax):
     import seaborn as sns
     # Identify the relevant columns
     qoi_columns = sorted([col for col in df_plot.columns if col.startswith(selected_qoi)])
-    time_columns = sorted([col for col in df_plot.columns if col.startswith("time_")])
+    # Extract time IDs from the QoI columns - (Some QoIs may not have multiple time points, e.g., cumulative values over time)
+    time_ids = [col.split(f"{selected_qoi}_")[-1] for col in qoi_columns]
+    time_columns = sorted([f"time_{time_id}" for time_id in time_ids])
     # Prepare the data for seaborn
     plot_data = pd.DataFrame({
         "Time": df_plot[time_columns].values.flatten(),
@@ -74,7 +76,7 @@ def plot_global_sa_results(global_SA_parameters, sa_method, qoi_time_values, sa_
     )
     custom_palette = sns.color_palette("tab20", len(plot_data["Parameter"].unique()))
     # If just one time point, use barplot, else use lineplot
-    if len(qoi_time_values) == 1:
+    if len(sa_results[selected_qoi].keys()) == 1:
         sns.barplot(data=plot_data, x="Time", y="Sensitivity Index", hue="Parameter", ax=ax, palette=custom_palette, hue_order=parameter_order)
     else:
         sns.lineplot(data=plot_data, x="Time", y="Sensitivity Index", hue="Parameter", ax=ax, palette=custom_palette, hue_order=parameter_order)                
@@ -107,11 +109,40 @@ def plot_local_sa_results(sa_method, qoi_time_values, sa_results, selected_qoi, 
         .index
     )
     custom_palette = sns.color_palette("tab20", len(plot_data["Parameter"].unique()))
-    sns.lineplot(data=plot_data, x="Time", y="Sensitivity Index", hue="Parameter", ax=ax, palette=custom_palette, hue_order=parameter_order)
+        # If just one time point, use barplot, else use lineplot
+    if len(sa_results[selected_qoi].keys()) == 1:
+        sns.barplot(data=plot_data, x="Time", y="Sensitivity Index", hue="Parameter", ax=ax, palette=custom_palette, hue_order=parameter_order)
+    else:
+        sns.lineplot(data=plot_data, x="Time", y="Sensitivity Index", hue="Parameter", ax=ax, palette=custom_palette, hue_order=parameter_order)
     ax.set_xlabel("Time (min)")
     ax.set_title(f"Local SA - {sa_method}")
     # Only add legend if there are labeled artists
     handles, labels = ax.get_legend_handles_labels()
     if handles and labels:
         ax.legend(bbox_to_anchor=(1.05, 1), loc="upper left", title_fontsize=8, fontsize=8)
-    
+
+
+def plot_cells_2D(df_cells, color_dic, ax, scale_bar=False, bar_size=200, axes_visible=False, feature='cell_type'):
+    import matplotlib.pyplot as plt
+    from matplotlib.collections import PatchCollection
+    from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
+    patches = []
+    for index, row in df_cells.iterrows():
+        circle = plt.Circle((row['position_x'], row['position_y']), row['radius'])
+        patches.append(circle)
+    collection = PatchCollection(patches, facecolors=[color_dic[ct] for ct in df_cells[feature]], edgecolors='black', linewidths=0.5)
+    ax.add_collection(collection)
+    ax.set_aspect('equal')
+    ax.autoscale_view()
+    # Remove spines
+    ax.spines[['top', 'right', 'left', 'bottom']].set_visible(axes_visible)
+    # Remove the tick marks as well:
+    ax.tick_params(left=axes_visible, labelleft=axes_visible, bottom=axes_visible, labelbottom=axes_visible)
+    if scale_bar:
+        asb = AnchoredSizeBar(ax.transData,
+                      bar_size,
+                      f"{bar_size} μm",
+                      loc="lower right",
+                      pad=0.1, borderpad=0.5, sep=5, size_vertical=20,
+                      frameon=False)
+        ax.add_artist(asb)

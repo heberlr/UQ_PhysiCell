@@ -172,7 +172,11 @@ def plot_qoi_param(df_ObsData:pd.DataFrame, df_output:pd.DataFrame, samples_id:l
         ax = axis
 
     # Plot observed data if available
-    sns.lineplot(df_ObsData, x=x_var, y=y_var, color='red', label='Observed QoI', linewidth=3, ax=ax)
+    if df_ObsData[y_var].nunique() > 1: # Ensure there are multiple y values to plot
+        sns.lineplot(df_ObsData, x=x_var, y=y_var, color='red', label='Observed QoI', linewidth=3, ax=ax)
+    else:
+        # sns.scatterplot(df_ObsData, x=x_var, y=y_var, color='red', label='Observed QoI', ax=ax)
+        ax.axhline(y=df_ObsData[y_var].dropna().values[0], color='red', label='Observed QoI', linestyle='--')
 
     all_df_data = pd.DataFrame()
     # Plot each QoI against the model results associated with the dic_param
@@ -188,8 +192,12 @@ def plot_qoi_param(df_ObsData:pd.DataFrame, df_output:pd.DataFrame, samples_id:l
     # Plot PhysiCell replicates with only one legend entry using seaborn
     # Add formatted SampleID for better legend display
     all_df_data['SampleID_formatted'] = all_df_data['SampleID'].apply(lambda x: f'SampleID: {x}')
-    sns.lineplot(data=all_df_data, x=x_var, y=y_var, ax=ax,
-        hue='SampleID_formatted', units='replicateID', dashes=(4,2), estimator=None)
+    if df_data[y_var].nunique() > 1:  # Ensure there are multiple y values to plot
+        sns.lineplot(data=all_df_data, x=x_var, y=y_var, ax=ax,
+            hue='SampleID_formatted', units='replicateID', dashes=(4,2), estimator=None)
+    else:
+        sns.scatterplot(data=all_df_data, x=x_var, y=y_var, ax=ax,
+            hue='SampleID_formatted', style='replicateID', s=50, alpha=0.5)
 
     ax.set_xlabel(x_var)
     ax.set_ylabel(y_var)
