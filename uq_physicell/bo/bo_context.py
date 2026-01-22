@@ -1,43 +1,49 @@
-import os, sys
+import os
+import sys
 import logging
+import configparser # read config *.ini file
 import concurrent.futures
 import pickle
 import numpy as np
 import pandas as pd
 from scipy.spatial.distance import pdist
 import torch
+from typing import Union, Optional
+
+# BoTorch imports
 from botorch.optim.optimize import optimize_acqf
 from botorch.utils.sampling import draw_sobol_samples
 from botorch import fit_gpytorch_mll
 from botorch.utils.multi_objective.pareto import is_non_dominated
-
-# All the specific classes we need
-from typing import Union, Optional
 from botorch.acquisition.multi_objective.logei import qLogNoisyExpectedHypervolumeImprovement
+from botorch.acquisition.logei import qLogExpectedImprovement
 from botorch.models.gp_regression import SingleTaskGP
 from botorch.models.model_list_gp_regression import ModelListGP
+from botorch.models.multitask import MultiTaskGP
 from botorch.sampling.normal import SobolQMCNormalSampler
+
+# GPyTorch imports
 from gpytorch.mlls.sum_marginal_log_likelihood import SumMarginalLogLikelihood
 from gpytorch.mlls import ExactMarginalLogLikelihood
-from botorch.acquisition.logei import qLogExpectedImprovement
 
-# My local modules
+# Local module imports
 from uq_physicell import PhysiCell_Model
+from uq_physicell.database.ma_db import (
+    load_parameter_space as load_ma_parameter_samples, 
+    load_qois as load_ma_qois, 
+    load_samples as load_ma_samples
+)
+from uq_physicell.model_analysis.utils import calculate_qoi_from_sa_db
 from ..utils.model_wrapper import run_replicate_serializable
 from ..database.bo_db import (
     create_structure, insert_metadata, insert_param_space, insert_qois, 
-    insert_gp_models, insert_samples, insert_output, load_structure
+    insert_gp_models, insert_samples, insert_output, load_structure, load_qois
 )
-from ..utils.distances import SumSquaredDifferences, Manhattan, Chebyshev
-from .utils import unnormalize_params, tensor_to_param_dict, normalize_params, param_dict_to_tensor
+from .utils import unnormalize_params, tensor_to_param_dict, param_dict_to_tensor
 
 class CalibrationContext:
     """
-    Context for Bayesian Optimization calibration with enhanced acquisition strategies.
-    
-    This class encapsulates all necessary parameters and configurations for model calibration
-    using multi-objective Bayesian optimization with sophisticated handling of parameter
-    non-identifiability issues through acquisition function enhancement strategies.
+    Context for Bayesian Optimization calibration for single objective or multi-objective.
     
     Attributes:
         db_path (str): Path to the database file for storing and retrieving samples.
@@ -47,9 +53,10 @@ class CalibrationContext:
         qoi_functions (dict): Dictionary of functions to compute quantities of interest (QoIs) from model outputs.
         distance_functions (dict): Dictionary of functions to compute distances between model outputs and observed data.
         search_space (dict): Dictionary defining the search space for parameters, including bounds and types.
-        bo_options (dict): Options for Bayesian Optimization including sampling parameters and acquisition strategy.
-                          Use 'acq_func_strategy' key for strategy: 'diversity_bonus', 'uncertainty_weighting', 
-                          'soft_constraints', 'adaptive_scaling', 'combined', or 'none' (default: 'none').
+        bo_options (dict): Options for Bayesian Optimization including sampling parameters.
+                          - 'use_correlated_gp' (bool): If True, use MultiTaskGP to model correlations between 
+                                                        objectives. If False (default), use independent GPs per objective.
+                          - Other options: num_initial_samples, num_iterations, batch_size_per_iteration, etc.
         logger (logging.Logger): Logger instance for logging messages during the calibration process.
     """
     
@@ -110,9 +117,6 @@ class CalibrationContext:
                 self.logger.error(f"Error reading observed data from {obsData}: {e}")
                 raise
         
-        # Validate acquisition strategy early to catch configuration issues
-        self._validate_acquisition_strategy()
-
         # Optional model customizations
         self.fixed_params = bo_options.get("fixed_params", {})
         self.summary_function = bo_options.get("summary_function", None)
@@ -129,12 +133,22 @@ class CalibrationContext:
         # (outer pool workers * num_replicates per sample) does not exceed max_workers. This prevents CPU oversubscription.
         # For example, if max_workers=8 and num_replicates=2, then workers_out=4, so at most 4 samples run in parallel,
         # each with 2 replicates, for a total of 8 processes.
-        self.num_replicates = self.model_config['numReplicates']
+        self.num_replicates = model_config.get('numReplicates', None)
+        # Read num_replicates from ini file if not provided in model_config
+        if self.num_replicates is None:
+            configFile = configparser.ConfigParser()
+            configFile.read_file(open(model_config['ini_path']))
+            self.num_replicates = int(configFile[model_config['struc_name']]['numReplicates'])
         self.workers_inner = min(self.max_workers, self.num_replicates)
         self.workers_out = max(1, self.max_workers // self.workers_inner)
         
         # BO-specific parameters (Model evaluation = [num_initial_samples + batch_size_bo * batch_size_per_iteration]* num_replicates)
-        self.num_initial_samples = bo_options.get("num_initial_samples", 2 * (len(search_space) + 1))  # Initial samples based on the number of parameters 2*(num_params + 1)  # Number of initial samples for Bayesian optimization
+        self.db_path_initial_samples = bo_options.get("db_path_initial_samples", None)
+        if self.db_path_initial_samples:
+            self.logger.info(f"🧪 Initial samples will be generated from existing database at {self.db_path_initial_samples}.")
+            self.num_initial_samples = 0  # Will be determined from the database
+        else:
+            self.num_initial_samples = bo_options.get("num_initial_samples", 2 * (len(search_space) + 1))  # Initial samples based on the number of parameters 2*(num_params + 1)  # Number of initial samples for Bayesian optimization
         self.batch_size_bo =  bo_options.get("num_iterations", 10)  # Number of BO iterations
         self.batch_size_per_iteration = bo_options.get("batch_size_per_iteration", 1)  # Batch size for each BO iteration
         self.samples_per_batch_act_func = bo_options.get("samples_per_batch_act_func", 128)  # Number of samples per batch for the acquisition function
@@ -150,17 +164,8 @@ class CalibrationContext:
             "StructureName": self.model_config["struc_name"],
         }
         
-        # Store enhanced strategy metadata
-        acq_func_strategy = bo_options.get("acq_func_strategy", "none")
-        if acq_func_strategy != "none":
-            self.dic_metadata["Enhancement_Strategy"] = acq_func_strategy
-            # Store strategy-specific weights if provided
-            if "diversity_weight" in bo_options:
-                self.dic_metadata["Diversity_Weight"] = bo_options["diversity_weight"]
-            if "uncertainty_weight" in bo_options:
-                self.dic_metadata["Uncertainty_Weight"] = bo_options["uncertainty_weight"]
-            if "constraint_strength" in bo_options:
-                self.dic_metadata["Constraint_Strength"] = bo_options["constraint_strength"]
+        # Estimate weights from observational data if not provided by user
+        self.distance_functions = self._estimate_weights_from_obsdata(obsData_columns)
 
         # Initialize the qoi_details
         self.qoi_details = {
@@ -171,35 +176,13 @@ class CalibrationContext:
                 (func.__name__ if callable(func) else eval(func).__name__)
                 for func in [self.distance_functions[key]['function'] for key in self.distance_functions.keys()]
             ],
+            # Extract weights estimated from observational data
             "QoI_distanceWeight": [self.distance_functions[key]['weight'] for key in self.distance_functions.keys()],
         }
 
         self.logger.info(f"🔧 CalibrationContext initialized with {self.max_workers} max workers, {self.workers_inner} inner workers, and {self.workers_out} outer workers.")
         # Cancellation flag for cooperative cancellation support
         self.cancel_requested = False
-
-    def _validate_acquisition_strategy(self) -> None:
-        """
-        Validate acquisition strategy configuration and warn about invalid values.
-        Raises:
-            ValueError: If acq_func_strategy contains invalid values.
-        """
-        # Validate strategy if specified
-        acq_func_strategy = self.bo_options.get("acq_func_strategy", "none")
-        valid_strategies = ["diversity_bonus", "uncertainty_weighting", "soft_constraints", 
-                          "adaptive_scaling", "combined", "none"]
-        
-        if acq_func_strategy not in valid_strategies:
-            self.logger.error(f"❌ Invalid acquisition strategy '{acq_func_strategy}'. Valid strategies: {valid_strategies}")
-            raise
-        
-        # Log the strategy being used
-        if acq_func_strategy != "none":
-            self.logger.debug(f"✅ Using enhanced identification strategy: {acq_func_strategy}")
-            if acq_func_strategy == "combined":
-                self.logger.debug("   - Combining diversity bonus + uncertainty weighting for balanced exploration")
-        else:
-            self.logger.debug("ℹ️  Using pure BoTorch acquisition (no enhancement strategy)")
 
     def default_run_single_replicate(self, sample_id: int, replicate_id: int, params: dict) -> dict:
         """
@@ -252,8 +235,11 @@ class CalibrationContext:
         for replicate_id, replicate_result in enumerate(replicate_results):
             replicate_objectives = {}
             for qoi, dist_info in self.distance_functions.items():
-                dicObsData = {'time': self.dic_obsData['time'], 'value': self.dic_obsData[qoi]}
-                dicModel = {'time': replicate_result['time'], 'value': replicate_result[qoi]}
+                idxs_non_nan = ~np.isnan(self.dic_obsData[qoi]) # Find non-NaN indices
+                dicObsData = {'time': self.dic_obsData['time'][idxs_non_nan], 'value': self.dic_obsData[qoi][idxs_non_nan]} 
+                # Include std if available
+                # if f"{qoi}_std" in self.dic_obsData: dicObsData["value_std"] = self.dic_obsData[f"{qoi}_std"][idxs_non_nan]    
+                dicModel = {'time': replicate_result['time'][idxs_non_nan], 'value': replicate_result[qoi][idxs_non_nan]}
                 if callable(dist_info["function"]):
                     distance = dist_info["weight"] * dist_info["function"](dicObsData, dicModel)
                 else:
@@ -261,21 +247,15 @@ class CalibrationContext:
                 # Convert distance to fitness
                 if self.use_exponential_fitness: # Use exponential fitness transformation
                     fitness = np.exp(-distance)
-                    # IMPROVED: Ensure exponential fitness stays in reasonable range
-                    min_fitness = 1e-3  # Higher minimum for numerical stability
-                    max_fitness = 1.0   # Cap maximum to prevent extreme values
-                    fitness = np.clip(fitness, min_fitness, max_fitness)
                 else: # Use inverse distance transformation
                     fitness = 1.0 / (1.0 + distance)
-                    # Standard clamping for inverse transformation
-                    min_fitness = 1e-3
-                    max_fitness = 1.0   # Cap maximum to prevent extreme values
-                    fitness = np.clip(fitness, min_fitness, max_fitness)
-                
-                # Check for problematic values
-                if fitness < min_fitness or np.isnan(fitness):
-                    fitness = min_fitness
-                    self.logger.warning(f"Fitness value clamped for QoI '{qoi}' - setting to minimum {min_fitness}")
+    
+                # Only handle pathological numerical cases
+                if np.isnan(fitness) or np.isinf(fitness):
+                    fitness = 1e-8
+                    self.logger.warning(f"Fitness value was NaN/Inf for QoI '{qoi}' - setting to {fitness}")
+                # Fitness must stay in [0, 1] but don't compress the range unnecessarily
+                fitness = np.clip(fitness, 0.0, 1.0)
                 
                 replicate_objectives[qoi] = fitness
                 # Debug: log distance and fitness values
@@ -334,9 +314,6 @@ class CalibrationContext:
         else: # Custom aggregation function (without scale factor - weights handle scaling)
             objectives, obj_noise, dic_results = self.custom_aggregation_func(replicate_results, sample_index, self.distance_functions, self.dic_obsData)
 
-        # NOTE: Enhanced strategies are now handled in the acquisition function, not as objectives
-        # This avoids unnecessary GP modeling of deterministic enhancement terms
-
         return objectives, obj_noise, dic_results
 
     def save_results_to_db(self, sample_index:int, objectives:dict, noise_std:dict, dic_results:dict):
@@ -357,8 +334,83 @@ class CalibrationContext:
         except Exception as e:
             self.logger.error(f"Error saving results for sample {sample_index} to database: {e}")
             raise
+    
+    def generate_initial_samples_from_db(self, start_sample_id:int = 0, iteration_id:int = 0) -> tuple:
+        """
+        Generate initial samples from existing database for Bayesian optimization.
+        
+        This function retrieves initial samples from the database, evaluates them with the QoI functions,
+        and prepares the training tensors for the BO pipeline. Used for resume functionality.
+        
+        Args:
+            start_sample_id (int, optional): Starting sample ID. default will use 0 for new databases
+            iteration_id (int, optional): Current iteration ID for tracking.
+        Returns:
+            tuple: (train_x, train_obj, train_obj_std) - Tensors ready for BO pipeline.
+        """
+        self.logger.debug("Generating initial samples from existing database...")
+        
+        # Load all data from the database
+        df_param_space = load_ma_parameter_samples(self.db_path_initial_samples)
+        # Check if parameter space is compatible
+        for param, param_info in self.search_space.items():
+            lower_bound = param_info['lower_bound']
+            upper_bound = param_info['upper_bound']
+            if param not in df_param_space['ParamName'].values:
+                self.logger.error(f"❌ Parameter '{param}' not found in database parameter space.")
+                raise ValueError(f"Parameter '{param}' not found in database parameter space.")
+            if lower_bound - df_param_space[df_param_space['ParamName'] == param]['lower_bound'].values[0] > 1e-8 or \
+               upper_bound - df_param_space[df_param_space['ParamName'] == param]['upper_bound'].values[0] > 1e-8:
+                self.logger.error(f"❌ Parameter '{param}' bounds do not match database parameter space. "
+                                  f"lower: {lower_bound} vs {df_param_space[df_param_space['ParamName'] == param]['lower_bound'].values[0]},"
+                                  f"upper: {upper_bound} vs {df_param_space[df_param_space['ParamName'] == param]['upper_bound'].values[0]}")
+                raise ValueError(f"Parameter '{param}' bounds do not match database parameter space.")
+        
+        # QoIs need to be empty
+        df_qois = load_ma_qois(self.db_path_initial_samples)
+        if df_qois.iloc[0].to_numpy().any():
+            self.logger.error(f"❌ Database already contains QoI definitions, cannot generate initial samples. Found QoIs: {df_qois}")
+            raise ValueError(f"Database already contains QoI definitions, cannot generate initial samples. Found QoIs: {df_qois}")
+        
+        # Load samples
+        dic_samples = load_ma_samples(self.db_path_initial_samples)
+        self.num_samples = len(dic_samples)
+        train_x_list = []
+        for sample_id in dic_samples.keys():
+            dic_params_i = dic_samples[sample_id]
+            # save parameters in the database
+            insert_samples(self.db_path, iteration_id, {sample_id: dic_params_i})
+            train_x_list.append(param_dict_to_tensor(dic_params_i, self.search_space))
 
-    def generate_and_evaluate_samples(self, num_samples:int, start_sample_id:int = 0, iteration_id:int = 0) -> tuple:
+        # MCDS lists to QoIs
+        df_qois_data = calculate_qoi_from_sa_db(self.db_path_initial_samples, self.qoi_functions, mode='calib')
+        objectives_list = []
+        obj_noise_list = []
+        for sample_id in dic_samples.keys():
+            replicate_results = [df_qois_data[(df_qois_data['SampleID'] == sample_id) & (df_qois_data['ReplicateID'] == replicate_id)].to_dict(orient='list') for replicate_id in df_qois_data['ReplicateID'].unique()] # Convert to dict of lists
+            # Convert lists to numpy arrays
+            for elem_dict in replicate_results:
+                for key, list_values in elem_dict.items():
+                    elem_dict[key] = np.array(list_values)
+            if not self.custom_aggregation_func: # Default: Aggregate replicate results (mean and standard deviation)
+                objectives, obj_noise, dic_results = self.default_aggregation_func(replicate_results, sample_id)
+            else: # Custom aggregation function (without scale factor - weights handle scaling)
+                objectives, obj_noise, dic_results = self.custom_aggregation_func(replicate_results, sample_id, self.distance_functions, self.dic_obsData)
+            objectives_list.append(objectives)
+            obj_noise_list.append(obj_noise)
+            # Save results to database sequentially to avoid concurrency issues
+            self.save_results_to_db(sample_id, objectives, obj_noise, dic_results)
+        # Convert parameters and objectives to tensors
+        train_x = torch.stack(train_x_list).to(torch.float64)  # Convert to float
+        train_obj = torch.tensor([list(output.values()) for output in objectives_list], dtype=torch.float64)
+        train_obj_std = torch.tensor([list(output.values()) for output in obj_noise_list], dtype=torch.float64)
+        
+        # Reconstruct training tensors from loaded data
+        self.logger.debug(f"Generated {len(train_x)} initial samples from database.")
+        return train_x, train_obj, train_obj_std
+
+
+    def generate_and_evaluate_samples(self, start_sample_id:int = 0, iteration_id:int = 0) -> tuple:
         """
         Generate and evaluate samples for Bayesian optimization using Sobol sequences.
         
@@ -367,27 +419,27 @@ class CalibrationContext:
         restart functionality.
         
         Args:
-            num_samples (int): Number of samples to generate and evaluate.
             start_sample_id (int, optional): Starting sample ID. default will use 0 for new databases
                                            or caller should provide the appropriate starting ID.
+            iteration_id (int, optional): Current iteration ID for tracking.
         Returns:
-            tuple: (train_x, train_obj, train_obj_true, train_obj_std) - Tensors ready for BO pipeline.
+            tuple: (train_x, train_obj, train_obj_std) - Tensors ready for BO pipeline.
         """
         num_params = len(self.search_space)
         bounds = torch.stack([torch.zeros(num_params), torch.ones(num_params)]) # 0 to 1 bounds for each parameter
         
-        sample_ids = np.arange(start_sample_id, start_sample_id + num_samples, dtype=int)
-        self.logger.debug(f"Generating {num_samples} samples with IDs {start_sample_id} to {start_sample_id + num_samples - 1}")
-        train_x = draw_sobol_samples(bounds, n=num_samples, q=1).squeeze(1).to(torch.float64)  # Convert to float64 and squeeze q dimension
+        sample_ids = np.arange(start_sample_id, start_sample_id + self.num_initial_samples, dtype=int)
+        self.logger.debug(f"Generating {self.num_initial_samples} samples with IDs {start_sample_id} to {start_sample_id + self.num_initial_samples - 1}")
+        train_x = draw_sobol_samples(bounds, n=self.num_initial_samples, q=1).squeeze(1).to(torch.float64)  # Convert to float64 and squeeze q dimension
         train_x_dic_params = []
-        for i in range(num_samples):
+        for i in range(self.num_initial_samples):
             train_x_unnorm_i = unnormalize_params(train_x[i], self.search_space)
             dic_params_i = tensor_to_param_dict(train_x_unnorm_i, self.search_space)
             # save parameters in the database
             insert_samples(self.db_path, iteration_id, {sample_ids[i]: dic_params_i})
             train_x_dic_params.append(dic_params_i)
 
-        self.logger.debug(f"Evaluating {num_samples} samples with model...")
+        self.logger.debug(f"Evaluating {self.num_initial_samples} samples with model...")
         with concurrent.futures.ProcessPoolExecutor(max_workers=self.workers_out) as outer_executor:
             list_output_tuples = list(outer_executor.map(self.evaluate_params, train_x_dic_params, sample_ids))
 
@@ -401,15 +453,10 @@ class CalibrationContext:
         # list(output[0].values()) extracts values as [1.23, 4.56] for one sample
         # The list comprehension creates [[1.23, 4.56], [2.34, 5.67], ...] for all samples
         # torch.tensor() converts this to a 2D tensor with shape (n_samples, n_objectives)
-        train_obj_true = torch.tensor([list(output[0].values()) for output in list_output_tuples], dtype=torch.float64)
+        train_obj = torch.tensor([list(output[0].values()) for output in list_output_tuples], dtype=torch.float64)
         train_obj_std = torch.tensor([list(output[1].values()) for output in list_output_tuples], dtype=torch.float64)
-        # Add noise to the average of mean based on the standard deviation of the outputs (normal distributed noise)
-        train_obj = train_obj_true + torch.randn_like(train_obj_true) * train_obj_std
-        # Ensure fitness values remain positive (fitness should not be negative)
-        min_fitness = 1e-3
-        train_obj = torch.clamp(train_obj, min=min_fitness)
 
-        return train_x, train_obj, train_obj_true, train_obj_std
+        return train_x, train_obj, train_obj_std
 
     def load_existing_data(self) -> tuple:
         """
@@ -426,7 +473,7 @@ class CalibrationContext:
         self._validate_loaded_data(df_metadata, df_param_space, df_qois)
         
         # Reconstruct training tensors from loaded data
-        train_x, train_obj, train_obj_true, train_obj_std = self._reconstruct_training_data(df_samples, df_output)
+        train_x, train_obj, train_obj_std = self._reconstruct_training_data(df_samples, df_output)
         
         # Get the latest iteration and hypervolume (don't load the model - we'll recreate it)
         if not df_gp_models.empty:
@@ -439,7 +486,7 @@ class CalibrationContext:
         self.logger.debug(f"Latest hypervolume: {latest_hypervolume}")
 
         # Return without the model - we'll recreate it from the training data
-        return train_x, train_obj, train_obj_true, train_obj_std, latest_iteration, latest_hypervolume
+        return train_x, train_obj, train_obj_std, latest_iteration, latest_hypervolume
 
     def _validate_loaded_data(self, df_metadata, df_param_space, df_qois):
         """
@@ -475,16 +522,17 @@ class CalibrationContext:
                 param_dict[row['ParamName']] = row['ParamValue']
             
             # Normalize parameters to [0,1] range
-            param_tensor = param_dict_to_tensor(param_dict, self.search_space)
-            normalized_tensor = normalize_params(param_tensor, self.search_space)
-            train_x_list.append(normalized_tensor)
+            train_x_list.append( param_dict_to_tensor(param_dict, self.search_space) )
         
         train_x = torch.stack(train_x_list).to(torch.float64)
+        # Validate that X is normalized
+        if train_x.min() < -0.01 or train_x.max() > 1.01:
+            self.logger.warning(f"⚠️ Input X not properly normalized: min={train_x.min():.4f}, max={train_x.max():.4f}")
+            raise ValueError("Input training data X must be normalized to [0, 1] range.")
         
         # Reconstruct objectives tensors
-        train_obj_true_list = []
-        train_obj_std_list = []
         train_obj_list = []
+        train_obj_std_list = []
         
         for sample_id in sample_ids:
             output_row = df_output[df_output['SampleID'] == sample_id].iloc[0]
@@ -501,21 +549,13 @@ class CalibrationContext:
             obj_tensor = torch.tensor(obj_values, dtype=torch.float64)
             std_tensor = torch.tensor(std_values, dtype=torch.float64)
             
-            train_obj_true_list.append(obj_tensor)
+            train_obj_list.append(obj_tensor)
             train_obj_std_list.append(std_tensor)
-            
-            # Add noise to create train_obj (same as in original code)
-            noisy_obj = obj_tensor + torch.randn_like(obj_tensor) * std_tensor
-            # Ensure fitness values remain positive (fitness should not be negative)
-            min_fitness = 1e-3
-            noisy_obj = torch.clamp(noisy_obj, min=min_fitness)
-            train_obj_list.append(noisy_obj)
         
-        train_obj_true = torch.stack(train_obj_true_list)
-        train_obj_std = torch.stack(train_obj_std_list)
         train_obj = torch.stack(train_obj_list)
+        train_obj_std = torch.stack(train_obj_std_list)
         
-        return train_x, train_obj, train_obj_true, train_obj_std
+        return train_x, train_obj, train_obj_std
 
     def update_bo_iterations(self, additional_iterations: int):
         """
@@ -525,66 +565,20 @@ class CalibrationContext:
         self.batch_size_bo += additional_iterations
         self.logger.debug(f"Updated max iterations from {original_iterations} to {self.batch_size_bo} (added {additional_iterations} iterations)")
 
-    def load_existing_data(self) -> tuple:
+    def analyze_convergence(self, hvs_list: list, train_obj: torch.Tensor, train_obj_std: torch.Tensor, 
+                           train_x: torch.Tensor, iteration: int) -> dict:
         """
-        Load existing data from the database for resume functionality.
-        Returns:
-            tuple: A tuple containing training data tensors, latest iteration, and hypervolume.
-        """
-        self.logger.debug("Loading existing data from database...")
-        
-        # Load all data from the database
-        df_metadata, df_param_space, df_qois, df_gp_models, df_samples, df_output = load_structure(self.db_path)
-        
-        # Validate that the loaded data is compatible with current configuration
-        self._validate_loaded_data(df_metadata, df_param_space, df_qois)
-        
-        # Reconstruct training tensors from loaded data
-        train_x, train_obj, train_obj_true, train_obj_std = self._reconstruct_training_data(df_samples, df_output)
-        
-        # Get the latest iteration and hypervolume (don't load the model - we'll recreate it)
-        if not df_gp_models.empty:
-            latest_iteration = df_gp_models['IterationID'].max()
-            latest_hypervolume = df_gp_models[df_gp_models['IterationID'] == latest_iteration]['Hypervolume'].iloc[0]
-        else:
-            latest_iteration = -1
-            latest_hypervolume = 0.0
-            
-        self.logger.debug(f"Loaded {len(train_x)} samples from {latest_iteration + 1} iterations")
-        self.logger.debug(f"Latest hypervolume: {latest_hypervolume}")
-        
-        # Return without the model - we'll recreate it from the training data
-        return train_x, train_obj, train_obj_true, train_obj_std, latest_iteration, latest_hypervolume
-
-    def _validate_loaded_data(self, df_metadata, df_param_space, df_qois):
-        """
-        Validate that loaded data is compatible with current configuration.
-        """
-        # Check if parameter space matches
-        loaded_params = set(df_param_space['ParamName'].tolist())
-        current_params = set(self.search_space.keys())
-        if loaded_params != current_params:
-            raise ValueError(f"Parameter space mismatch. Loaded: {loaded_params}, Current: {current_params}")
-            
-        # Check if QoIs match
-        loaded_qois = set(df_qois['QoI_Name'].tolist())
-        current_qois = set(self.qoi_functions.keys())
-        if loaded_qois != current_qois:
-            raise ValueError(f"QoI mismatch. Loaded: {loaded_qois}, Current: {current_qois}")
-            
-        self.logger.debug("Loaded data validation passed")
-
-    def analyze_convergence(self, hvs_list: list, train_obj_true: torch.Tensor, train_x: torch.Tensor, iteration: int) -> dict:
-        """
-        Sophisticated convergence analysis that properly distinguishes between:
+        Noise-aware convergence analysis that distinguishes between:
         1. True convergence (optimization found optimal solutions)
-        2. Stagnation with good coverage (likely converged to optimal region)
-        3. Stagnation with poor coverage (stuck in suboptimal region)
-        4. Still in progress
+        2. Noise-limited convergence (converged given noise level)
+        3. Stagnation with good coverage (likely converged to optimal region)
+        4. Stagnation with poor coverage (stuck in suboptimal region)
+        5. Still in progress
         
         Args:
             hvs_list (list): History of hypervolume values
-            train_obj_true (torch.Tensor): True objective values
+            train_obj (torch.Tensor): Objective values (used for Pareto analysis)
+            train_obj_std (torch.Tensor): Standard deviation across replicates (noise estimate)
             train_x (torch.Tensor): Parameter values (normalized)
             iteration (int): Current iteration
             
@@ -598,7 +592,8 @@ class CalibrationContext:
             "status": "in_progress",
             "reason": "",
             "convergence_confidence": 0.0,
-            "suggestion": ""
+            "suggestion": "",
+            "noise_limited": False
         }
         
         if len(hvs_list) < 10:
@@ -606,9 +601,36 @@ class CalibrationContext:
             result["status"] = "insufficient_data"
             return result
         
-        # Strategy-aware analysis logging
-        acq_func_strategy = self.bo_options.get("acq_func_strategy", "none")
-        self.logger.debug(f"🔍 Convergence analysis with strategy: {acq_func_strategy}")
+        # NOISE ANALYSIS: Compute signal-to-noise ratio to assess if we can distinguish solutions
+        obj_means = train_obj.mean(dim=0).numpy()
+        obj_noise = train_obj_std.mean(dim=0).numpy()  # Average noise per objective
+        snr_per_objective = obj_means / (obj_noise + 1e-10)  # Signal-to-noise ratio
+        avg_snr = float(np.mean(snr_per_objective))
+        min_snr = float(np.min(snr_per_objective))
+        
+        # Compute relative noise (coefficient of variation)
+        relative_noise = obj_noise / (obj_means + 1e-10)
+        avg_relative_noise = float(np.mean(relative_noise))
+        max_relative_noise = float(np.max(relative_noise))
+        
+        result["snr_avg"] = avg_snr
+        result["snr_min"] = min_snr
+        result["relative_noise_avg"] = avg_relative_noise
+        result["relative_noise_max"] = max_relative_noise
+        
+        # Determine noise level severity and adjust thresholds accordingly
+        if max_relative_noise > 0.15:  # >15% noise
+            noise_level = "high"
+            result["noise_limited"] = True
+            hv_stability_threshold = 0.02  # Relax threshold for noisy objectives
+            self.logger.warning(f"⚠️  High noise detected (max {max_relative_noise:.1%}) - using relaxed convergence criteria")
+        elif max_relative_noise > 0.08:  # 8-15% noise
+            noise_level = "moderate"
+            result["noise_limited"] = True
+            hv_stability_threshold = 0.01
+        else:  # <8% noise
+            noise_level = "low"
+            hv_stability_threshold = 0.005
         
         # 1. Hypervolume trend analysis
         hv_improvements = [hvs_list[i] - hvs_list[i-5] for i in range(5, len(hvs_list))]
@@ -626,7 +648,7 @@ class CalibrationContext:
             result["hv_stability"] = hv_stability
             
         # 3. Pareto front quality analysis
-        fitness_values = train_obj_true.detach().numpy()
+        fitness_values = train_obj.detach().numpy()
         pareto_analysis = self._analyze_pareto_front(fitness_values)
         result.update(pareto_analysis)
         
@@ -638,54 +660,58 @@ class CalibrationContext:
         acq_diversity = self._estimate_acquisition_diversity(train_x)
         result["acquisition_diversity"] = acq_diversity
         
-        # 6. IMPROVED CONVERGENCE DECISION LOGIC
-        # Strategy-specific threshold adjustments
-        if acq_func_strategy in ["combined", "diversity_bonus"]:
-            hv_stability_threshold = 0.01
-            coverage_threshold_good = 0.7
-            coverage_threshold_poor = 0.3
-            acq_diversity_threshold = 0.05
-            pareto_quality_threshold = 0.6
-        elif acq_func_strategy == "uncertainty_weighting":
-            hv_stability_threshold = 0.008
-            coverage_threshold_good = 0.65
-            coverage_threshold_poor = 0.25
-            acq_diversity_threshold = 0.08
-            pareto_quality_threshold = 0.7
-        else:
-            # Pure BoTorch - use original strict thresholds
-            hv_stability_threshold = 0.005
-            coverage_threshold_good = 0.6
-            coverage_threshold_poor = 0.2
-            acq_diversity_threshold = 0.1
-            pareto_quality_threshold = 0.7
+        # Additional convergence thresholds
+        coverage_threshold_good = 0.6
+        coverage_threshold_poor = 0.2
+        acq_diversity_threshold = 0.1
+        pareto_quality_threshold = 0.7
         
         # Check if hypervolume has stabilized (minimal recent improvements)
+        # For high noise, we expect more HV fluctuation, so check against noise-adjusted threshold
         is_hv_stable = (hv_stability < hv_stability_threshold and
                         len(recent_improvements) >= 3 and
                         all(imp >= -1e-10 for imp in recent_improvements) and
-                        max(recent_improvements) < 1e-6)
+                        max(recent_improvements) < hv_stability_threshold * 0.2)  # Improvement < 20% of stability threshold
         
-        # Check for long-term stagnation
-        is_stagnant = (len(hvs_list) >= 10 and
-                       abs(hvs_list[-1] - hvs_list[-10]) < 1e-10)
+        # Check for long-term stagnation (adjusted for noise level)
+        stagnation_window = 10 if noise_level == "low" else 15  # Longer window for noisy objectives
+        stagnation_threshold = 1e-10 if noise_level == "low" else hv_stability_threshold * 0.1
+        is_stagnant = (len(hvs_list) >= stagnation_window and
+                       abs(hvs_list[-1] - hvs_list[-stagnation_window]) < stagnation_threshold)
         
-        # DECISION TREE:
+        # DECISION TREE (noise-aware):
         
-        # CASE 1: TRUE CONVERGENCE - Stable HV + Good quality + Good coverage
+        # CASE 1: TRUE CONVERGENCE - Stable HV + Good quality + Good coverage + Low noise
         if (is_hv_stable and
             pareto_analysis["pareto_quality"] >= pareto_quality_threshold and
-            coverage_analysis["coverage"] >= coverage_threshold_good):
+            coverage_analysis["coverage"] >= coverage_threshold_good and
+            noise_level == "low"):
             
             result["converged"] = True
             result["status"] = "converged"
-            result["reason"] = f"Optimal solutions found: stable hypervolume with excellent Pareto quality and parameter coverage (strategy: {acq_func_strategy})"
+            result["reason"] = "Optimal solutions found: stable hypervolume with excellent Pareto quality and parameter coverage"
             result["convergence_confidence"] = min(0.95, 
                 0.3 + 0.3 * pareto_analysis["pareto_quality"] + 
                 0.2 * coverage_analysis["coverage"] + 
                 0.2 * (1 - min(hv_stability / hv_stability_threshold, 1.0)))
         
-        # CASE 2: LIKELY CONVERGED - Stagnant but good coverage and quality
+        # CASE 2: NOISE-LIMITED CONVERGENCE - Converged as much as noise allows
+        elif (is_hv_stable and
+              coverage_analysis["coverage"] >= coverage_threshold_good and
+              result["noise_limited"]):
+            
+            result["converged"] = True
+            result["status"] = "converged_noise_limited"
+            result["reason"] = (f"Converged within noise constraints (rel. noise: {avg_relative_noise:.1%}). "
+                              f"Further improvement requires more replicates to reduce noise.")
+            result["convergence_confidence"] = min(0.75,
+                0.4 * pareto_analysis["pareto_quality"] + 
+                0.4 * coverage_analysis["coverage"] + 
+                0.2 * min_snr / 10.0)  # SNR contribution (capped at SNR=10)
+            result["suggestion"] = (f"Consider increasing replicates from {self.num_replicates} to "
+                                  f"~{int(self.num_replicates * (max_relative_noise / 0.05)**2)} to reduce noise below 5%")
+        
+        # CASE 3: LIKELY CONVERGED - Stagnant but good coverage and quality
         elif (is_stagnant and
               coverage_analysis["coverage"] >= coverage_threshold_good and
               pareto_analysis["pareto_quality"] >= pareto_quality_threshold * 0.8):  # Slightly relaxed quality
@@ -714,10 +740,7 @@ class CalibrationContext:
             
             # Provide specific restart suggestions
             if coverage_analysis["coverage"] < coverage_threshold_poor:
-                if acq_func_strategy in ["combined", "diversity_bonus"]:
-                    result["suggestion"] = "Despite diversity enhancement, coverage is low - try increasing diversity_weight or restart with more initial samples"
-                else:
-                    result["suggestion"] = "Poor parameter space coverage - enable diversity_bonus strategy or restart with more initial samples"
+                result["suggestion"] = "Poor parameter space coverage - restart with more initial samples or adjust distance function weights"
             elif pareto_analysis["pareto_quality"] < pareto_quality_threshold * 0.5:
                 result["suggestion"] = "Poor fitness values: check distance function weights or try different acquisition strategy"
             else:
@@ -855,6 +878,53 @@ class CalibrationContext:
             "uniformity": uniformity
         }
     
+    def _estimate_weights_from_obsdata(self, obsData_columns):
+        """
+        Estimate distance function weights based on observational data ranges.
+        
+        This method normalizes weights so that each QoI contributes equally to the optimization,
+        based on the scale of the observational data itself (not simulated data).
+        
+        Args:
+            obsData_columns (dict): Dictionary mapping QoI names to observational data column names
+            
+        Returns:
+            dict: Updated distance_functions with normalized weights
+        """
+        updated_functions = {}
+        
+        logger_msg = "📊 Estimating weights from observational data ranges:\n"
+        
+        for qoi_name in self.qoi_functions.keys():
+            func_config = self.distance_functions.get(qoi_name, {"function": None}).copy()
+            current_weight = func_config.get("weight", None)
+            # Get observational data for this QoI (supports dict or DataFrame inputs)
+            if isinstance(self.dic_obsData, dict):
+                obs_values = np.asarray(self.dic_obsData[qoi_name], dtype=np.float64)
+            elif hasattr(self.dic_obsData, "columns"):
+                obs_values = self.dic_obsData[qoi_name].to_numpy()
+            if obs_values is not None:
+                obs_values = obs_values[~np.isnan(obs_values)] # drop NaNs
+                obs_range = float(np.max(obs_values) - np.min(obs_values)) if len(obs_values) > 1 else obs_values[0] # single value the range is the value itself
+            else:
+                ValueError("Obs. Data was NOT load correctly!")            
+            
+            # If user provided weight, keep it; otherwise estimate from obs data range
+            if current_weight is not None and abs(current_weight) > 1e-6 and abs(current_weight) < 1e6:
+                # User-provided weight - keep it
+                new_weight = current_weight
+                logger_msg += f"  ✓ {qoi_name}: {new_weight:.6f} (user-provided)\n"
+            else:
+                # Estimate weight: normalize by range times number of observations
+                new_weight = 1.0 / (obs_range * len(obs_values) + 1e-10)
+                logger_msg += f"  📈 {qoi_name} - weight: {new_weight:.2e} (range={obs_range:.2e})\n"
+            
+            func_config['weight'] = new_weight
+            updated_functions[qoi_name] = func_config
+        
+        self.logger.info(logger_msg)
+        return updated_functions
+
     def _estimate_acquisition_diversity(self, train_x):
         """
         Estimate diversity of acquisition function sampling.
@@ -890,7 +960,7 @@ class CalibrationContext:
         return min(diversity, 1.0)  # Cap at 1.0
 
 
-def single_objective_bayesian_optimization(calib_context, train_x, train_obj, train_obj_true, train_obj_std, start_iteration):
+def single_objective_bayesian_optimization(calib_context, train_x, train_obj, train_obj_std, start_iteration):
     """Single-objective Bayesian optimization loop."""
     logger = calib_context.logger
     batch_size_bo = calib_context.batch_size_bo
@@ -902,15 +972,17 @@ def single_objective_bayesian_optimization(calib_context, train_x, train_obj, tr
     db_path = calib_context.db_path
     qoi_name = calib_context.qoi_details['QOI_Name'][0]
     hvs_list = []
-    best_fitness_list = [torch.max(train_obj_true).item()]
+    best_fitness_list = [torch.max(train_obj).item()]
     for iteration in range(start_iteration, batch_size_bo + 1):
         logger.info(f"{'='*60}")
         logger.info(f"🔄 Single-Objective BO Iteration {iteration}/{batch_size_bo}")
         logger.info(f"{'='*60}")
+
         # Cooperative cancellation check
         if getattr(calib_context, 'cancel_requested', False):
             logger.info("🛑 Cancellation requested — stopping single-objective optimization loop.")
             break
+
         # Fit GP model
         logger.info("🔧 Fitting Gaussian Process model...")
         train_y = train_obj[:, 0:1]
@@ -919,6 +991,7 @@ def single_objective_bayesian_optimization(calib_context, train_x, train_obj, tr
         model = SingleTaskGP(train_x, train_y, train_yvar)
         mll = ExactMarginalLogLikelihood(model.likelihood, model)
         fit_gpytorch_mll(mll)
+        
         # Acquisition function: qLogExpectedImprovement
         sampler = SobolQMCNormalSampler(sample_shape=torch.Size([samples_per_batch]))
         acq_func = qLogExpectedImprovement(model=model, best_f=train_yvar.max().item(), sampler=sampler)
@@ -936,30 +1009,33 @@ def single_objective_bayesian_optimization(calib_context, train_x, train_obj, tr
         logger.info(f"🎯 Optimized acquisition function, best value = {acq_values.max():.6f}")
         next_sample_ids = [len(train_x) + i for i in range(len(candidates))]
         next_params_list = []
+        # Convert Parameter to real scale and save to DB
         for i, x in enumerate(candidates):
             x_unnorm = unnormalize_params(x, search_space)
             params_dict = tensor_to_param_dict(x_unnorm, search_space)
             next_params_list.append(params_dict)
             insert_samples(db_path, iteration, {next_sample_ids[i]: params_dict})
+        # Run simulations
         with concurrent.futures.ProcessPoolExecutor(max_workers=calib_context.workers_out) as executor:
             new_results = list(executor.map(calib_context.evaluate_params, next_params_list, next_sample_ids))
         for i, (objectives, obj_noise, dic_results) in enumerate(new_results):
             calib_context.save_results_to_db(next_sample_ids[i], objectives, obj_noise, dic_results)
-        new_obj_true = torch.tensor([list(result[0].values()) for result in new_results], dtype=torch.float64)
+        new_obj = torch.tensor([list(result[0].values()) for result in new_results], dtype=torch.float64)
         new_obj_std = torch.tensor([list(result[1].values()) for result in new_results], dtype=torch.float64)
-        new_obj = new_obj_true + torch.randn_like(new_obj_true) * new_obj_std
-        new_obj = torch.clamp(new_obj, min=1e-3)
         train_x = torch.cat([train_x, candidates])
         train_obj = torch.cat([train_obj, new_obj])
-        train_obj_true = torch.cat([train_obj_true, new_obj_true])
         train_obj_std = torch.cat([train_obj_std, new_obj_std])
-        best_fitness = torch.max(train_obj_true).item()
+        best_fitness = torch.max(train_obj).item()
         best_fitness_list.append(best_fitness)
+
+        # Log iteration summary
         logger.info(f"✅ Completed iteration {iteration}/{batch_size_bo} - Total samples: {len(train_x)}")
         logger.info(f"🎯 Best fitness value for {qoi_name}: {best_fitness:.6f}")
+
+    # Final log
     logger.info("✅ Single-objective Bayesian optimization completed successfully!")
 
-def multi_objective_bayesian_optimization(calib_context, train_x, train_obj, train_obj_true, train_obj_std, start_iteration, latest_hypervolume, resume_from_db):
+def multi_objective_bayesian_optimization(calib_context, train_x, train_obj, train_obj_std, start_iteration, latest_hypervolume, resume_from_db):
     """Multi-objective Bayesian optimization loop."""
     logger = calib_context.logger
     batch_size_bo = calib_context.batch_size_bo
@@ -971,38 +1047,46 @@ def multi_objective_bayesian_optimization(calib_context, train_x, train_obj, tra
     db_path = calib_context.db_path
     qoi_names = calib_context.qoi_details['QOI_Name']
     hvs_list = [latest_hypervolume] if resume_from_db else []
+    # Main loop
     for iteration in range(start_iteration, batch_size_bo + 1):
         logger.info(f"{'='*60}")
         logger.info(f"🔄 Multi-Objective BO Iteration {iteration}/{batch_size_bo}")
         logger.info(f"{'='*60}")
+        
         # Cooperative cancellation check
         if getattr(calib_context, 'cancel_requested', False):
             logger.info("🛑 Cancellation requested — stopping multi-objective optimization loop.")
             break
+        
         logger.info("🔧 Fitting Gaussian Process models...")
         model = _fit_gp_models(train_x, train_obj, train_obj_std, calib_context)
+        
         logger.info("🎯 Optimizing acquisition function...")
-        next_x = _optimize_acquisition_function(model, train_x, train_obj_true, calib_context)
+        next_x = _optimize_acquisition_function(model, train_x, calib_context)
+        
         logger.info(f"📊 Evaluating {len(next_x)} new candidate(s)...")
+        for id_, next_sample in enumerate(next_x):
+            logger.info(f"\t Candidate {id_+1}: {tensor_to_param_dict(unnormalize_params(next_sample, search_space), search_space)}")
         next_sample_ids = [len(train_x) + i for i in range(len(next_x))]
         next_params_list = []
+        # Convert Parameter to real scale and save to DB
         for i, x in enumerate(next_x):
             x_unnorm = unnormalize_params(x, search_space)
             params_dict = tensor_to_param_dict(x_unnorm, search_space)
             next_params_list.append(params_dict)
             insert_samples(db_path, iteration, {next_sample_ids[i]: params_dict})
+        # Run simulations
         with concurrent.futures.ProcessPoolExecutor(max_workers=calib_context.workers_out) as executor:
             new_results = list(executor.map(calib_context.evaluate_params, next_params_list, next_sample_ids))
         for i, (objectives, obj_noise, dic_results) in enumerate(new_results):
+            logger.info(f"\t Results for Sample ID {next_sample_ids[i]}: Objectives = {objectives}, Noise Std = {obj_noise}")
             calib_context.save_results_to_db(next_sample_ids[i], objectives, obj_noise, dic_results)
-        new_obj_true = torch.tensor([list(result[0].values()) for result in new_results], dtype=torch.float64)
+        new_obj = torch.tensor([list(result[0].values()) for result in new_results], dtype=torch.float64)
         new_obj_std = torch.tensor([list(result[1].values()) for result in new_results], dtype=torch.float64)
-        new_obj = new_obj_true + torch.randn_like(new_obj_true) * new_obj_std
-        new_obj = torch.clamp(new_obj, min=1e-3)
         train_x = torch.cat([train_x, next_x])
         train_obj = torch.cat([train_obj, new_obj])
-        train_obj_true = torch.cat([train_obj_true, new_obj_true])
         train_obj_std = torch.cat([train_obj_std, new_obj_std])
+        # Get the hypervolume from the acquisition function's cached data
         try:
             cached_hv = calib_context._cached_pareto_data.get('hypervolume', None)
             current_hv = cached_hv
@@ -1013,21 +1097,39 @@ def multi_objective_bayesian_optimization(calib_context, train_x, train_obj, tra
         hvs_list.append(current_hv)
         insert_gp_models(db_path, iteration, model, current_hv)
         logger.info(f"📊 Iteration {iteration} Sample(s) {next_sample_ids} : Hypervolume = {current_hv}")
+
+        # Check Convergence
         if len(hvs_list) >= 10:
             logger.info("🔍 Analyzing convergence...")
-            convergence_result = calib_context.analyze_convergence(hvs_list, train_obj_true, train_x, iteration)
+            convergence_result = calib_context.analyze_convergence(hvs_list, train_obj, train_obj_std, train_x, iteration)
             logger.info(f"\t📋 Convergence Status: {convergence_result['status']}")
             logger.info(f"\t💡 Reason: {convergence_result['reason']}")
             logger.info(f"\t🎯 Confidence: {convergence_result['convergence_confidence']:.2%}")
+            
+            # Log noise metrics if available
+            if "relative_noise_max" in convergence_result:
+                logger.info(f"\t📊 Noise level: max={convergence_result['relative_noise_max']:.1%}, "
+                          f"avg={convergence_result['relative_noise_avg']:.1%}, SNR={convergence_result['snr_min']:.1f}")
+            
             if convergence_result["suggestion"]:
                 logger.info(f"\t💡 Suggestion: {convergence_result['suggestion']}")
             if convergence_result["converged"] and convergence_result["convergence_confidence"] > 0.8:
                 logger.info("\t🎉 Convergence detected with high confidence - stopping optimization")
                 break
+            elif convergence_result["converged"] and convergence_result.get("noise_limited", False):
+                logger.info("\t✅ Converged within noise constraints - consider suggestion to improve further")
             elif convergence_result["needs_restart"]:
                 logger.warning("\t⚠️  Suboptimal stagnation detected - consider restarting with different settings")
+
+        # Log iteration summary
         logger.info(f"✅ Completed iteration {iteration}/{batch_size_bo} - Total samples: {len(train_x)}")
-        logger.info(f"🎯 Best fitness values: {[f'{qoi}: {fitness:.6f}' for qoi, fitness in zip(qoi_names, torch.max(train_obj_true, dim=0)[0].tolist())]}")
+        best_fitness_idxs = torch.argmax(train_obj, dim=0).tolist()
+        logger.info(f"🎯 Best fitness values:")
+        for qoi_idx, best_idx in enumerate(best_fitness_idxs):         
+                    logger.info(f"\t Best parameters for best fitness of {qoi_names[qoi_idx]} (sample {best_idx}): {tensor_to_param_dict(unnormalize_params(train_x[best_idx], search_space), search_space)}")
+                    fitness_dict = {qoi_name: fitness for qoi_name, fitness in zip(qoi_names, train_obj[best_idx].tolist())}
+                    logger.info(f"\t Fitness: {fitness_dict}.")
+    # Final log
     logger.info("✅ Multi-objective Bayesian optimization completed successfully!")
 
 
@@ -1047,7 +1149,23 @@ def run_bayesian_optimization(calib_context: CalibrationContext, additional_iter
             logger.info(f"🔄 Resuming optimization from existing database: {calib_context.db_path}")
             if additional_iterations is not None:
                 calib_context.update_bo_iterations(additional_iterations)
-            train_x, train_obj, train_obj_true, train_obj_std, latest_iteration, latest_hypervolume = calib_context.load_existing_data()
+            train_x, train_obj, train_obj_std, latest_iteration, latest_hypervolume = calib_context.load_existing_data()
+            
+            # Load stored weights from database to maintain reproducibility
+            logger.info("📊 Loading stored weights from database...")
+            try:
+                df_qois = load_qois(calib_context.db_path)
+                if df_qois is not None and not df_qois.empty:
+                    # Restore weights from stored database values
+                    for idx, row in df_qois.iterrows():
+                        qoi_name = row.get('QoI_Name')
+                        stored_weight = row.get('QoI_distanceWeight')
+                        if qoi_name in calib_context.distance_functions and stored_weight is not None:
+                            calib_context.distance_functions[qoi_name]['weight'] = stored_weight
+                            logger.debug(f"✓ Restored weight for {qoi_name}: {stored_weight}")
+            except Exception as e:
+                logger.warning(f"⚠️  Could not load weights from database: {e}")
+            
             start_iteration = latest_iteration + 1
         else:
             logger.info(f"🆕 Starting fresh optimization with database: {calib_context.db_path}")
@@ -1055,21 +1173,24 @@ def run_bayesian_optimization(calib_context: CalibrationContext, additional_iter
             insert_metadata(calib_context.db_path, calib_context.dic_metadata)
             insert_param_space(calib_context.db_path, calib_context.search_space)
             insert_qois(calib_context.db_path, calib_context.qoi_details)
-            logger.info(f"🎲 Generating {calib_context.num_initial_samples} initial samples...")
-            train_x, train_obj, train_obj_true, train_obj_std = calib_context.generate_and_evaluate_samples(
-                calib_context.num_initial_samples, start_sample_id=0, iteration_id=0
-            )
+            if calib_context.db_path_initial_samples:
+                logger.info(f"🧪 Generating initial samples from {calib_context.db_path_initial_samples}...")
+                train_x, train_obj, train_obj_std = calib_context.generate_initial_samples_from_db( start_sample_id=0, iteration_id=0)
+            else:
+                logger.info(f"🎲 Generating {calib_context.num_initial_samples} initial samples...")
+                train_x, train_obj, train_obj_std = calib_context.generate_and_evaluate_samples(start_sample_id=0, iteration_id=0)
+            
             start_iteration = 1
             latest_hypervolume = 0.0
         if single_qoi:
             logger.info("🔬 Detected single QoI - using single-objective Bayesian optimization loop.")
             single_objective_bayesian_optimization(
-                calib_context, train_x, train_obj, train_obj_true, train_obj_std, start_iteration
+                calib_context, train_x, train_obj, train_obj_std, start_iteration
             )
         else:
             logger.info("🔬 Detected multiple QoIs - using multi-objective Bayesian optimization loop.")
             multi_objective_bayesian_optimization(
-                calib_context, train_x, train_obj, train_obj_true, train_obj_std, start_iteration, latest_hypervolume, resume_from_db
+                calib_context, train_x, train_obj, train_obj_std, start_iteration, latest_hypervolume, resume_from_db
             )
         
         # Remove temporary file and folders
@@ -1081,60 +1202,124 @@ def run_bayesian_optimization(calib_context: CalibrationContext, additional_iter
         raise
 
 
-def _fit_gp_models(train_x: torch.Tensor, train_obj: torch.Tensor, train_obj_std: torch.Tensor, calib_context: CalibrationContext) -> ModelListGP:
+def _fit_gp_models(train_x: torch.Tensor, train_obj: torch.Tensor, train_obj_std: torch.Tensor, calib_context: CalibrationContext):
     """
     Fit Gaussian Process models for multi-objective optimization.
     
+    Supports two modes:
+    1. Independent GPs (ModelListGP): One GP per objective, no correlation modeling
+    2. Multivariate GP (MultiTaskGP): Single GP that models correlations between objectives
+    
     Args:
-        train_x (torch.Tensor): Training inputs (normalized parameters)
+        train_x (torch.Tensor): Training inputs (normalized parameters) - should be in [0, 1]^d
         train_obj (torch.Tensor): Training objectives (fitness values)
         train_obj_std (torch.Tensor): Noise standard deviations
         calib_context (CalibrationContext): Calibration context
         
     Returns:
-        ModelListGP: Fitted GP model list
+        Union[ModelListGP, MultiTaskGP]: Fitted GP model(s)
     """
-    models = []
+    # Check if user wants correlated GP modeling
+    use_correlated_gp = calib_context.bo_options.get("use_correlated_gp", False)
+    n_objectives = train_obj.shape[1]
     
-    # Fit a separate GP for each objective
-    for i in range(train_obj.shape[1]):
-        # Extract single objective data
-        train_y = train_obj[:, i:i+1]  # Keep 2D shape: (n_samples, 1)
-        train_yvar = train_obj_std[:, i:i+1] ** 2  # Convert std to variance: (n_samples, 1)
+    if use_correlated_gp and n_objectives > 1:
+        # Use MultiTaskGP to model QoI correlations
+        calib_context.logger.info(f"🔗 Using multivariate GP with correlation modeling for {n_objectives} objectives")
         
-        # Ensure minimum noise for numerical stability
-        train_yvar = torch.clamp(train_yvar, min=1e-6)
+        # Prepare data for MultiTaskGP
+        # MultiTaskGP expects: X shape (n_samples, n_features), Y shape (n_samples * n_tasks, 1)
+        # and task_feature parameter indicating which dimension is the task index
         
-        # Create GP model (following the old code pattern)
-        model = SingleTaskGP(
-            train_x,     # 2D: (n_samples, n_features)
-            train_y,     # 2D: (n_samples, 1)
-            train_yvar   # 2D: (n_samples, 1)
+        n_samples = train_x.shape[0]
+        
+        # Expand X to include task indices
+        task_indices = torch.arange(n_objectives, dtype=torch.long, device=train_x.device)
+        X_list = []
+        Y_list = []
+        Yvar_list = []
+        
+        for task_id in range(n_objectives):
+            # Add task index as last feature
+            X_task = torch.cat([train_x, task_indices[task_id:task_id+1].expand(n_samples, 1).float()], dim=1)
+            X_list.append(X_task)
+            
+            # Extract objective for this task
+            Y_list.append(train_obj[:, task_id:task_id+1])
+            
+            # Extract noise variance for this task
+            Yvar_task = train_obj_std[:, task_id:task_id+1] ** 2
+            Yvar_task = torch.clamp(Yvar_task, min=1e-6)
+            Yvar_list.append(Yvar_task)
+        
+        # Concatenate all tasks
+        X_mtgp = torch.cat(X_list, dim=0)  # Shape: (n_samples * n_objectives, n_features + 1)
+        Y_mtgp = torch.cat(Y_list, dim=0)  # Shape: (n_samples * n_objectives, 1)
+        # Create and fit MultiTaskGP (noise handled by likelihood; provided variances unused here)
+        # task_feature=-1 means the last dimension is the task index
+        model = MultiTaskGP(
+            X_mtgp,
+            Y_mtgp,
+            task_feature=-1
         )
         
-        models.append(model)
-        calib_context.logger.debug(f"Created GP for objective {i}")
+        # Fit the model
+        mll = ExactMarginalLogLikelihood(model.likelihood, model)
+        fit_gpytorch_mll(mll)
+        
+        calib_context.logger.info(f"✅ Fitted multivariate GP with {n_objectives} correlated objectives")
+        
+        return model
     
-    # Combine into ModelListGP
-    model_list = ModelListGP(*models)
-    
-    # Create MLL object and fit it (following the old code pattern)
-    mll = SumMarginalLogLikelihood(model_list.likelihood, model_list)
-    fit_gpytorch_mll(mll)
-    
-    calib_context.logger.debug(f"Fitted {len(models)} GP models successfully")
-    
-    return model_list
+    else:
+        # Use independent GPs (original approach)
+        if use_correlated_gp and n_objectives == 1:
+            calib_context.logger.debug("Single objective detected, using SingleTaskGP (correlation modeling not applicable)")
+        else:
+            calib_context.logger.debug(f"Using independent GPs for {n_objectives} objectives (correlation modeling disabled)")
+        
+        models = []
+        
+        # Fit a separate GP for each objective
+        for i in range(n_objectives):
+            # Extract single objective data
+            train_y = train_obj[:, i:i+1]  # Keep 2D shape: (n_samples, 1)
+            train_yvar = train_obj_std[:, i:i+1] ** 2  # Convert std to variance: (n_samples, 1)
+            
+            # Ensure minimum noise for numerical stability
+            train_yvar = torch.clamp(train_yvar, min=1e-6)
+            
+            # Create GP model
+            model = SingleTaskGP(
+                train_x,     # 2D: (n_samples, n_features)
+                train_y,     # 2D: (n_samples, 1)
+                train_yvar   # 2D: (n_samples, 1)
+            )
+            
+            models.append(model)
+            calib_context.logger.debug(f"Created independent GP for objective {i}")
+        
+        # Combine into ModelListGP
+        model_list = ModelListGP(*models)
+        
+        # Create MLL object and fit it
+        mll = SumMarginalLogLikelihood(model_list.likelihood, model_list)
+        fit_gpytorch_mll(mll)
+        
+        calib_context.logger.debug(f"Fitted {len(models)} independent GP models successfully")
+        
+        return model_list
 
 
-def _optimize_acquisition_function(model: ModelListGP, train_x: torch.Tensor, train_obj_true: torch.Tensor, calib_context: CalibrationContext) -> torch.Tensor:
+def _optimize_acquisition_function(model, train_x: torch.Tensor, calib_context: CalibrationContext) -> torch.Tensor:
     """
     Optimize the acquisition function to find next candidate points.
     
+    Supports both ModelListGP (independent objectives) and MultiTaskGP (correlated objectives).
+    
     Args:
-        model (ModelListGP): Fitted GP models
+        model: Fitted GP model (ModelListGP or MultiTaskGP)
         train_x (torch.Tensor): Current training inputs
-        train_obj_true (torch.Tensor): Current training objectives (true values)
         calib_context (CalibrationContext): Calibration context
         
     Returns:
@@ -1144,133 +1329,54 @@ def _optimize_acquisition_function(model: ModelListGP, train_x: torch.Tensor, tr
     num_params = len(calib_context.search_space)
     bounds = torch.stack([torch.zeros(num_params), torch.ones(num_params)]).to(torch.float64)
     
+    # Prepare X for acquisition function
+    # X_baseline should only contain parameter columns (no task indices)
+    if isinstance(model, MultiTaskGP):
+        # For MultiTaskGP, train_x is original parameters, model expects expanded X internally
+        # We extract just the parameters (first num_params columns)
+        X_baseline = train_x[:, :num_params]
+    else:
+        # For independent GPs, use train_x as-is
+        X_baseline = train_x
+    
     # Create acquisition function (qNEHVI)
     sampler = SobolQMCNormalSampler(sample_shape=torch.Size([calib_context.samples_per_batch_act_func]))
     
     acq_func = qLogNoisyExpectedHypervolumeImprovement(
         model=model,
         ref_point=calib_context.ref_point,
-        X_baseline=train_x,
+        X_baseline=X_baseline,
         sampler=sampler,
         prune_baseline=True,  # Remove dominated points
         alpha=0.0,  # No risk aversion
     )
     
-    # Apply acquisition function enhancement strategies
-    enhanced_acq_func = _enhance_acquisition_function(acq_func, train_x, calib_context)
-    
-    # Extract Pareto data from acquisition function to avoid recomputation
-    extracted_data = _extract_pareto_and_hypervolume_from_acqf(acq_func, calib_context)
-    
     # Optimize acquisition function
-    candidates, acq_values = optimize_acqf(
-        acq_function=enhanced_acq_func,
-        bounds=bounds,
-        q=calib_context.batch_size_per_iteration,
-        num_restarts=calib_context.num_restarts_act_func,
-        raw_samples=calib_context.raw_samples_act_func,
-        options={"batch_limit": 5, "maxiter": 200},
-        sequential=True,  # Use sequential optimization for batch
-    )
+    try:
+        candidates, acq_values = optimize_acqf(
+            acq_function=acq_func,
+            bounds=bounds,
+            q=calib_context.batch_size_per_iteration,
+            num_restarts=calib_context.num_restarts_act_func,
+            raw_samples=calib_context.raw_samples_act_func,
+            options={"batch_limit": 5, "maxiter": 200},
+            sequential=True,  # Use sequential optimization for batch
+        )
+    except Exception as e:
+        calib_context.logger.error(f"❌ Acquisition optimization failed: {str(e)}")
+        calib_context.logger.error(f"   train_x shape: {train_x.shape}")
+        calib_context.logger.error(f"   bounds shape: {bounds.shape}")
+        calib_context.logger.error(f"   batch_size: {calib_context.batch_size_per_iteration}")
+        calib_context.logger.error(f"   num_restarts: {calib_context.num_restarts_act_func}")
+        calib_context.logger.error(f"   raw_samples: {calib_context.raw_samples_act_func}")
+        raise
 
-    calib_context.logger.debug(f"Acquisition optimization with {extracted_data['n_pareto_points']} Pareto points: best value = {acq_values.max():.6f}")
+    calib_context.logger.debug(f"Acquisition optimization with candidates={candidates} ac_values = {acq_values}")
 
     # Store extracted data for use in convergence analysis
-    calib_context._cached_pareto_data = extracted_data
+    calib_context._cached_pareto_data = _extract_pareto_and_hypervolume_from_acqf(acq_func, calib_context)
     
     return candidates
-
-
-def _enhance_acquisition_function(base_acq_func, train_x: torch.Tensor, calib_context: CalibrationContext):
-    """
-    Enhance the acquisition function with identification strategies.
-    
-    Args:
-        base_acq_func: Base acquisition function
-        train_x (torch.Tensor): Current training inputs
-        calib_context (CalibrationContext): Calibration context
-        
-    Returns:
-        Enhanced acquisition function
-    """
-    strategy = calib_context.bo_options.get("acq_func_strategy", "none")
-    
-    if strategy == "none":
-        return base_acq_func
-    
-    class EnhancedAcquisition:
-        def __init__(self, base_func, strategy, train_x, options):
-            self.base_func = base_func
-            self.strategy = strategy
-            self.train_x = train_x
-            self.options = options
-            
-        def __call__(self, X):
-            # Get base acquisition value
-            base_value = self.base_func(X)
-            
-            # Apply enhancements based on strategy
-            if self.strategy == "diversity_bonus":
-                diversity_weight = self.options.get("diversity_weight", 0.1)
-                diversity_bonus = self._compute_diversity_bonus(X)
-                return base_value + diversity_weight * diversity_bonus
-                
-            elif self.strategy == "uncertainty_weighting":
-                uncertainty_weight = self.options.get("uncertainty_weight", 0.2)
-                uncertainty_bonus = self._compute_uncertainty_bonus(X)
-                return base_value * (1.0 + uncertainty_weight * uncertainty_bonus)
-                
-            elif self.strategy == "combined":
-                # Use both diversity and uncertainty
-                diversity_weight = self.options.get("diversity_weight", 0.05)
-                uncertainty_weight = self.options.get("uncertainty_weight", 0.15)
-                
-                diversity_bonus = self._compute_diversity_bonus(X)
-                uncertainty_bonus = self._compute_uncertainty_bonus(X)
-                
-                enhancement = (diversity_weight * diversity_bonus + 
-                             uncertainty_weight * uncertainty_bonus)
-                
-                return base_value + enhancement
-                
-            else:
-                # For other strategies (soft_constraints, adaptive_scaling), just return base
-                # These would require more complex implementations
-                return base_value
-        
-        def _compute_diversity_bonus(self, X):
-            """Compute diversity bonus to encourage exploration of new regions."""
-            if len(self.train_x) == 0:
-                return torch.ones(X.shape[0])
-            
-            # Compute minimum distance to existing points
-            distances = torch.cdist(X, self.train_x, p=2)
-            min_distances = distances.min(dim=1)[0]
-            
-            # Normalize and convert to bonus (higher distance = higher bonus)
-            max_distance = np.sqrt(len(self.train_x))  # Approximate max distance in unit hypercube
-            normalized_distances = min_distances / max_distance
-            
-            return normalized_distances
-        
-        def _compute_uncertainty_bonus(self, X):
-            """Compute uncertainty bonus to encourage exploration of uncertain regions."""
-            # This is a simplified implementation
-            # In practice, you'd use the GP posterior variance
-            if len(self.train_x) == 0:
-                return torch.ones(X.shape[0])
-            
-            # Use distance as a proxy for uncertainty (farther = more uncertain)
-            distances = torch.cdist(X, self.train_x, p=2)
-            avg_distances = distances.mean(dim=1)
-            
-            # Normalize
-            max_distance = np.sqrt(len(self.train_x))
-            normalized_uncertainty = avg_distances / max_distance
-            
-            return normalized_uncertainty
-    
-    return EnhancedAcquisition(base_acq_func, strategy, train_x, calib_context.bo_options)
 
 
 def _extract_pareto_and_hypervolume_from_acqf(acq_func, calib_context: CalibrationContext) -> dict:
