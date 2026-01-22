@@ -27,31 +27,33 @@ def check_functions_need_microenv(qoi_funcs):
     # If none need it,
     return False
 
-def safe_call_qoi_function(func, df_cell, df_subs=None):
+def safe_call_qoi_function(func, mcds=None, list_mcds=None ):
     """
     Safely call a QoI function with the appropriate dataframe based on parameter inspection.
     
     Parameters:
     - func: The QoI function to call
-    - df_cell: Cell dataframe
-    - df_subs: Substrate dataframe (optional)
+    - mcds: pcdl.TimeStep or None -> The mcds object for single snapshot
+    - list_mcds: pcdl.TimeSeries or None -> The mcds time series object for multiple snapshots
     
     Returns:
     - Result of the QoI function
     """
-    
     # Check if function has our custom parameter name attribute (from string creation)
     param_name = func.__param_name__
-    needs_subs = any(keyword in param_name.lower() for keyword in ['subs', 'conc', 'micro'])
-    
-    # Call function with appropriate dataframe
-    if needs_subs:
-        if df_subs is None:
-            raise ValueError(f"Function {func.__name__} needs substrate data but df_subs is None")
-        return func(df_subs)
+    if param_name in ['df_cell', 'df'] and mcds is not None: # Function expects cell dataframe
+        return func(mcds.get_cell_df())
+    elif param_name in ['df_subs'] and mcds is not None: # Function expects substrate dataframe
+        return func(mcds.get_substrate_df())
+    elif param_name in ['mcds'] and mcds is not None: # Function expects the mcds object
+        return func(mcds)
+    elif param_name in ['mcds_ts'] and list_mcds is not None: # Function expects the mcds time series object
+        if mcds == list_mcds[-1]: # Ensure we only compute once per time series (last mcds passed)
+            return func(list_mcds)
+        else: return None # Skip computation for other snapshots
     else:
-        return func(df_cell)
-
+        raise ValueError(f"Unknown parameter name '{param_name}' for QoI function.")
+    
 def summ_func_FinalPopLiveDead(outputPath:str,summaryFile:Union[str,None], dic_params:dict, SampleID:int, ReplicateID:int) -> Union[pd.DataFrame,None]:
     """
     Final population of live and dead cells
@@ -155,10 +157,8 @@ def generic_QoI(outputPath: str, summaryFile: Union[str, None], dic_params: dict
                 return [df_cell]
                     
             else:
-                df_cell = mcds.get_cell_df()
-                df_subs = mcds.get_conc_df() if needs_microenv else None
                 # Compute QoIs using safe function calling
-                qoi_data = {name: safe_call_qoi_function(func, df_cell, df_subs) for name, func in qoi_funcs.items()}
+                qoi_data = {name: safe_call_qoi_function(func, mcds=mcds) for name, func in qoi_funcs.items()}
                 data = {
                     'time': mcds.get_time(),
                     'sampleID': SampleID,
@@ -171,7 +171,6 @@ def generic_QoI(outputPath: str, summaryFile: Union[str, None], dic_params: dict
         elif mode == 'time_series':
             # Check if any function needs microenvironment data
             needs_microenv = check_functions_need_microenv(qoi_funcs)
-            
             # Load the time series
             mcds_ts = pcdl.TimeSeries(outputPath, microenv=needs_microenv, graph=False, settingxml=None, verbose=False)
             #  All data is stored as a list of mcds
@@ -191,13 +190,17 @@ def generic_QoI(outputPath: str, summaryFile: Union[str, None], dic_params: dict
             else:
                 df_list = []
                 for mcds in mcds_ts.get_mcds_list():
-                    df_cell = mcds.get_cell_df()
-                    df_subs = mcds.get_conc_df() if needs_microenv else None
-                    try: 
-                        qoi_data = {name: safe_call_qoi_function(func, df_cell, df_subs) for name, func in qoi_funcs.items()}
+                    try:
+                        qoi_data = {}
+                        for name, func in qoi_funcs.items():
+                            func_result = safe_call_qoi_function(func, mcds=mcds, list_mcds=mcds_ts.get_mcds_list())
+                            if func_result is not None:
+                                qoi_data[name] = func_result
+                        if not qoi_data: continue  # Skip if no QoI data was computed
+                        # print(f"Computed QoIs at time {mcds.get_time()}: {qoi_data}")
                     except Exception as e:
                         raise RuntimeError(f"Error computing QoIs in generic_QoI function: {e}")
-
+                    
                     data = {
                         'time': mcds.get_time(),
                         'sampleID': SampleID,
@@ -217,10 +220,8 @@ def generic_QoI(outputPath: str, summaryFile: Union[str, None], dic_params: dict
             mcds_ts = pcdl.TimeSeries(outputPath, microenv=needs_microenv, graph=False, settingxml=None, verbose=False)
             summary_data = {name: [] for name in qoi_funcs.keys()}
             for mcds in mcds_ts.get_mcds_list():
-                df_cell = mcds.get_cell_df()
-                df_subs = mcds.get_conc_df() if needs_microenv else None
                 for name, func in qoi_funcs.items():
-                    summary_data[name].append(safe_call_qoi_function(func, df_cell, df_subs))
+                    summary_data[name].append(safe_call_qoi_function(func, mcds=mcds))
             summarized_qois = {name: sum(values) / len(values) for name, values in summary_data.items()}
             data = {
                 'sampleID': SampleID,

@@ -152,8 +152,12 @@ def run_global_sa(params_dict: dict, method: str, all_qois_func: dict, df_qois: 
     for qoi in all_qois_func.keys(): 
         for time_id, time_label in enumerate(qoi_time_values.keys()):
             # Generate qoi_result_np - it is sorted by sample ID
-            if qoi_time_values is None: qoi_result_np = df_qois[f"{qoi}_{time_label}"].to_numpy()
-            else: qoi_result_np = df_qois[f"{qoi}_{time_id}"].to_numpy()
+            if qoi_time_values is None:
+                if f"{qoi}_{time_label}" not in df_qois.columns: continue # Skip if QoI at this time does not exist
+                qoi_result_np = df_qois[f"{qoi}_{time_label}"].to_numpy()
+            else:
+                if f"{qoi}_{time_id}" not in df_qois.columns: continue # Skip if QoI at this time does not exist
+                qoi_result_np = df_qois[f"{qoi}_{time_id}"].to_numpy()
             if len(qoi_result_np) != len(params_np):
                 raise ValueError(f"Error: Mismatch between number of samples ({len(params_np)}) and QoI results ({len(qoi_result_np)})!")
             print(f"Running {method} for QoI: {qoi} and time: {qoi_time_values[time_label]}") 

@@ -5,6 +5,7 @@ from typing import Union
 # My local modules
 from ..database.ma_db import load_output, load_samples
 from ..utils.model_wrapper import create_named_function_from_string
+from ..utils.sumstats import safe_call_qoi_function
 
 def reshape_sa_expanded_data(expanded_data: pd.DataFrame, qoi_columns: list) -> pd.DataFrame:
     """Reshape expanded sensitivity analysis data for pivot table analysis.
@@ -57,7 +58,96 @@ def reshape_sa_expanded_data(expanded_data: pd.DataFrame, qoi_columns: list) -> 
     except Exception as e:
         raise ValueError(f"Error reshaping expanded data: {e}")
 
-def calculate_qoi_from_sa_db(db_file: str, qoi_functions: str, chunk_size: int = 10) -> pd.DataFrame:
+def mcds_list_to_qoi_df_for_sa(recreated_qoi_funcs, all_sample_ids, chunk_size, db_file) -> pd.DataFrame:
+    """Convert a list of MCDS objects to a DataFrame of quantities of interest for sensitivity analysis.
+    
+    This function processes a list of MCDS simulation results, extracting relevant
+    quantities of interest (QoIs) at each time point and organizing them into a
+    structured DataFrame suitable for sensitivity analysis.
+    
+    Args:
+        recreated_qoi_funcs (dict): Dictionary of QoI functions where keys are QoI names
+                                   and values are callable functions.
+        all_sample_ids (list): List of all sample IDs to process.
+        chunk_size (int): Number of samples to process in each chunk to manage memory usage.
+        db_file (str): Path to the database file containing simulation output.
+    Returns:
+        pd.DataFrame: DataFrame with calculated QoI values indexed by SampleID
+                        and ReplicateID, with columns for each QoI - columns combined with time points.
+    """
+    df_qois = pd.DataFrame()
+    # Process samples in chunks to avoid memory issues
+    for i in range(0, len(all_sample_ids), chunk_size):
+        chunk_sample_ids = all_sample_ids[i:i + chunk_size]
+        # Load only this chunk of data
+        df_output = load_output(db_file, sample_ids=chunk_sample_ids, load_data=True)
+        for SampleID in df_output['SampleID'].unique():
+            df_sample = df_output[df_output['SampleID'] == SampleID]
+            for ReplicateID in df_sample['ReplicateID'].unique():
+                mcds_ts_list = df_sample[df_sample['ReplicateID'] == ReplicateID]['Data'].values[0]
+                # print(f"SampleID: {SampleID}, ReplicateID: {ReplicateID} - mcds_ts_list: {mcds_ts_list}")
+                data = {'SampleID': SampleID, 'ReplicateID': ReplicateID}
+                for id_time, mcds in enumerate(mcds_ts_list):
+                    data[f"time_{id_time}"] = mcds.get_time()
+                    try: 
+                        for qoi_name, qoi_func in recreated_qoi_funcs.items():
+                            function_result = safe_call_qoi_function(qoi_func, mcds=mcds, list_mcds=mcds_ts_list)
+                            if function_result is not None:
+                                data[f"{qoi_name}_{id_time}"] = function_result
+                        if len(data) == 2: continue  # Skip if no QoI data was computed
+                    except Exception as e:
+                        raise RuntimeError(f"Error calculating QoIs for SampleID: {SampleID}, ReplicateID: {ReplicateID} - QoI: {qoi_name}_{id_time}: {e}")
+                # Store the data in a DataFrame
+                df_qoi_replicate = pd.DataFrame({key: [value] for key, value in data.items()})
+                df_qois = pd.concat([df_qois, df_qoi_replicate], ignore_index=True)
+    
+    df_qois = df_qois.reset_index(drop=True)
+    return df_qois
+
+def mcds_list_to_qoi_df_for_calib(recreated_qoi_funcs, all_sample_ids, chunk_size, db_file) -> pd.DataFrame:
+    """Convert a list of MCDS objects to a DataFrame of quantities of interest for calibration.
+    
+    This function processes a list of MCDS simulation results, extracting relevant
+    quantities of interest (QoIs) and organizing them into a structured DataFrame
+    suitable for calibration tasks.
+    
+    Args:
+        recreated_qoi_funcs (dict): Dictionary of QoI functions where keys are QoI names
+                                   and values are callable functions.
+        all_sample_ids (list): List of all sample IDs to process.
+        chunk_size (int): Number of samples to process in each chunk to manage memory usage.
+        db_file (str): Path to the database file containing simulation output.
+    Returns:
+        pd.DataFrame: DataFrame with calculated QoI values indexed by SampleID
+                        and ReplicateID, with columns for each QoI - columns is not combined with time points.
+    """
+    df_qois = pd.DataFrame()
+    # Process samples in chunks to avoid memory issues
+    for i in range(0, len(all_sample_ids), chunk_size):
+        chunk_sample_ids = all_sample_ids[i:i + chunk_size]
+        # Load only this chunk of data
+        df_output = load_output(db_file, sample_ids=chunk_sample_ids, load_data=True)
+        for SampleID in df_output['SampleID'].unique():
+            df_sample = df_output[df_output['SampleID'] == SampleID]
+            for ReplicateID in df_sample['ReplicateID'].unique():
+                mcds_ts_list = df_sample[df_sample['ReplicateID'] == ReplicateID]['Data'].values[0]
+                for id_time, mcds in enumerate(mcds_ts_list):
+                    data = {'SampleID': SampleID, 'ReplicateID': ReplicateID, 'time': mcds.get_time()}
+                    try: 
+                        for qoi_name, qoi_func in recreated_qoi_funcs.items():
+                            function_result = safe_call_qoi_function(qoi_func, mcds=mcds, list_mcds=mcds_ts_list)
+                            if function_result is not None:
+                                data[qoi_name] = function_result
+                        if len(data) == 3: continue  # Skip if no QoI data was computed
+                    except Exception as e:
+                        raise RuntimeError(f"Error calculating QoIs for SampleID: {SampleID}, ReplicateID: {ReplicateID} - QoI: {qoi_name}: {e}")
+                    # Store the data in a DataFrame
+                    df_qoi_replicate = pd.DataFrame({key: [value] for key, value in data.items()})
+                    df_qois = pd.concat([df_qois, df_qoi_replicate], ignore_index=True)
+    df_qois = df_qois.reset_index(drop=True)
+    return df_qois
+
+def calculate_qoi_from_sa_db(db_file: str, qoi_functions: dict, chunk_size: int = 10, mode='sa') -> pd.DataFrame:
     """Calculate quantities of interest from sensitivity analysis database results.
     
     This function loads simulation results from a database in chunks and applies QoI 
@@ -66,7 +156,7 @@ def calculate_qoi_from_sa_db(db_file: str, qoi_functions: str, chunk_size: int =
     
     Args:
         db_file (str): Path to the SQLite database containing simulation results.
-        qoi_functions (str): Dictionary of QoI functions where keys are QoI names
+        qoi_functions (dict): Dictionary of QoI functions where keys are QoI names
                            and values are lambda functions or string representations.
         chunk_size (int, optional): Number of samples to process at a time. Default is 10.
                                    Adjust based on available memory and data size.
@@ -92,42 +182,25 @@ def calculate_qoi_from_sa_db(db_file: str, qoi_functions: str, chunk_size: int =
         qoi_name: create_named_function_from_string(qoi_value, qoi_name)
         for qoi_name, qoi_value in qoi_functions.items()
     }
-    
-    df_qois = pd.DataFrame()
-    # Process samples in chunks to avoid memory issues
-    for i in range(0, len(all_sample_ids), chunk_size):
-        chunk_sample_ids = all_sample_ids[i:i + chunk_size]
-        # Load only this chunk of data
-        df_output = load_output(db_file, sample_ids=chunk_sample_ids, load_data=True)
-        for SampleID in df_output['SampleID'].unique():
-            df_sample = df_output[df_output['SampleID'] == SampleID]
-            for ReplicateID in df_sample['ReplicateID'].unique():
-                mcds_ts_list = df_sample[df_sample['ReplicateID'] == ReplicateID]['Data'].values[0]
-                # print(f"SampleID: {SampleID}, ReplicateID: {ReplicateID} - mcds_ts_list: {mcds_ts_list}")
-                data = {'SampleID': SampleID, 'ReplicateID': ReplicateID}
-                for id_time, mcds in enumerate(mcds_ts_list):
-                    data[f"time_{id_time}"] = mcds.get_time()
-                    try: 
-                        for qoi_name, qoi_func in recreated_qoi_funcs.items():
-                            # Store the QoI value in the data dictionary
-                            if qoi_func.__param_name__ in ["df_cell", "df"]: # Function expects cell dataframe
-                                data[f"{qoi_name}_{id_time}"] =  qoi_func(mcds.get_cell_df())
-                            elif qoi_func.__param_name__ == 'df_subs': # Function expects substrate dataframe
-                                print(mcds.get_conc_df())
-                                data[f"{qoi_name}_{id_time}"] =  qoi_func(mcds.get_conc_df())
-                            elif qoi_func.__param_name__ == 'mcds': # Function expects the mcds object
-                                data[f"{qoi_name}_{id_time}"] =  qoi_func(mcds)
-                            else:
-                                raise ValueError(f"Unknown parameter name '{qoi_func.__param_name__}' for QoI function '{qoi_name}'")
-                    except Exception as e:
-                        raise RuntimeError(f"Error calculating QoIs for SampleID: {SampleID}, ReplicateID: {ReplicateID} - QoI: {qoi_name}_{id_time}: {e}")
-                # Store the data in a DataFrame
-                df_qoi_replicate = pd.DataFrame({key: [value] for key, value in data.items()})
-                df_qois = pd.concat([df_qois, df_qoi_replicate], ignore_index=True)
-    
-    df_qois = df_qois.reset_index(drop=True)
+    if mode == 'sa':
+        df_qois = mcds_list_to_qoi_df_for_sa(
+            recreated_qoi_funcs=recreated_qoi_funcs,
+            all_sample_ids=all_sample_ids,
+            chunk_size=chunk_size,
+            db_file=db_file
+        )
+    elif mode == 'calib':
+        df_qois = mcds_list_to_qoi_df_for_calib(
+            recreated_qoi_funcs=recreated_qoi_funcs,
+            all_sample_ids=all_sample_ids,
+            chunk_size=chunk_size,
+            db_file=db_file
+        )
+    else:
+        raise ValueError(f"Unknown mode '{mode}'. Supported modes are 'sa' and 'calib'.")
+
     return df_qois
- 
+
 def calculate_qoi_statistics(df_qois_data: pd.DataFrame, qoi_funcs: dict, db_file_path: str) -> pd.DataFrame:
     """Calculate statistical summaries of quantities of interest across replicates.
     
