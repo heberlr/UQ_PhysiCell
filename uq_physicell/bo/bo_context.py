@@ -35,6 +35,7 @@ from uq_physicell.database.ma_db import (
 )
 from uq_physicell.model_analysis.utils import calculate_qoi_from_sa_db
 from ..utils.model_wrapper import run_replicate_serializable
+from ..utils.distances import SumSquaredDifferences
 from ..database.bo_db import (
     create_structure, insert_metadata, insert_param_space, insert_qois, 
     insert_gp_models, insert_samples, insert_output, load_structure, load_qois
@@ -67,9 +68,9 @@ class CalibrationContext:
         obsData_columns: dict, 
         model_config: dict, 
         qoi_functions: dict, 
-        distance_functions: dict, 
-        search_space: dict, 
-        bo_options: dict, 
+        bo_options: dict,
+        distance_functions: dict=None, 
+        search_space: dict=None, 
         logger: logging.Logger=None
     ):
         """Initialize CalibrationContext with comprehensive validation and setup."""
@@ -147,8 +148,19 @@ class CalibrationContext:
         if self.db_path_initial_samples:
             self.logger.info(f"🧪 Initial samples will be generated from existing database at {self.db_path_initial_samples}.")
             self.num_initial_samples = 0  # Will be determined from the database
+            # Load search space from the database if not provided
+            if search_space is None:
+                # Load search space from the database
+                df_param_space = load_ma_parameter_samples(self.db_path_initial_samples)
+                self.search_space = {}
+                for _, row in df_param_space.iterrows():
+                    self.search_space[row['ParamName']] = {
+                        'type': 'real' if type(row['lower_bound']) == float else ValueError(f"Unsupported parameter type '{row['ParamType']}' in database. Just 'real' is supported."),
+                        'lower_bound': row['lower_bound'],
+                        'upper_bound': row['upper_bound']
+                    }
         else:
-            self.num_initial_samples = bo_options.get("num_initial_samples", 2 * (len(search_space) + 1))  # Initial samples based on the number of parameters 2*(num_params + 1)  # Number of initial samples for Bayesian optimization
+            self.num_initial_samples = bo_options.get("num_initial_samples", 2 * (len(self.search_space) + 1))  # Initial samples based on the number of parameters 2*(num_params + 1)  # Number of initial samples for Bayesian optimization
         self.batch_size_bo =  bo_options.get("num_iterations", 10)  # Number of BO iterations
         self.batch_size_per_iteration = bo_options.get("batch_size_per_iteration", 1)  # Batch size for each BO iteration
         self.samples_per_batch_act_func = bo_options.get("samples_per_batch_act_func", 128)  # Number of samples per batch for the acquisition function
@@ -164,6 +176,9 @@ class CalibrationContext:
             "StructureName": self.model_config["struc_name"],
         }
         
+        # Define distance functions (default use SumSquaredDifferences) and weights
+        if not self.distance_functions:
+            self.distance_functions = {qoi_name: {'function': SumSquaredDifferences} for qoi_name in self.qoi_functions.keys()}
         # Estimate weights from observational data if not provided by user
         self.distance_functions = self._estimate_weights_from_obsdata(obsData_columns)
 
@@ -898,23 +913,22 @@ class CalibrationContext:
         for qoi_name in self.qoi_functions.keys():
             func_config = self.distance_functions.get(qoi_name, {"function": None}).copy()
             current_weight = func_config.get("weight", None)
-            # Get observational data for this QoI (supports dict or DataFrame inputs)
-            if isinstance(self.dic_obsData, dict):
-                obs_values = np.asarray(self.dic_obsData[qoi_name], dtype=np.float64)
-            elif hasattr(self.dic_obsData, "columns"):
-                obs_values = self.dic_obsData[qoi_name].to_numpy()
-            if obs_values is not None:
-                obs_values = obs_values[~np.isnan(obs_values)] # drop NaNs
-                obs_range = float(np.max(obs_values) - np.min(obs_values)) if len(obs_values) > 1 else obs_values[0] # single value the range is the value itself
-            else:
-                ValueError("Obs. Data was NOT load correctly!")            
-            
             # If user provided weight, keep it; otherwise estimate from obs data range
             if current_weight is not None and abs(current_weight) > 1e-6 and abs(current_weight) < 1e6:
                 # User-provided weight - keep it
                 new_weight = current_weight
                 logger_msg += f"  ✓ {qoi_name}: {new_weight:.6f} (user-provided)\n"
-            else:
+
+            else:  # Get observational data for this QoI (supports dict or DataFrame inputs) 
+                if isinstance(self.dic_obsData, dict):
+                    obs_values = np.asarray(self.dic_obsData[qoi_name], dtype=np.float64)
+                elif hasattr(self.dic_obsData, "columns"):
+                    obs_values = self.dic_obsData[qoi_name].to_numpy()
+                if obs_values is not None:
+                    obs_values = obs_values[~np.isnan(obs_values)] # drop NaNs
+                    obs_range = float(np.max(obs_values) - np.min(obs_values)) if len(obs_values) > 1 else obs_values[0] # single value the range is the value itself
+                else:
+                    ValueError("Obs. Data was NOT load correctly!")            
                 # Estimate weight: normalize by range times number of observations
                 new_weight = 1.0 / (obs_range * len(obs_values) + 1e-10)
                 logger_msg += f"  📈 {qoi_name} - weight: {new_weight:.2e} (range={obs_range:.2e})\n"
