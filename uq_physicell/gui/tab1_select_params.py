@@ -111,7 +111,7 @@ def create_tab1(main_window):
     main_window.combo_box.setEnabled(False)
     main_window.combo_hbox.addWidget(main_window.combo_box)
     main_window.combo_hbox.addStretch()
-    
+
     # Create a group box for parameter details
     main_window.param_details_groupbox = QGroupBox("Parameter Details")
     param_details_layout = QVBoxLayout()
@@ -151,12 +151,12 @@ def create_tab1(main_window):
         lambda: [
             main_window.set_param_button.setEnabled(main_window.new_value_input.text().strip() != ""),
             main_window.set_param_button.setStyleSheet(
-                "background-color: lightgreen; color: black;" if main_window.new_value_input.text().strip() 
+                "background-color: lightgreen; color: black;" if main_window.new_value_input.text().strip()
                 else "background-color: lightgreen; color: darkgray;"
             ),
             main_window.add_analysis_button.setEnabled(not main_window.set_param_button.isEnabled()),
             main_window.add_analysis_button.setStyleSheet(
-                "background-color: lightgreen; color: black;" if not main_window.new_value_input.text().strip() 
+                "background-color: lightgreen; color: black;" if not main_window.new_value_input.text().strip()
                 else "background-color: lightgreen; color: darkgray;"
             )
         ]
@@ -264,6 +264,10 @@ def create_combo_box(main_window, parent_node, label):
         # Append the 'index' attribute if it exists
         if "index" in child.attrib:
             display_name = f"{display_name}[{int(child.get('index')) + 1}]"
+        # Append the 'ID' attribute for Dirichlet_options boundary_value
+        elif display_name == "boundary_value":
+            display_name = f"{display_name}[@ID='" + child.get('ID') + "']"
+        # Generic
         combo_box.addItem(display_name)
     combo_box.currentIndexChanged.connect(lambda: main_window.handle_combo_selection(main_window, combo_box, parent_node))
 
@@ -295,6 +299,9 @@ def handle_combo_selection(main_window, combo_box, parent_node):
         display_name = child.get("name", child.tag)
         if "index" in child.attrib:
             display_name = f"{display_name}[{int(child.get('index')) + 1}]"
+        elif display_name == "boundary_value":
+            display_name = f"{display_name}[@ID='{child.get('ID')}']"
+
         if display_name == selected_display_name:
             # Clear combo boxes below the current one
             main_window.clear_combo_boxes(main_window, starting_index=main_window.combo_hbox.indexOf(combo_box) + 1)
@@ -312,7 +319,6 @@ def handle_combo_selection(main_window, combo_box, parent_node):
                 # Update the parameter and value labels
                 main_window.update_selected_param_label(main_window, path, value)
             break
-
 
 def update_selected_param_label(main_window, path, value):
     # Determine the displayed value
@@ -436,12 +442,12 @@ def create_rule_section(main_window):
         lambda: [
             set_rule_button.setEnabled(main_window.new_value_input_rule.text().strip() != ""),
             set_rule_button.setStyleSheet(
-                "background-color: lightgreen; color: black;" if main_window.new_value_input_rule.text().strip() 
+                "background-color: lightgreen; color: black;" if main_window.new_value_input_rule.text().strip()
                 else "background-color: lightgreen; color: darkgray;"
             ),
             add_rule_analysis_button.setEnabled(not set_rule_button.isEnabled()),
             add_rule_analysis_button.setStyleSheet(
-                "background-color: lightgreen; color: black;" if not main_window.new_value_input_rule.text().strip() 
+                "background-color: lightgreen; color: black;" if not main_window.new_value_input_rule.text().strip()
                 else "background-color: lightgreen; color: darkgray;"
             )
         ]
@@ -651,8 +657,11 @@ def get_parameter_path_xml(main_window, node):
         if "name" in node.attrib:
             node_name += f"[@name='{node.get('name')}']"
         # Append 'index' attribute if it exists
-        if "index" in node.attrib:
+        elif "index" in node.attrib:
             node_name += f"[{int(node.get('index')) + 1}]"
+        # Use ID attribute if Dirichlet_options boundary_value
+        elif "boundary_value" == node.tag :
+            node_name += f"[@ID='{node.get('ID')}']"
         path.insert(0, node_name)
         node = main_window.parent_map.get(node)  # Use the parent map to find the parent
     return ".//" + "/".join(path)
@@ -844,8 +853,8 @@ def save_ini_file(main_window):
                 config.read(file_path)
                 if struc_name in config.sections():
                     # Ask the user if they want to overwrite
-                    reply = QMessageBox.question(main_window, "Overwrite Confirmation", 
-                                                    f"Structure '{struc_name}' already exists. Do you want to overwrite it?", 
+                    reply = QMessageBox.question(main_window, "Overwrite Confirmation",
+                                                    f"Structure '{struc_name}' already exists. Do you want to overwrite it?",
                                                     QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
                     if reply == QMessageBox.Yes:
                         # Remove the existing section

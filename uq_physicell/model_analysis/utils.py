@@ -121,7 +121,7 @@ def mcds_list_to_qoi_df_long(recreated_qoi_funcs, all_sample_ids, chunk_size, db
                         and ReplicateID, with columns for each QoI - columns combined with time points.
     """
     # Process samples in chunks to avoid memory issues
-    ls_column = ['SampleID','ReplicateID', 'time'] + sorted(recreated_qoi_funcs.keys())
+    ls_column = ['SampleID','time','ReplicateID'] + sorted(recreated_qoi_funcs.keys())
     llo_data = []
     for i in range(0, len(all_sample_ids), chunk_size):
         chunk_sample_ids = all_sample_ids[i:i + chunk_size]
@@ -134,7 +134,7 @@ def mcds_list_to_qoi_df_long(recreated_qoi_funcs, all_sample_ids, chunk_size, db
                 mcds_ts_list = df_sample[df_sample['ReplicateID'] == ReplicateID]['Data'].values[0]
                 # print(f"SampleID: {SampleID}, ReplicateID: {ReplicateID} - mcds_ts_list: {mcds_ts_list}")
                 for mcds in mcds_ts_list:
-                    lo_data = [SampleID, ReplicateID, mcds.get_time()]
+                    lo_data = [SampleID, mcds.get_time(), ReplicateID]
                     try:
                         for qoi_name, qoi_func in sorted(recreated_qoi_funcs.items()):
                             # Store functions the qoi result
@@ -147,6 +147,7 @@ def mcds_list_to_qoi_df_long(recreated_qoi_funcs, all_sample_ids, chunk_size, db
 
     # Gernate data frame
     df_qois = pd.DataFrame(llo_data, columns=ls_column)
+    df_qois = df_qois.sort_values(['SampleID','time','ReplicateID'], ignore_index=True)
     return df_qois
 
 def mcds_list_to_qoi_df_for_calib(recreated_qoi_funcs, all_sample_ids, chunk_size, db_file) -> pd.DataFrame:

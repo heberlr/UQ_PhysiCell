@@ -728,7 +728,7 @@ def check_simulations_db(PhysiCellModel: PhysiCell_Model, sampler: str, param_di
         for sample_id, params in dic_samples.items():
             # Use set items comparison to ignore order of keys
             if set(dic_samples_db[sample_id].items()) != set(params.items()):
-                raise ValueError(f"ParameterSpace mismatch for SampleID {sample_id}. Expected: {params}, Found: {dic_samples_db[sample_id]}.")
+                raise ValueError(f"ParameterSpace mismatch for SampleID {sample_id}. Expected: {sorted(params.items())}, Found: {sorted(dic_samples_db[sample_id].items())}.")
 
         # Check if QoIs match the expected values
         if qois_dic:
