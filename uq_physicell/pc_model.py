@@ -512,6 +512,8 @@ def _set_xml_element_value(xml_root: ET.Element, key: str, val: Union[str, int, 
     # Check and extract the attribute name using regex
     attribute = _attr_name_re.search(last_seg)
     elem = elems[0]
+    if last_seg.startswith('boundary_value[@ID'):
+        attribute = False
     if attribute:
         elem.set(attribute.group(1), str(val))
     else:
