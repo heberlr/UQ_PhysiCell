@@ -18,9 +18,7 @@ def reshape_sa_expanded_data(expanded_data: pd.DataFrame, qoi_columns: list) -> 
         qoi_columns (list): List of quantity of interest column names to reshape.
 
     Returns:
-        pd.DataFrame: Reshaped DataFrame with multi-level columns where each QoI
-                     and time point becomes a separate column indexed by SampleID
-                     and ReplicateID.
+        pd.DataFrame: Reshaped DataFrame with multi-level columns where each QoI and time point becomes a separate column indexed by SampleID and ReplicateID.
 
     Example:
         >>> data = pd.DataFrame({
@@ -71,8 +69,7 @@ def mcds_list_to_qoi_df_for_sa(recreated_qoi_funcs, all_sample_ids, chunk_size, 
         chunk_size (int): Number of samples to process in each chunk to manage memory usage.
         db_file (str): Path to the database file containing simulation output.
     Returns:
-        pd.DataFrame: DataFrame with calculated QoI values indexed by SampleID
-                        and ReplicateID, with columns for each QoI - columns combined with time points.
+        pd.DataFrame: DataFrame with calculated QoI values indexed by SampleID and ReplicateID, with columns for each QoI - columns combined with time points.
     """
     df_qois = pd.DataFrame()
     # Process samples in chunks to avoid memory issues
@@ -122,8 +119,7 @@ def mcds_list_to_qoi_df_long(recreated_qoi_funcs, all_sample_ids, chunk_size, db
         chunk_size (int): Number of samples to process in each chunk to manage memory usage.
         db_file (str): Path to the database file containing simulation output.
     Returns:
-        pd.DataFrame: DataFrame with calculated QoI values indexed by SampleID
-                        and ReplicateID, with columns for each QoI - columns combined with time points.
+        pd.DataFrame: DataFrame with calculated QoI values indexed by SampleID and ReplicateID, with columns for each QoI - columns combined with time points.
     """
     # Process samples in chunks to avoid memory issues
     b_column = True
@@ -187,8 +183,7 @@ def mcds_list_to_qoi_df_for_calib(recreated_qoi_funcs, all_sample_ids, chunk_siz
         chunk_size (int): Number of samples to process in each chunk to manage memory usage.
         db_file (str): Path to the database file containing simulation output.
     Returns:
-        pd.DataFrame: DataFrame with calculated QoI values indexed by SampleID
-                        and ReplicateID, with columns for each QoI - columns is not combined with time points.
+        pd.DataFrame: DataFrame with calculated QoI values indexed by SampleID and ReplicateID, with columns for each QoI - columns is not combined with time points.
     """
     df_qois = pd.DataFrame()
     # Process samples in chunks to avoid memory issues
@@ -248,13 +243,12 @@ def calculate_qoi_from_sa_db(db_file:str, qoi_functions:dict, qoi_def:dict={}, c
             sa, calib, and long. The default is sa.
 
     Returns:
-        pd.DataFrame: DataFrame with calculated QoI values indexed by SampleID
-                     and ReplicateID, with columns for each QoI.
+        pd.DataFrame: DataFrame with calculated QoI values indexed by SampleID and ReplicateID, with columns for each QoI.
 
     Example:
         >>> qoi_funcs = {
-        ...     'final_cells': 'lambda data: data[-1]["cell_count"]',
-        ...     'max_growth': 'lambda data: max(d["cell_count"] for d in data)'
+        ...     'live_cells': lambda df: len(df[df['dead'] == False]),
+        ...     'dead_cells': lambda df: len(df[df['dead'] == True])
         ... }
         >>> qoi_df = calculate_qoi_from_sa_db('study.db', qoi_funcs, chunk_size=20)
     """
@@ -297,9 +291,9 @@ def calculate_qoi_from_sa_db(db_file:str, qoi_functions:dict, qoi_def:dict={}, c
 
 
 def calculate_qoi_statistics(df_qois_data: pd.DataFrame, qoi_funcs: dict, db_file_path: str, ignore_db_consistency: bool = False) -> pd.DataFrame:
-    """Calculate statistical summaries of quantities of interest across replicates.
+    """Calculate statistical summaries (mean and relative MCSE) of quantities of interest across replicates.
 
-    This function computes mean and standard deviation of QoI values across
+    This function computes mean and relative Monte Carlo Standard Error (MCSE) of QoI values across
     simulation replicates for each parameter sample, enabling uncertainty quantification.
 
     Args:
@@ -310,16 +304,26 @@ def calculate_qoi_statistics(df_qois_data: pd.DataFrame, qoi_funcs: dict, db_fil
         db_file_path (str): Path to the database file for context.
         ignore_db_consistency (bool): If True, bypasses the database consistency check.
     Returns:
-        pd.DataFrame: DataFrame with statistical summaries (mean, std) of QoIs
-                     grouped by SampleID, with columns for each QoI statistic.
+        tuple: A tuple containing:
+            - df_mean (pd.DataFrame): DataFrame with statistical summaries (mean) of QoIs grouped by SampleID, with columns for each QoI statistic.
+            - df_mcse (pd.DataFrame): DataFrame with relative Monte Carlo Standard Error (MCSE) of QoIs grouped by SampleID, with columns for each QoI statistic.
+    Note:
+        Relative Monte Carlo Standard Error (MCSE) is calculated as the standard deviation
+        of the QoI across replicates divided by the square root of the number of replicates, and then normalized by the mean QoI value to express it as a percentage. This provides insight into the uncertainty of the QoI estimates due to finite sampling in the simulations.
+            - < 1% (Excellent): This is the gold standard. If your relative MCSE is under 1%, your mean estimate is highly stable and precise. You can confidently use this metric for sensitivity analysis or publication.
+            - 1% to 5% (Good / Acceptable): For stochastic biological simulations like PhysiCell, getting under 5% is generally considered reliable and practical.
+            - 5% to 10% (Caution): You can use these metrics to observe broad trends, but small differences between parameters might just be noise. You likely need to run more replicates.
+            - > 10% (Unreliable): The metric is too noisy. If you are running 50+ replicates and still have a relative MCSE > 10%, that specific QoI (Quantity of Interest) is likely a poor choice, or your biological system is fundamentally chaotic in that aspect.
 
     Raises:
         ValueError: If no QoI functions are defined or data format is invalid.
 
     Example:
-        >>> qoi_funcs = {'cell_count': lambda x: x.sum(), 'growth_rate': None}
-        >>> stats_df = calculate_qoi_statistics(qoi_data, qoi_funcs, 'study.db')
-        >>> print(stats_df[['cell_count_mean', 'cell_count_std']])
+        >>> qoi_funcs = {
+        ...     'live_cells': lambda df: len(df[df['dead'] == False]),
+        ...     'dead_cells': lambda df: len(df[df['dead'] == True])
+        ... }
+        >>> df_mean, df_mcse = calculate_qoi_statistics(qoi_data, qoi_funcs, 'study.db')
     """
     # Check db consistency
     if not check_db_consistency(db_file_path):
