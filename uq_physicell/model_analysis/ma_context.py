@@ -164,10 +164,10 @@ def run_simulations(context: ModelAnalysisContext):
         ImportError: If required parallelization libraries are missing.
     
     Note:
-        This function handles three execution modes:
-        - Serial: Single-threaded execution for small analyses
-        - Inter-process: Multi-processing on a single node using concurrent.futures
-        - Inter-node: Distributed execution across multiple nodes using MPI
+        This function handles three execution modes: 
+            - Serial: Single-threaded execution for small analyses
+            - Inter-process: Multi-processing on a single node using concurrent.futures
+            - Inter-node: Distributed execution across multiple nodes using MPI
     """
     # Only set up signal handlers if we're in the main thread of the main interpreter
     if threading.current_thread() is threading.main_thread():
