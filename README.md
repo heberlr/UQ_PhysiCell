@@ -18,4 +18,4 @@ UQ-PhysiCell is a comprehensive framework for performing uncertainty quantificat
 - 💡 **Examples**: [https://uq-physicell.readthedocs.io/en/latest/examples.html](https://uq-physicell.readthedocs.io/en/latest/examples.html)
 - 🐛 **Bug Reports**: [https://github.com/heberlr/UQ_PhysiCell/issues](https://github.com/heberlr/UQ_PhysiCell/issues)
 - 💻 **Source Code**: [https://github.com/heberlr/UQ_PhysiCell](https://github.com/heberlr/UQ_PhysiCell)
-<!-- - 📄 **Cite**: [...](...) -->
+- 📄 **Cite**: [https://doi.org/10.64898/2026.04.06.716692](https://doi.org/10.64898/2026.04.06.716692)
