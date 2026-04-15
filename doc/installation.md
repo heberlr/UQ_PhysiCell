@@ -8,6 +8,8 @@ UQ-PhysiCell requires Python 3.10 or later and the following dependencies:
 
 ## Installation from PyPI
 
+We recommend using a virtual environment, such as [venv](https://docs.python.org/3/library/venv.html) or [conda](https://docs.conda.io/projects/conda/en/latest/user-guide/tasks/manage-environments.html).
+
 ```bash
 pip install uq-physicell
 ```
