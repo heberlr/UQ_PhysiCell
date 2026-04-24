@@ -47,21 +47,67 @@ def convert_df_to_df_over_time(df_summary, selected_qoi):
     })
     return plot_data
 
-def plot_qoi_over_time(df_plot, selected_qoi, ax):
+def plot_qoi_over_time(df_plot, selected_qoi, ax, plot_mcse_range=False):
+    from matplotlib.patches import Patch
+    import numpy as np
     import seaborn as sns
     # Prepare the data for seaborn
-    plot_data = convert_df_to_df_over_time(df_plot, selected_qoi)
+    if 'time' in df_plot.index.names:
+        df_plot = df_plot.reset_index()
+        df_plot.rename(columns={'time': 'Time'}, inplace=True)
+        plot_data = df_plot[['Time', selected_qoi, 'SampleID']].dropna()
+    else:
+        plot_data = convert_df_to_df_over_time(df_plot, selected_qoi)
     # If just one time point, use swarmplot, else use lineplot
     if len(plot_data["Time"].unique()) == 1:
         sns.swarmplot(data=plot_data, x="Time", y=selected_qoi, hue="SampleID", ax=ax)
     else:
         sns.lineplot(data=plot_data, x="Time", y=selected_qoi, hue="SampleID", ax=ax)
+
+    # Plot MCSE range if requested
+    if plot_mcse_range:
+        # Use fixed MCSE intervals and draw only the bands that overlap the plotted QoI scale.
+        _, y_max = ax.get_ylim()
+        y_min = 0.0
+        ranges = [
+            (0.0, 0.01, 'green'),
+            (0.01, 0.05, 'blue'),
+            (0.05, 0.1, 'yellow'),
+            (0.1, 1.0, 'red')
+        ]
+        for lower, upper, color in ranges:
+            clipped_lower = max(lower, y_min)
+            clipped_upper = min(upper, y_max)
+            if clipped_upper > clipped_lower:
+                ax.axhspan(clipped_lower, clipped_upper, color=color, alpha=0.1)
+        ax.set_ylim(y_min, y_max)
+    
     ax.set_xlabel("Time (min)")
     ax.set_ylabel(selected_qoi)
-    # Only add legend if there are labeled artists
-    handles, labels = ax.get_legend_handles_labels()
-    if handles and labels:
-        ax.legend(title="Sample Index")
+    # Add sample legend and, when requested, a dedicated MCSE legend outside the plot.
+    sample_legend = ax.get_legend()
+    if sample_legend is not None:
+        ax.add_artist(sample_legend)
+
+    if plot_mcse_range:
+        mcse_handles = [
+            Patch(facecolor='green', alpha=0.3, label='Excelent (<1%)'),
+            Patch(facecolor='blue', alpha=0.3, label='Acceptable ([1%,5%])'),
+            Patch(facecolor='yellow', alpha=0.3, label='Cautionary ([5%,10%])'),
+            Patch(facecolor='red', alpha=0.3, label='Unreliable (>10%)')
+        ]
+        # Place MCSE legend below the plot, then call tight_layout to adjust figure
+        mcse_legend = ax.legend(
+            handles=mcse_handles,
+            title='Ranges of MCSE relative to mean',
+            loc='upper center',
+            bbox_to_anchor=(0.5, -0.15),
+            ncol=4,
+            fontsize=8,
+            frameon=True
+        )
+        ax.add_artist(mcse_legend)
+
 
 def plot_global_sa_results(global_SA_parameters, sa_method, qoi_time_values, sa_results, selected_qoi, selected_sm, ax, parameter_order=None):
     import pandas as pd
