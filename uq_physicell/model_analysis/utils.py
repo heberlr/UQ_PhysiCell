@@ -6,7 +6,7 @@ from typing import Union
 from ..database.ma_db import load_output, load_samples, check_db_consistency
 from ..utils.sumstats import recreate_qoi_functions, safe_call_qoi_function
 
-def reshape_sa_expanded_data(expanded_data: pd.DataFrame, qoi_columns: list) -> pd.DataFrame:
+def _reshape_sa_expanded_data(expanded_data: pd.DataFrame, qoi_columns: list) -> pd.DataFrame:
     """Reshape expanded sensitivity analysis data for pivot table analysis.
 
     This function transforms time-series data from long format (multiple rows per sample)
@@ -218,7 +218,41 @@ def mcds_list_to_qoi_df_for_calib(recreated_qoi_funcs, all_sample_ids, chunk_siz
     df_qois = df_qois.reset_index(drop=True)
     return df_qois
 
-def calculate_qoi_from_sa_db(db_file:str, qoi_functions:dict, qoi_def:dict={}, chunk_size:int=10, mode='sa', verbose=False) -> pd.DataFrame:
+def get_qoi_from_db_file(db_file:str, qoi_names:list) -> pd.DataFrame:
+    """Extract quantities of interest (QoIs) from a database file containing simulation results.
+
+    Args:
+        db_file (str): Path to the SQLite database containing simulation results.
+        qoi_names (list): List of QoI names to extract.
+
+    Returns:
+        pd.DataFrame: DataFrame with calculated QoI values indexed by SampleID and ReplicateID, with columns for each QoI.
+    """
+    # Load the full output data to extract time column and reshape
+    df_qois_data = load_output(db_file, load_data=True)
+ 
+    # Extract the consistent 'time' column from the first DataFrame
+    time_column = df_qois_data['Data'].iloc[0]['time'].values
+    # Flatten the 'Data' column into a single DataFrame with SampleID and ReplicateID
+    expanded_data = pd.concat(
+        [
+            pd.DataFrame(data).assign(SampleID=SampleID, ReplicateID=ReplicateID)
+            for (SampleID, ReplicateID), group in df_qois_data.groupby(['SampleID', 'ReplicateID'])
+            for data in group['Data']  # Ensure 'Data' contains DataFrames
+        ],
+        ignore_index=True
+    )
+    # Dynamically calculate the number of repetitions for the time column
+    num_repeats = len(expanded_data) // len(time_column)
+    if len(expanded_data) % len(time_column) != 0:
+        raise ValueError("Mismatch between expanded_data rows and time column length.")
+    expanded_data['time'] = np.tile(time_column, num_repeats)
+    # Reshape the expanded_data to match the expected format
+    reshaped_data = _reshape_sa_expanded_data(expanded_data, qoi_names)
+    
+    return reshaped_data
+
+def calculate_qoi_from_db_file(db_file:str, qoi_functions:dict, qoi_def:dict={}, chunk_size:int=10, mode='long', verbose=False) -> pd.DataFrame:
     """Calculate quantities of interest from sensitivity analysis database results.
 
     This function loads simulation results from a database in chunks and applies QoI
@@ -240,7 +274,7 @@ def calculate_qoi_from_sa_db(db_file:str, qoi_functions:dict, qoi_def:dict={}, c
         chunk_size (int, optional): Number of samples to process at a time. Default is 10.
                                    Adjust based on available memory and data size.
         mode:  Specify the form of the result dataframe. Possible modes are
-            sa, calib, and long. The default is sa.
+            sa, calib, and long. The default is long.
 
     Returns:
         pd.DataFrame: DataFrame with calculated QoI values indexed by SampleID and ReplicateID, with columns for each QoI.
@@ -250,7 +284,7 @@ def calculate_qoi_from_sa_db(db_file:str, qoi_functions:dict, qoi_def:dict={}, c
         ...     'live_cells': lambda df: len(df[df['dead'] == False]),
         ...     'dead_cells': lambda df: len(df[df['dead'] == True])
         ... }
-        >>> qoi_df = calculate_qoi_from_sa_db('study.db', qoi_funcs, chunk_size=20)
+        >>> qoi_df = calculate_qoi_from_db_file('study.db', qoi_funcs, chunk_size=20)
     """
 
     # Load sample IDs to determine what to process
@@ -288,25 +322,111 @@ def calculate_qoi_from_sa_db(db_file:str, qoi_functions:dict, qoi_def:dict={}, c
 
     return df_qois
 
+def get_mean_std_qois(df_qois: pd.DataFrame, filter_columns: list = []) -> pd.DataFrame:
+    """Calculate the mean and standard deviation of quantities of interest (QoIs) across replicates.
 
+    This function computes the mean and standard deviation QoI values for each parameter sample across all replicates, providing a central tendency and variability measure for the QoI estimates.
+    
+    Args: 
+        df_qois (pd.DataFrame): DataFrame containing QoI values with SampleID, ReplicateID, and QoI columns.
+        filter_columns (list, optional): List of columns to include in the calculation. If None, all numeric columns are used.
+    Returns: tuple: A tuple containing:
+        pd.DataFrame: DataFrame containing the mean QoI values for each SampleID, indexed by SampleID and ReplicateID.
+        pd.DataFrame: DataFrame containing the standard deviation QoI values for each SampleID, indexed by SampleID and ReplicateID.
+    Note:
+        The mean QoI values are calculated by averaging the QoI estimates across all replicates for each parameter sample. This provides a central tendency measure for the QoI estimates, which can be used for sensitivity analysis and comparison between different parameter samples.
+    """
+    df_grouped = df_qois.groupby(['SampleID']+filter_columns)
+    df_mean = df_grouped.mean(numeric_only=True) # ignores NaN values
+    df_mean.drop(columns=['ReplicateID'], inplace=True)
+    df_std = df_grouped.std(numeric_only=True) # ignores NaN values
+    df_std.drop(columns=['ReplicateID'], inplace=True)
+    return df_mean, df_std
 
-def calculate_qoi_statistics(df_qois_data: pd.DataFrame, qoi_funcs: dict, db_file_path: str, ignore_db_consistency: bool = False) -> pd.DataFrame:
+def get_relative_mcse_qois(df_mean: pd.DataFrame, df_std: pd.DataFrame, num_replicates: int, time_columns: list) -> pd.DataFrame:
+    """Calculate the relative Monte Carlo Standard Error (MCSE) for QoI estimates.
+
+    This function computes the relative MCSE for each QoI across replicates, providing
+    insight into the uncertainty of the QoI estimates due to finite sampling in the simulations.
+
+    Args:
+        df_mean (pd.DataFrame): DataFrame containing the mean QoI values for each SampleID, indexed by SampleID and ReplicateID.
+        df_std (pd.DataFrame): DataFrame containing the standard deviation QoI values for each SampleID, indexed by SampleID and ReplicateID.
+        num_replicates (int): The number of replicates used to calculate the mean and standard deviation of the QoIs.
+        time_columns (list): List of column names corresponding to time points in the DataFrame, which should not be included in the MCSE calculation.
+    Returns:
+        pd.DataFrame: DataFrame containing the relative MCSE values for each QoI, indexed by SampleID and ReplicateID.
+
+    Note:
+        Relative Monte Carlo Standard Error (MCSE) is calculated as the standard deviation
+        of the QoI across replicates divided by the square root of the number of replicates, and then normalized by the mean QoI value to express it as a percentage. This provides insight into the uncertainty of the QoI estimates due to finite sampling in the simulations.
+            - < 1% (Excellent): This is the gold standard. If your relative MCSE is under 1%, your mean estimate is highly stable and precise. You can confidently use this metric for sensitivity analysis or publication.
+            - 1% to 5% (Good / Acceptable): For stochastic biological simulations like PhysiCell, getting under 5% is generally considered reliable and practical.
+            - 5% to 10% (Caution): You can use these metrics to observe broad trends, but small differences between parameters might just be noise. You likely need to run more replicates.
+            - > 10% (Unreliable): The metric is too noisy. If you are running 50+ replicates and still have a relative MCSE > 10%, that specific QoI (Quantity of Interest) is likely a poor choice, or your biological system is fundamentally chaotic in that aspect.
+    """
+    df_relative_mcse = df_std/np.sqrt(num_replicates)
+    # Small epsilon to avoid division by zero
+    epsilon = max(0.01 * np.nanmedian(df_mean.abs().to_numpy().flatten()), 1e-12)
+    # Relative MCSE
+    df_relative_mcse = df_relative_mcse.div(df_mean + epsilon)
+    # Replace the columns relative to time as the real value from df_mean
+    df_relative_mcse[time_columns] = df_mean[time_columns]
+    
+    return df_relative_mcse
+
+def get_summary_statistics_qois(df_qois: pd.DataFrame) -> tuple:
+    """Calculate summary statistics (mean, standard deviation, and relative MCSE) of quantities of interest.
+
+    Args:
+        df_qois (pd.DataFrame): DataFrame containing QoI values with SampleID and ReplicateID columns.
+
+    Returns: tuple: A tuple containing:
+        pd.DataFrame: DataFrame with statistical summaries (mean) of QoIs grouped by SampleID, with columns for each QoI statistic.
+        pd.DataFrame: DataFrame with standard deviation of QoIs grouped by SampleID, with columns for each QoI statistic.
+        pd.DataFrame: DataFrame with relative Monte Carlo Standard Error (MCSE) of QoIs grouped by SampleID, with columns for each QoI statistic.
+    """
+    time_columns = sorted([col for col in df_qois.columns if col.startswith("time_")])
+    if not time_columns:
+        if 'time' in df_qois.columns:
+            filter_columns = ['time']
+        else:
+            raise ValueError("No time columns found in the DataFrame.")
+    else:
+        filter_columns = []
+    df_mean, df_std = get_mean_std_qois(df_qois, filter_columns=filter_columns)
+    
+    
+    df_relative_mcse = get_relative_mcse_qois(df_mean, df_std, num_replicates = df_qois['ReplicateID'].nunique(), time_columns=time_columns)
+
+    return df_mean, df_std, df_relative_mcse
+
+def calculate_qoi_statistics(db_file_path: str, qoi_funcs: dict, df_qois_data: pd.DataFrame = None,  ignore_db_consistency: bool = False, qoi_def: dict = None, chunk_size: int = 10) -> tuple:
     """Calculate statistical summaries (mean and relative MCSE) of quantities of interest across replicates.
 
     This function computes mean and relative Monte Carlo Standard Error (MCSE) of QoI values across
     simulation replicates for each parameter sample, enabling uncertainty quantification.
 
     Args:
-        df_qois_data (pd.DataFrame): DataFrame containing QoI values with SampleID,
-                                   ReplicateID, and QoI columns.
+        db_file_path (str): Path to the database file for context.
         qoi_funcs (dict): Dictionary of QoI functions where keys are QoI names and
                          values are lambda functions or None.
-        db_file_path (str): Path to the database file for context.
+        df_qois_data (pd.DataFrame): DataFrame containing QoI values with SampleID,
+                                   ReplicateID, and QoI columns. Default is None, in which case the function will attempt to load QoI data from the database.
         ignore_db_consistency (bool): If True, bypasses the database consistency check.
+        qoi_def (dict): first-class object, that can be used in qoi_funcs lambda string, mapped to their name.
+                        e.g. for a function definition, if the function definition is:
+                        def my_func():
+                            print('hello world!')
+                            return 0
+                        then the qoi_def dict would look like this:
+                        {'my_func': my_func}
+        chunk_size (int, optional): Number of samples to process at a time when loading from the database. Default is 10. Adjust based on available memory and data size.
     Returns:
         tuple: A tuple containing:
             - df_mean (pd.DataFrame): DataFrame with statistical summaries (mean) of QoIs grouped by SampleID, with columns for each QoI statistic.
-            - df_mcse (pd.DataFrame): DataFrame with relative Monte Carlo Standard Error (MCSE) of QoIs grouped by SampleID, with columns for each QoI statistic.
+            - df_std (pd.DataFrame): DataFrame with standard deviation of QoIs grouped by SampleID, with columns for each QoI statistic.
+            - df_relative_mcse (pd.DataFrame): DataFrame with relative Monte Carlo Standard Error (MCSE) of QoIs grouped by SampleID, with columns for each QoI statistic.
     Note:
         Relative Monte Carlo Standard Error (MCSE) is calculated as the standard deviation
         of the QoI across replicates divided by the square root of the number of replicates, and then normalized by the mean QoI value to express it as a percentage. This provides insight into the uncertainty of the QoI estimates due to finite sampling in the simulations.
@@ -323,8 +443,16 @@ def calculate_qoi_statistics(df_qois_data: pd.DataFrame, qoi_funcs: dict, db_fil
         ...     'live_cells': lambda df: len(df[df['dead'] == False]),
         ...     'dead_cells': lambda df: len(df[df['dead'] == True])
         ... }
-        >>> df_mean, df_mcse = calculate_qoi_statistics(qoi_data, qoi_funcs, 'study.db')
+        >>> df_mean, df_std, df_mcse = calculate_qoi_statistics(qoi_data, qoi_funcs, 'study.db')
     """
+
+    if df_qois_data is None:
+        print("No QoI data provided, calculating QoIs from the database...")
+        try:
+            df_qois_data = load_output(db_file_path, load_data=False)
+        except Exception as e:
+            raise ValueError(f"Error loading output data from database: {e}")
+        
     # Check db consistency
     if not check_db_consistency(db_file_path):
         if ignore_db_consistency:
@@ -338,37 +466,16 @@ def calculate_qoi_statistics(df_qois_data: pd.DataFrame, qoi_funcs: dict, db_fil
         if not qoi_columns:
             raise ValueError("Error: No QoI functions defined.")
         if isinstance(df_qois_data['Data'].iloc[0], pd.DataFrame):
-            print("Calculating QoIs from DataFrame...")
-            # Load the full output data to extract time column and reshape
-            df_qois_data = load_output(db_file_path, load_data=True)
+            print("Extracting QoIs from DataFrame...")
             try:
-                # Extract the consistent 'time' column from the first DataFrame
-                time_column = df_qois_data['Data'].iloc[0]['time'].values
-                # Flatten the 'Data' column into a single DataFrame with SampleID and ReplicateID
-                expanded_data = pd.concat(
-                    [
-                        pd.DataFrame(data).assign(SampleID=SampleID, ReplicateID=ReplicateID)
-                        for (SampleID, ReplicateID), group in df_qois_data.groupby(['SampleID', 'ReplicateID'])
-                        for data in group['Data']  # Ensure 'Data' contains DataFrames
-                    ],
-                    ignore_index=True
-                )
-                # Dynamically calculate the number of repetitions for the time column
-                num_repeats = len(expanded_data) // len(time_column)
-                if len(expanded_data) % len(time_column) != 0:
-                    raise ValueError("Mismatch between expanded_data rows and time column length.")
-                expanded_data['time'] = np.tile(time_column, num_repeats)
-                # Reshape the expanded_data to match the expected format
-                reshaped_data = reshape_sa_expanded_data(expanded_data, qoi_columns)
-                # Assign the reshaped data to df_qois
-                df_qois = reshaped_data
+                df_qois = get_qoi_from_db_file(db_file_path, qoi_columns)
             except Exception as e:
-                raise ValueError(f"Error calculating QoIs from DataFrame: {e}")
+                raise ValueError(f"Error extracting QoIs from DataFrame: {e}")
         # Check if 'Data' column in df_qois_data is a series of mcds list - Case of db generated by generic summary function with NO QoI functions
         elif isinstance(df_qois_data['Data'].iloc[0], list):
             print("Calculating QoIs from mcds list...")
             try:
-                df_qois = calculate_qoi_from_sa_db(db_file_path, qoi_funcs)
+                df_qois = calculate_qoi_from_db_file(db_file_path, qoi_funcs, qoi_def=qoi_def, chunk_size=chunk_size)
             except Exception as e:
                 raise ValueError(f"Error calculating QoIs from mcds list: {e}")
             if df_qois.empty:
@@ -377,28 +484,12 @@ def calculate_qoi_statistics(df_qois_data: pd.DataFrame, qoi_funcs: dict, db_fil
             raise ValueError("Error: Data element is neither Dataframe nor List.")
     # If QoIs are already in the database and 'Data' column is not present
     else:
-        print("Calculating QoIs from existing DataFrame...")
+        print("Extracting QoIs from existing DataFrame...")
         df_qois = df_qois_data
 
     # Take the mean and MCSE among the replicates and sort the samples
     try:
-        # Number of Replicates is equal for all samples
-        num_replicates = df_qois['ReplicateID'].nunique()
-        time_columns = sorted([col for col in df_qois.columns if col.startswith("time_")])
-        print(f"Number of replicates: {num_replicates}")
-        df_grouped = df_qois.groupby(['SampleID'])
-        df_stds = df_grouped.std(numeric_only=True) # ignores NaN values
-        df_stds.drop(columns=['ReplicateID'], inplace=True)
-        df_mean = df_grouped.mean(numeric_only=True) # ignores NaN values
-        df_mean.drop(columns=['ReplicateID'], inplace=True)
-        # Calculate the relative Monte Carlo Standard Error (MCSE)
-        df_relative_mcse = df_stds/np.sqrt(num_replicates)
-        # Small epsilon to avoid division by zero
-        epsilon = max(0.01 * np.nanmedian(df_mean.abs().to_numpy().flatten()), 1e-12)
-        # Relative MCSE
-        df_relative_mcse = df_relative_mcse.div(df_mean + epsilon)
-        # Replace the columns relative to time as the real value from df_mean
-        df_relative_mcse[time_columns] = df_mean[time_columns]
+        df_mean, df_std, df_relative_mcse = get_summary_statistics_qois(df_qois)
     except Exception as e:
-        raise ValueError(f"Error taking the mean and MCSE among replicates: {e}")
-    return df_mean, df_relative_mcse
+        raise ValueError(f"Error taking the mean, std, and MCSE among replicates: {e}")
+    return df_mean, df_std, df_relative_mcse
