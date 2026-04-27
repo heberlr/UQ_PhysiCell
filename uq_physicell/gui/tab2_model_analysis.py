@@ -18,11 +18,12 @@ from matplotlib.figure import Figure
 
 # My local modules
 from ..model_analysis.samplers import run_global_sampler, run_local_sampler
-from ..model_analysis.sensitivity_analysis import run_global_sa, run_local_sa, samplers_to_method
+from ..model_analysis.sensitivity_analysis import run_global_sa, run_local_sa, samplers_to_method, get_global_SA_parameters, get_local_SA_parameters
 from ..model_analysis.ma_context import ModelAnalysisContext, run_simulations
 from ..model_analysis.utils import calculate_qoi_statistics
+from ..model_analysis.visualization import plot_qoi_over_time, plot_global_sa_results, plot_local_sa_results
 from ..database.ma_db import load_structure
-from ..gui.utils import get_global_SA_parameters, get_local_SA_parameters, plot_qoi_over_time, plot_global_sa_results, plot_local_sa_results
+
 
 class QtTextEditLogHandler(logging.Handler):
     """Thread-safe logging handler that uses signal/slot mechanism."""
@@ -629,6 +630,7 @@ def open_qoi_definition_window(main_window):
             'total_cells': "lambda df: len(df)",
             'live_cells': "lambda df: len(df[df['dead'] == False])",
             'dead_cells': "lambda df: len(df[df['dead'] == True])",
+            'sum_dead_cells': "lambda mcds_ts: sum(map(lambda mcds: len(mcds.get_cell_df()[mcds.get_cell_df()['dead'] == True]), mcds_ts))",     
             'mean_radial_distance': "lambda df: df[['position_x', 'position_y', 'position_z']].apply(lambda row: ((row['position_x']**2 + row['position_y']**2 + row['position_z']**2)**0.5), axis=1).mean()",
             'max_volume': "lambda df: df['total_volume'].max()",
             'min_volume': "lambda df: df['total_volume'].min()",
@@ -1615,12 +1617,12 @@ def plot_qois(main_window):
     plot_qoi_hbox.addWidget(plot_qoi_mcse_checkbox)
     layout.addLayout(plot_qoi_hbox)
     # Create a new figure and canvas for the plot
-    figure = Figure(figsize=(5, 3))
+    figure = Figure(figsize=(5, 3), constrained_layout=False)
     canvas = FigureCanvas(figure)
     layout.addWidget(canvas)
     # Calculate the QoIs if not already done
     if main_window.df_summary_qois.empty:
-        try: main_window.df_summary_qois, main_window.df_relative_mcse = calculate_qoi_statistics(main_window.df_output, main_window.qoi_funcs, db_file_path = main_window.db_file_name_input.text().strip())
+        try: main_window.df_summary_qois,_, main_window.df_relative_mcse = calculate_qoi_statistics(main_window.df_output, main_window.qoi_funcs, db_file_path = main_window.db_file_name_input.text().strip())
         except Exception as e:
             main_window.update_output_tab2(main_window, f"Error calculating QoIs: {e}")
             return
@@ -1632,17 +1634,20 @@ def plot_qois(main_window):
         selected_qoi = plot_qoi_combo.currentText()
         # Plot the selected QoI
         if selected_qoi in main_window.qoi_funcs.keys():
-            if plot_qoi_mcse_checkbox.isChecked(): df_plot = main_window.df_relative_mcse
-            else: df_plot = main_window.df_summary_qois
+            if plot_qoi_mcse_checkbox.isChecked():
+                # Reserve room for legends: right side for samples and bottom for MCSE ranges.
+                figure.subplots_adjust( bottom=0.30)
+                df_plot = main_window.df_relative_mcse
+                plot_mcse_range = True
+            else:
+                figure.subplots_adjust( bottom=0.15) # Adjust bottom to make room for x-axis labels
+                df_plot = main_window.df_summary_qois
+                plot_mcse_range = False
             # print(f"Columns: {df_plot.columns}")
-            plot_qoi_over_time(df_plot, selected_qoi, ax)
-            canvas.draw()
+            plot_qoi_over_time(df_plot, selected_qoi, ax, plot_mcse_range=plot_mcse_range)
         else:
             main_window.update_output_tab2(main_window, f"Error: {selected_qoi} not found in the output data.")
-        # Adjust layout and draw the canvas
-        # figure.tight_layout()
-        figure.set_constrained_layout(True)
-        canvas.draw()
+        canvas.draw_idle()
     
     try:
         # Connect the combo box to update the plot
@@ -1663,7 +1668,7 @@ def run_analysis(main_window):
     main_window.update_output_tab2(main_window, "Running sensitivity analysis...")
      # Calculate the QoIs if not already done
     if main_window.df_summary_qois.empty:
-        try: main_window.df_summary_qois, main_window.df_relative_mcse = calculate_qoi_statistics(main_window.df_output, main_window.qoi_funcs, db_file_path = main_window.db_file_name_input.text().strip())
+        try: main_window.df_summary_qois,_, main_window.df_relative_mcse = calculate_qoi_statistics(main_window.df_output, main_window.qoi_funcs, db_file_path = main_window.db_file_name_input.text().strip())
         except Exception as e:
             main_window.update_output_tab2(main_window, f"Error calculating QoIs: {e}")
             return
@@ -1747,7 +1752,8 @@ def plot_sa_results(main_window):
         try:
             if main_window.sampling_type_dropdown.currentText() == "Global":
                 SA_method = main_window.SA_method_combo.currentText()
-                plot_global_sa_results(main_window.global_SA_parameters, SA_method, main_window.qoi_time_values, main_window.sa_results, selected_qoi, selected_sm, ax)
+                param_names = [key for key in main_window.global_SA_parameters.keys() if key != "samples"]
+                plot_global_sa_results(param_names, SA_method, main_window.qoi_time_values, main_window.sa_results, selected_qoi, selected_sm, ax)
             elif main_window.sampling_type_dropdown.currentText() == "Local":
                 SA_method = main_window.SA_method_combo.currentText()
                 plot_local_sa_results(SA_method, main_window.qoi_time_values, main_window.sa_results, selected_qoi, ax)
