@@ -25,6 +25,7 @@ except ImportError:
 from uq_physicell import PhysiCell_Model
 from .samplers import run_local_sampler, run_global_sampler
 from ..utils.model_wrapper import run_replicate, run_replicate_serializable
+from ..utils.sumstats import _convert_qoi_function_to_string
 from ..database.ma_db import create_structure, insert_metadata, insert_param_space, insert_qois, insert_samples, insert_output, check_simulations_db, _disable_wal_mode
 
 
@@ -72,7 +73,8 @@ class ModelAnalysisContext:
             logger: logging.Logger=None):
         self.db_path = db_path
         self.params_dict = params_info  # Dictionary with parameter names, ref value, ranges, and perturbations.
-        self.qois_dict = qois_info
+        # QOI_FUNCTIONS MUST BE STRINGS, BECAUSE THEY NEED TO BE SERIALIZABLE TO BE SAVED IN THE DATABASE AND USED IN THE DEFAULT AGGREGATION FUNCTION.
+        self.qois_dict = {key: _convert_qoi_function_to_string(value, key) if not isinstance(value, str) else value for key, value in qois_info.items()}
         self.qoi_def = qoi_def
         self.parallel_method = parallel_method # inter-process (single node) or inter-node (mpi)
         self.num_workers = num_workers
