@@ -42,6 +42,16 @@ from .utils import (
     calculate_qoi_statistics
 )
 
+from ..database.ma_db import (
+    load_structure,
+    load_metadata,
+    load_parameter_space,
+    load_qois,
+    load_samples,
+    load_output,
+
+)
+
 __all__ = [
     'ModelAnalysisContext',
     'run_simulations',
@@ -64,5 +74,11 @@ __all__ = [
     'get_mean_std_qois',
     'get_relative_mcse_qois',
     'get_summary_statistics_qois',
-    'calculate_qoi_statistics'
+    'calculate_qoi_statistics',
+    'load_structure',
+    'load_metadata',
+    'load_parameter_space',
+    'load_qois',
+    'load_samples',
+    'load_output',
 ]
