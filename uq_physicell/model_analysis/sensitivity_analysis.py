@@ -195,10 +195,20 @@ def run_global_sa(params_dict: dict, qoi_names: list, df_qois: pd.DataFrame, met
                 if np.isnan(qoi_result_np).all(): continue # Skip if QoI at this time does not exist
             elif qoi_time_values is None:
                 if f"{qoi}_{time_label}" not in df_qois.columns: continue # Skip if QoI at this time does not exist
-                qoi_result_np = df_qois[f"{qoi}_{time_label}"].sort_values(by='SampleID').to_numpy()
+                if 'SampleID' in df_qois.columns:
+                    qoi_result_np = df_qois[f"{qoi}_{time_label}"].sort_values(by='SampleID').to_numpy()
+                elif 'SampleID' in df_qois.index.names:
+                    qoi_result_np = df_qois[f"{qoi}_{time_label}"].sort_index(level='SampleID').to_numpy()
+                else:
+                    raise ValueError(f"Error: 'SampleID' must be present as a column or index in df_qois to sort QoI results for method '{method}'.")
             else:
                 if f"{qoi}_{time_id}" not in df_qois.columns: continue # Skip if QoI at this time does not exist
-                qoi_result_np = df_qois[f"{qoi}_{time_id}"].sort_values(by='SampleID').to_numpy()
+                if 'SampleID' in df_qois.columns:
+                    qoi_result_np = df_qois[f"{qoi}_{time_id}"].sort_values(by='SampleID').to_numpy()
+                elif 'SampleID' in df_qois.index.names:
+                    qoi_result_np = df_qois[f"{qoi}_{time_id}"].sort_index(level='SampleID').to_numpy()
+                else:
+                    raise ValueError(f"Error: 'SampleID' must be present as a column or index in df_qois to sort QoI results for method '{method}'.")
             if len(qoi_result_np) != len(params_np):
                 raise ValueError(f"Error: Mismatch between number of samples ({len(params_np)}) and QoI results ({len(qoi_result_np)})!")
             print(f"Running {method} for QoI: {qoi} and time: {qoi_time_values[time_label]}") 
