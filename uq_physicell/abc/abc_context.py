@@ -432,11 +432,11 @@ class CalibrationContext:
         else:
             self.logger.info(f"Starting calibration: max populations: {self.max_populations}, max simulations: {self.max_simulations}")
             abc_smc.run(max_nr_populations=self.max_populations, max_total_nr_simulations=self.max_simulations)
-        # Add metadata to database
-        insert_metadata_db(self.db_path, self)
-        # Add extra info of adaptive distance to database
-        if self.adaptive_distance:
-            insert_adaptive_weights_db(self.db_path, dict_distances=self.distance_functions, dict_adaptive_weights=load_dict_from_json(self.adaptive_distance_file))
+            # Add metadata to database
+            insert_metadata_db(self.db_path, self)
+            # Add extra info of adaptive distance to database
+            if self.adaptive_distance:
+                insert_adaptive_weights_db(self.db_path, dict_distances=self.distance_functions, dict_adaptive_weights=load_dict_from_json(self.adaptive_distance_file))
 
     def check_convergence(self, abc_smc):
         """Check convergence criteria."""
