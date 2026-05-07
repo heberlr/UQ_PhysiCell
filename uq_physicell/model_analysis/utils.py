@@ -493,3 +493,516 @@ def calculate_qoi_statistics(db_file_path: str, qoi_funcs: dict, df_qois_data: p
     except Exception as e:
         raise ValueError(f"Error taking the mean, std, and MCSE among replicates: {e}")
     return df_mean, df_std, df_relative_mcse
+
+def apply_pca_to_qois(df_mean: pd.DataFrame, latent_dim: int = 3, seed: int = None):
+    """Apply PCA to the selected QoIs.
+
+    This function uses PCA (scikit-learn) as a linear dimensionality reduction technique on the QoI matrix (samples x features).
+
+    Args:
+        df_mean (pd.DataFrame): DataFrame with QoI mean values indexed by SampleID.
+        latent_dim (int): Dimension of the latent encoding.
+        seed (int): Random seed for reproducibility (used if PCA requires it). If None, no seed is set.
+    Returns:
+        dict: {
+            'method': 'pca',
+            'encoder_output': np.ndarray (n_samples x latent_dim),
+            'reconstruction': np.ndarray (n_samples x n_features),
+            'model': PCA object,
+            'scaler': StandardScaler object
+        }
+    """
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.decomposition import PCA
+
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(df_mean.to_numpy(dtype=float))
+    n_samples, n_features = X_scaled.shape
+
+    pca = PCA(n_components=min(latent_dim, n_features), random_state=seed)
+    enc = pca.fit_transform(X_scaled)
+    recon = pca.inverse_transform(enc)
+    return {'method': 'pca', 'encoder_output': enc, 'reconstruction': recon, 'model': pca, 'scaler': scaler}
+
+def apply_autoencoder_to_qois(df_mean: pd.DataFrame, latent_dim: int = 2, epochs: int = 200, batch_size: int = 32, verbose: bool = False, seed: int = None):
+    """Apply an autoencoder to the selected QoIs.
+
+    This function attempts to use PyTorch to train a small autoencoder on the
+    QoI matrix (samples x features). If a seed is provided, results will be reproducible.
+
+    Args:
+        df_mean (pd.DataFrame): DataFrame with QoI mean values indexed by SampleID.
+        latent_dim (int): Dimension of the latent encoding.
+        epochs (int): Training epochs for the PyTorch autoencoder.
+        batch_size (int): Batch size for training.
+        verbose (bool): Verbosity flag.
+        seed (int): Random seed for reproducibility. If None, no seed is set.
+
+    Returns:
+        dict: {
+            'method': 'torch',
+            'encoder_output': np.ndarray (n_samples x latent_dim),
+            'reconstruction': np.ndarray (n_samples x n_features),
+            'model': trained model object
+            'scaler': StandardScaler object
+        }
+    """
+    import numpy as _np
+    import random
+    from sklearn.preprocessing import StandardScaler
+
+    # Set seeds for reproducibility
+    if seed is not None:
+        random.seed(seed)
+        _np.random.seed(seed)
+
+    X = df_mean.sort_index().to_numpy(dtype=float)
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+    n_samples, n_features = X_scaled.shape
+
+    # Try PyTorch first
+    try:
+        import torch
+        import torch.nn as nn
+        from torch.utils.data import TensorDataset, DataLoader
+
+        # Set torch seed
+        if seed is not None:
+            torch.manual_seed(seed)
+            torch.cuda.manual_seed_all(seed)
+
+        if verbose:
+            print("Using PyTorch autoencoder")
+
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+        class AE(nn.Module):
+            def __init__(self, n_in, n_latent):
+                super().__init__()
+                self.encoder = nn.Sequential(
+                    nn.Linear(n_in, max(16, n_in//2)),
+                    nn.ReLU(),
+                    nn.Linear(max(16, n_in//2), n_latent),
+                )
+                self.decoder = nn.Sequential(
+                    nn.Linear(n_latent, max(16, n_in//2)),
+                    nn.ReLU(),
+                    nn.Linear(max(16, n_in//2), n_in),
+                )
+
+            def forward(self, x):
+                z = self.encoder(x)
+                xrec = self.decoder(z)
+                return xrec, z
+
+        model = AE(n_features, latent_dim).to(device)
+        optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+        loss_fn = nn.MSELoss()
+
+        tensor_X = torch.tensor(X_scaled, dtype=torch.float32)
+        dataset = TensorDataset(tensor_X)
+        loader = DataLoader(dataset, batch_size=min(batch_size, n_samples), shuffle=False, generator=torch.Generator().manual_seed(seed) if seed is not None else None)
+
+        model.train()
+        for ep in range(epochs):
+            epoch_loss = 0.0
+            for (batch,) in loader:
+                batch = batch.to(device)
+                optimizer.zero_grad()
+                xrec, _ = model(batch)
+                loss = loss_fn(xrec, batch)
+                loss.backward()
+                optimizer.step()
+                epoch_loss += float(loss.detach().cpu().item()) * batch.size(0)
+            if verbose and (ep % max(1, epochs//10) == 0 or ep == epochs-1):
+                print(f"AE epoch {ep+1}/{epochs} loss={epoch_loss / n_samples:.6g}")
+
+        # encode and reconstruct
+        model.eval()
+        with torch.no_grad():
+            X_t = tensor_X.to(device)
+            xrec_t, z_t = model(X_t)
+            recon = xrec_t.cpu().numpy()
+            enc = z_t.cpu().numpy()
+
+        return {'method': 'torch', 'encoder_output': enc, 'reconstruction': recon, 'model': model, 'scaler': scaler}
+
+    except Exception as e:
+        if verbose:
+            print(f"PyTorch autoencoder unavailable or failed ({e}).")
+
+
+def regression_accuracy_parameters(df_parameters: pd.DataFrame, encoder_output: np.ndarray) -> pd.DataFrame:
+    """Calculate regression accuracy of parameters from the latent encoding.
+
+    This function trains a regression model (e.g., Random Forest) to predict each parameter from the latent encoding and evaluates the R² score for each parameter.
+
+    Args:
+        df_parameters (pd.DataFrame): DataFrame containing parameter values indexed by SampleID.
+        encoder_output (np.ndarray): Latent encoding of the QoI data (n_samples x latent_dim).
+    Returns:
+        pd.DataFrame: DataFrame containing R² scores for each parameter, indexed by parameter name.
+            - R² ≈ 1.0: Perfect fit. The model explains all the variance in the parameter values from the latent encoding.
+            - R² < 0.5: Poor fit. The model does not capture the relationship between the latent encoding and the parameter values well.
+            - R² ≈ 0: No fit. The model does not explain any of the variance in the parameter values from the latent encoding, indicating no relationship.
+            - R² < 0: Worse than no fit. The model performs worse than simply predicting the mean parameter value for all samples, suggesting a very poor relationship between the latent encoding and the parameter values.
+    """
+    from sklearn.ensemble import RandomForestRegressor
+    from sklearn.model_selection import cross_val_score
+
+    r2_results = {}
+    for param in df_parameters.columns:
+        y = df_parameters[param].to_numpy()
+        model = RandomForestRegressor(n_estimators=100, random_state=42)
+        model.fit(encoder_output, y)
+        # Use cross_val_score to get the 'True' R2
+        # This prevents the 0.82 from being an overfitted illusion
+        scores = cross_val_score(model, encoder_output, y, cv=5, scoring='r2')
+        r2_results[param] = scores.mean()
+
+    return pd.DataFrame.from_dict(r2_results, orient='index', columns=['R2_CV'])
+
+
+def align_params_to_qois(df_params: pd.DataFrame, df_qois: pd.DataFrame) -> pd.DataFrame:
+    """Align parameter DataFrame to match the multi-index structure of QoI DataFrame.
+    
+    If df_qois has a multi-index (SampleID, time) but df_params only has SampleID,
+    this function replicates parameter rows for each time point so that both DataFrames
+    can be joined on (SampleID, time).
+    Args:
+        df_params (pd.DataFrame): Parameter DataFrame indexed by SampleID.
+        df_qois (pd.DataFrame): QoI DataFrame, possibly with multi-index (SampleID, time).
+    Returns:
+        pd.DataFrame: Parameter DataFrame aligned to match df_qois index structure.
+    """
+    # If df_qois has a multi-index with 'time', expand df_params accordingly
+    if hasattr(df_qois.index, 'names') and 'time' in df_qois.index.names:
+        # Extract unique (SampleID, time) pairs from df_qois
+        qois_index = df_qois.index
+        
+        # Create aligned params by replicating rows for each time point
+        expanded_data = []
+        new_index_tuples = []
+        
+        for sample_id, time_val in qois_index:
+            if sample_id in df_params.index:
+                # Replicate the parameter row for this (SampleID, time) pair
+                expanded_data.append(df_params.loc[sample_id].values)
+                new_index_tuples.append((sample_id, time_val))
+        
+        # Create new DataFrame with aligned rows
+        df_params_aligned = pd.DataFrame(expanded_data, columns=df_params.columns)
+        df_params_aligned.index = pd.MultiIndex.from_tuples(new_index_tuples, names=['SampleID', 'time'])
+        
+        return df_params_aligned.sort_index()
+    else:
+        # No time index in df_qois, return df_params as-is
+        return df_params
+
+def find_optimal_qoi_set(df_qois: pd.DataFrame, df_params: pd.DataFrame) -> list:
+    """
+    Use Recursive Feature Elimination with Cross-Validation (RFECV) to find the optimal set of QoIs that best predict the parameters.
+    This function trains a regression model (e.g., Random Forest) to predict parameters from the QoIs and uses RFECV to identify the most important QoIs for accurate parameter prediction. The optimal set of QoIs is determined based on the R² score obtained through cross-validation.
+    Args:
+        df_qois (pd.DataFrame): DataFrame containing QoI mean values indexed by SampleID and time.
+        df_params (pd.DataFrame): DataFrame containing parameter values indexed by SampleID and time.
+    Returns:
+        list: List of optimal QoI names that best predict the parameters based on RFECV analysis.
+    """
+
+    from sklearn.ensemble import RandomForestRegressor
+    from sklearn.feature_selection import RFECV
+    from sklearn.model_selection import KFold
+    from sklearn.metrics import make_scorer, r2_score
+
+    # 1. Define the base model
+    base_estimator = RandomForestRegressor(n_estimators=100, random_state=42)
+
+    # 2. Define a custom scoring function that focuses on the worst-predicted parameter (the bottleneck)
+    def min_r2_scorer(y_true, y_pred):
+        # Calculate R2 for each parameter individually
+        scores = r2_score(y_true, y_pred, multioutput='raw_values')
+        # Return the worst score (the bottleneck)
+        return np.min(scores)
+
+    # 3. Set up RFECV with the custom scorer and cross-validation strategy
+    selector = RFECV(
+        estimator=base_estimator,
+        step=1,
+        cv=KFold(5),
+        scoring=make_scorer(min_r2_scorer), # Focus on the hardest-to-identify parameter
+        min_features_to_select=df_params.shape[1],
+        n_jobs=-1
+    )
+
+    # 4. Fit the selector to the data
+    selector.fit(df_qois.sort_index().to_numpy(), df_params.sort_index().to_numpy())
+    
+    return selector
+
+def _regression_accuracy_with_weights(df_parameters: pd.DataFrame, encoder_output: np.ndarray, mcse_weights: np.ndarray = None) -> pd.DataFrame:
+    """
+    Calculate regression accuracy of parameters from latent encoding with optional MCSE-based weighting.
+    
+    Uses sample_weight inversely proportional to MCSE to give more weight to stable features.
+    
+    Args:
+        df_parameters (pd.DataFrame): DataFrame containing parameter values indexed by SampleID.
+        encoder_output (np.ndarray): Latent encoding (n_samples x latent_dim).
+        mcse_weights (np.ndarray): Per-sample weights based on information-to-noise ratio. If None, uniform weights.
+    
+    Returns:
+        pd.DataFrame: DataFrame containing weighted R² scores for each parameter.
+    """
+    from sklearn.ensemble import RandomForestRegressor
+    from sklearn.model_selection import cross_val_score
+
+    r2_results = {}
+    for param in df_parameters.columns:
+        y = df_parameters[param].to_numpy()
+        model = RandomForestRegressor(n_estimators=100, random_state=42)
+        
+        if mcse_weights is not None:
+            # Use sample_weight to favor stable features (passed via fit_params)
+            model.fit(encoder_output, y, sample_weight=mcse_weights)
+            scores = cross_val_score(model, encoder_output, y, cv=5, scoring='r2', fit_params={'sample_weight': mcse_weights})
+        else:
+            model.fit(encoder_output, y)
+            scores = cross_val_score(model, encoder_output, y, cv=5, scoring='r2')
+        
+        r2_results[param] = scores.mean()
+
+    return pd.DataFrame.from_dict(r2_results, orient='index', columns=['R2_CV'])
+
+def recursive_feature_elimination(df_qois_mean, df_qois_mcse, df_params, autoencoder_params={}, mcse_threshold=0.10, correlation_threshold=0.95, verbose=False):
+    """
+    Perform smart feature elimination using balanced Autoencoder-first approach.
+    
+    **Philosophy (Hybrid):** Removes only pathological features, preserves useful noise:
+    1. Remove EXTREME outliers (MCSE > 10% by default, configurable)
+    2. Remove highly correlated redundancy (>95%, configurable)  
+    3. Apply Autoencoder on cleaned feature set
+    4. Use RFECV on latent space to find optimal encoding
+    5. Validate with Synthetic Recovery Test
+    
+    This avoids "noise = non-informative" while still cleaning truly problematic features.
+    
+    Args:
+        df_qois_mean (pd.DataFrame): DataFrame containing mean QoI values indexed by SampleID and time.
+        df_qois_mcse (pd.DataFrame): DataFrame containing relative MCSE values for QoIs indexed by SampleID and time.
+        df_params (pd.DataFrame): DataFrame containing parameter values indexed by SampleID.
+        autoencoder_params (dict): Parameters for autoencoder (latent_dim, epochs, batch_size, seed).
+        mcse_threshold (float): Threshold for removing EXTREME noise (default 0.10 = 10%). Only removes pathological features.
+        correlation_threshold (float): Threshold for removing redundant correlations (default 0.95 = 95%). Only removes near-duplicates.
+        verbose (bool): Print detailed pipeline stages.
+    
+    Returns:
+        dict: {
+            'removed_extreme_noise': list of features removed as outliers,
+            'removed_redundant': list of highly correlated features removed,
+            'cleaned_qois': list of QoIs kept for autoencoder,
+            'correlation_matrix': full pairwise correlation matrix,
+            'full_autoencoder_results': autoencoder results on cleaned set,
+            'full_regression_r2': R² from full set,
+            'final_qois': QoI names selected by RFECV,
+            'reduced_autoencoder_results': autoencoder on final selected QoIs,
+            'reduced_regression_r2': R² from reduced set,
+            'synthetic_recovery_test': Full vs Reduced R² comparison,
+        }
+    """
+    import warnings
+    from sklearn.ensemble import RandomForestRegressor
+    from sklearn.feature_selection import RFECV
+    from sklearn.model_selection import KFold, cross_val_score
+    from sklearn.metrics import make_scorer, r2_score
+
+    #####################################################
+    # Stage 0: Prepare Data
+    #####################################################
+    df_qois_work = df_qois_mean.copy()
+    
+    # Identify and fill trajectory QoIs (those with NaN in MCSE)
+    trajectory_qois = [col for col in df_qois_mcse.columns if df_qois_mcse[col].isna().any()]
+    if trajectory_qois:
+        last_per_sample = df_qois_work[trajectory_qois].groupby(level='SampleID').transform('last')
+        df_qois_work[trajectory_qois] = df_qois_work[trajectory_qois].fillna(last_per_sample)
+        if verbose:
+            print(f"✓ Trajectory QoIs filled (NaN→last value per sample): {trajectory_qois}")
+    
+    # Align parameters
+    df_params_aligned = align_params_to_qois(df_params, df_qois_work)
+
+    #####################################################
+    # Stage 1: Remove EXTREME Outliers Only (Light Filter)
+    #####################################################
+    if verbose:
+        print(f"\n[STAGE 1] Pathological Noise Removal (MCSE > {mcse_threshold*100}%)")
+    
+    removed_extreme_noise = [col for col in df_qois_mcse.columns if df_qois_mcse[col].quantile(0.9) > mcse_threshold]
+    df_qois_work = df_qois_work.drop(columns=removed_extreme_noise, errors='ignore')
+    
+    if verbose:
+        if removed_extreme_noise:
+            print(f"  Removed {len(removed_extreme_noise)} pathological features: {removed_extreme_noise}")
+        else:
+            print(f"  No features exceed extreme noise threshold (all MCSE ≤ {mcse_threshold*100}%)")
+
+    #####################################################
+    # Stage 2: Remove Redundant Correlations (Hard Threshold)
+    #####################################################
+    if verbose:
+        print(f"\n[STAGE 2] Redundancy Removal (Correlation > {correlation_threshold*100}%)")
+    
+    corr_matrix = df_qois_work.corr().abs()
+    removed_redundant = []
+    
+    # Greedy strategy: for each correlated pair, keep the one with lower median MCSE
+    visited = set()
+    for col in corr_matrix.columns:
+        if col in visited:
+            continue
+        corr_peers = corr_matrix.index[corr_matrix[col] > correlation_threshold].tolist()
+        if len(corr_peers) > 1:
+            # Keep the one with best MCSE
+            best_feature = min(corr_peers, key=lambda x: df_qois_mcse[x].median())
+            for peer in corr_peers:
+                if peer != best_feature and peer not in removed_redundant:
+                    removed_redundant.append(peer)
+                    visited.add(peer)
+            visited.add(best_feature)
+    
+    df_qois_work = df_qois_work.drop(columns=removed_redundant, errors='ignore')
+    
+    if verbose:
+        if removed_redundant:
+            print(f"  Removed {len(removed_redundant)} redundant features: {removed_redundant}")
+        else:
+            print(f"  No near-duplicate features found (correlation ≤ {correlation_threshold*100}%)")
+
+    #####################################################
+    # Stage 3: Autoencoder on CLEANED Feature Set
+    #####################################################
+    if verbose:
+        print(f"\n[STAGE 3] Autoencoder on Cleaned Features ({len(df_qois_work.columns)} QoIs)")
+    
+    dict_ae_full = apply_autoencoder_to_qois(
+        df_qois_work,
+        latent_dim=autoencoder_params.get('latent_dim', 2),
+        epochs=autoencoder_params.get('epochs', 200),
+        batch_size=autoencoder_params.get('batch_size', 32),
+        seed=autoencoder_params.get('seed', 42),
+        verbose=verbose
+    )
+    
+    # Regression on full autoencoder output
+    df_r2_full = _regression_accuracy_with_weights(
+        df_params_aligned, 
+        dict_ae_full['encoder_output'], 
+        mcse_weights=None  # Uniform weights for full set
+    )
+    
+    if verbose:
+        print(f"  Full AE → Params R² (mean): {df_r2_full['R2_CV'].mean():.4f}")
+
+    #####################################################
+    # Stage 4: RFECV on Latent Space to Find Optimal QoI Set
+    #####################################################
+    if verbose:
+        print(f"\n[STAGE 4] RFECV-based Feature Selection on Latent Encoding")
+    
+    # Define scoring: bottleneck (minimum R² of hardest parameter)
+    def min_r2_scorer(y_true, y_pred):
+        if y_true.ndim == 1:
+            return r2_score(y_true, y_pred)
+        else:
+            return np.min([r2_score(y_true[:, i], y_pred[:, i]) for i in range(y_true.shape[1])])
+    
+    # RFECV just to identify if we can remove more from the cleaned set
+    base_rf = RandomForestRegressor(n_estimators=100, random_state=42)
+    
+    selector = RFECV(
+        base_rf,
+        step=1,
+        cv=KFold(5),
+        scoring=make_scorer(min_r2_scorer),
+        min_features_to_select=max(1, len(df_qois_work.columns) // 2),
+        n_jobs=-1
+    )
+    
+    # Fit RFECV on cleaned QoI data
+    selector.fit(df_qois_work.to_numpy(), df_params_aligned.to_numpy())
+    
+    selected_qoi_mask = selector.support_
+    final_qois = df_qois_work.columns[selected_qoi_mask].tolist()
+    
+    if verbose:
+        removed_by_rfecv = df_qois_work.columns[~selected_qoi_mask].tolist()
+        print(f"  RFECV selected {len(final_qois)}/{len(df_qois_work.columns)} QoIs")
+        if removed_by_rfecv:
+            print(f"  Removed by RFECV: {removed_by_rfecv}")
+
+    #####################################################
+    # Stage 5: Synthetic Recovery Test
+    #####################################################
+    if verbose:
+        print(f"\n[STAGE 5] Synthetic Recovery Test (Full vs Reduced)")
+    
+    # Train on reduced set
+    dict_ae_reduced = apply_autoencoder_to_qois(
+        df_qois_work[final_qois],
+        latent_dim=autoencoder_params.get('latent_dim', 2),
+        epochs=autoencoder_params.get('epochs', 200),
+        batch_size=autoencoder_params.get('batch_size', 32),
+        seed=autoencoder_params.get('seed', 42),
+        verbose=False
+    )
+    
+    df_r2_reduced = _regression_accuracy_with_weights(
+        df_params_aligned,
+        dict_ae_reduced['encoder_output'],
+        mcse_weights=None
+    )
+    
+    # Compare
+    recovery_test = pd.DataFrame({
+        'Full_R2': df_r2_full['R2_CV'],
+        'Reduced_R2': df_r2_reduced['R2_CV'],
+        'R2_Drop': df_r2_full['R2_CV'] - df_r2_reduced['R2_CV']
+    })
+    
+    if verbose:
+        print(f"  Full Set Mean R²: {df_r2_full['R2_CV'].mean():.4f}")
+        print(f"  Reduced Set Mean R²: {df_r2_reduced['R2_CV'].mean():.4f}")
+        print(f"  Mean R² Drop: {recovery_test['R2_Drop'].mean():.4f}")
+        
+        acceptable_drops = recovery_test[recovery_test['R2_Drop'] <= 0.05]
+        critical_drops = recovery_test[recovery_test['R2_Drop'] > 0.1]
+        
+        if len(acceptable_drops) == len(recovery_test):
+            print(f"  ✓ All parameters recovered well (R² drop ≤ 0.05)")
+        elif len(critical_drops) > 0:
+            print(f"  ⚠ Critical R² drops (>0.1) for: {critical_drops.index.tolist()}")
+
+    #####################################################
+    # Stage 6: Final Output
+    #####################################################
+    
+    return {
+        'removed_extreme_noise': removed_extreme_noise,
+        'removed_redundant': removed_redundant,
+        'cleaned_qois': list(df_qois_work.columns),
+        'correlation_matrix': corr_matrix,
+        # Full set (on cleaned features)
+        'full_autoencoder_results': dict_ae_full,
+        'full_regression_r2': df_r2_full,
+        # Reduced set (post-RFECV)
+        'final_qois': final_qois,
+        'reduced_autoencoder_results': dict_ae_reduced,
+        'reduced_regression_r2': df_r2_reduced,
+        # Validation
+        'synthetic_recovery_test': recovery_test,
+    }
+
+    
+    
