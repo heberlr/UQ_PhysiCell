@@ -401,7 +401,7 @@ def get_summary_statistics_qois(df_qois: pd.DataFrame) -> tuple:
 
     return df_mean, df_std, df_relative_mcse
 
-def calculate_qoi_statistics(db_file_path: str, qoi_funcs: dict, df_qois_data: pd.DataFrame = None,  ignore_db_consistency: bool = False, qoi_def: dict = None, chunk_size: int = 10) -> tuple:
+def calculate_qoi_statistics(db_file_path: str, qoi_funcs: dict, df_qois_data: pd.DataFrame = None,  ignore_db_consistency: bool = False, qoi_def: dict = {}, chunk_size: int = 10) -> tuple:
     """Calculate statistical summaries (mean and relative MCSE) of quantities of interest across replicates.
 
     This function computes mean and relative Monte Carlo Standard Error (MCSE) of QoI values across
