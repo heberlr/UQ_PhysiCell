@@ -1622,7 +1622,7 @@ def plot_qois(main_window):
     layout.addWidget(canvas)
     # Calculate the QoIs if not already done
     if main_window.df_summary_qois.empty:
-        try: main_window.df_summary_qois,_, main_window.df_relative_mcse = calculate_qoi_statistics(main_window.df_output, main_window.qoi_funcs, db_file_path = main_window.db_file_name_input.text().strip())
+        try: main_window.df_summary_qois,_, main_window.df_relative_mcse = calculate_qoi_statistics(main_window.db_file_name_input.text().strip(), main_window.qoi_funcs, main_window.df_output)
         except Exception as e:
             main_window.update_output_tab2(main_window, f"Error calculating QoIs: {e}")
             return
