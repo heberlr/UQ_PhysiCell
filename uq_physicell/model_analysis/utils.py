@@ -122,9 +122,11 @@ def mcds_list_to_qoi_df_long(recreated_qoi_funcs, all_sample_ids, chunk_size, db
         pd.DataFrame: DataFrame with calculated QoI values indexed by SampleID and ReplicateID, with columns for each QoI - columns combined with time points.
     """
     # Process samples in chunks to avoid memory issues
-    b_column = True
     ls_column = ['SampleID', 'time', 'ReplicateID']
     llo_data = []
+    # Track keys per QoI to dynamically add new columns as encountered
+    qoi_keys = {}
+    
     for i in range(0, len(all_sample_ids), chunk_size):
         chunk_sample_ids = all_sample_ids[i:i + chunk_size]
         # Load only this chunk of data
@@ -140,17 +142,26 @@ def mcds_list_to_qoi_df_long(recreated_qoi_funcs, all_sample_ids, chunk_size, db
                         for s_qoi_name, o_qoi_func in sorted(recreated_qoi_funcs.items()):
                             if verbose:
                                 print(f"processing sample replicate qoi: {s_sample} {s_replicate} {s_qoi_name} ...")
-                            # Execut qoi function on mcds
+                            # Execute qoi function on mcds
                             o_result = safe_call_qoi_function(o_qoi_func, mcds=mcds, list_mcds=l_mcds)
-                            # Save results from multi qoi function
+                            # Save results from multi qoi function (dict or Series)
                             if type(o_result) in {dict, pd.Series}:
-                                for s_key, o_value in sorted(o_result.items()):
-                                    if b_column:
-                                        ls_column.append(f'{s_key}_{s_qoi_name}')
+                                items = sorted(o_result.items())
+                                # Add new keys to tracking and columns if not seen before
+                                if s_qoi_name not in qoi_keys:
+                                    qoi_keys[s_qoi_name] = []
+                                for s_key, o_value in items:
+                                    if s_key not in qoi_keys[s_qoi_name]:
+                                        qoi_keys[s_qoi_name].append(s_key)
+                                        ls_column.append(f'{s_qoi_name}_{s_key}')
                                     lo_data.append(o_value)
+                                # Pad with NaN if result is empty but keys were previously seen
+                                if len(items) == 0 and s_qoi_name in qoi_keys:
+                                    for _ in qoi_keys[s_qoi_name]:
+                                        lo_data.append(np.nan)
                             # Save result from single qoi function
                             else:
-                                if b_column:
+                                if s_qoi_name not in ls_column:
                                     ls_column.append(s_qoi_name)
                                 lo_data.append(o_result)
                     # Error handling
@@ -158,12 +169,15 @@ def mcds_list_to_qoi_df_long(recreated_qoi_funcs, all_sample_ids, chunk_size, db
                         raise RuntimeError(f"Error calculating QoIs for SampleID: {s_sample}, ReplicateID: {s_replicate} - QoI: {s_qoi_name}: {e}")
                     # Save row
                     llo_data.append(lo_data)
-                    # Update flag
-                    b_column = False
         # Explicitely free memory
         del l_mcds
         del df_sample
         del df_output
+    
+    # Pad all rows to match final column count
+    final_col_count = len(ls_column)
+    llo_data = [row + [np.nan] * (final_col_count - len(row)) for row in llo_data]
+    
     # Generate data frame
     df_qois = pd.DataFrame(llo_data, columns=ls_column)
     df_qois = df_qois.sort_values(['SampleID','time','ReplicateID'], ignore_index=True)
@@ -670,12 +684,19 @@ def align_params_to_qois(df_params: pd.DataFrame, df_qois: pd.DataFrame) -> pd.D
     If df_qois has a multi-index (SampleID, time) but df_params only has SampleID,
     this function replicates parameter rows for each time point so that both DataFrames
     can be joined on (SampleID, time).
+    
+    String/categorical columns in df_params are automatically encoded to numeric values
+    using LabelEncoder to ensure compatibility with scikit-learn regression models.
+    
     Args:
         df_params (pd.DataFrame): Parameter DataFrame indexed by SampleID.
         df_qois (pd.DataFrame): QoI DataFrame, possibly with multi-index (SampleID, time).
     Returns:
-        pd.DataFrame: Parameter DataFrame aligned to match df_qois index structure.
+        pd.DataFrame: Parameter DataFrame aligned to match df_qois index structure,
+                     with categorical columns encoded as numeric.
     """
+    from sklearn.preprocessing import LabelEncoder
+    
     # If df_qois has a multi-index with 'time', expand df_params accordingly
     if hasattr(df_qois.index, 'names') and 'time' in df_qois.index.names:
         # Extract unique (SampleID, time) pairs from df_qois
@@ -695,10 +716,18 @@ def align_params_to_qois(df_params: pd.DataFrame, df_qois: pd.DataFrame) -> pd.D
         df_params_aligned = pd.DataFrame(expanded_data, columns=df_params.columns)
         df_params_aligned.index = pd.MultiIndex.from_tuples(new_index_tuples, names=['SampleID', 'time'])
         
-        return df_params_aligned.sort_index()
+        df_params_aligned = df_params_aligned.sort_index()
     else:
         # No time index in df_qois, return df_params as-is
-        return df_params
+        df_params_aligned = df_params.copy()
+    
+    # Encode categorical columns to numeric for regression compatibility
+    for col in df_params_aligned.columns:
+        if df_params_aligned[col].dtype == 'object':  # String/categorical column
+            le = LabelEncoder()
+            df_params_aligned[col] = le.fit_transform(df_params_aligned[col].astype(str))
+    
+    return df_params_aligned
 
 def find_optimal_qoi_set(df_qois: pd.DataFrame, df_params: pd.DataFrame) -> list:
     """
@@ -830,8 +859,27 @@ def recursive_feature_elimination(df_qois_mean, df_qois_mcse, df_params, autoenc
         if verbose:
             print(f"✓ Trajectory QoIs filled (NaN→last value per sample): {trajectory_qois}")
     
+    # Data quality check: Remove rows with any NaN or inf values
+    initial_rows = len(df_qois_work)
+    nan_mask = df_qois_work.isna().any(axis=1) | np.isinf(df_qois_work).any(axis=1)
+    if nan_mask.any():
+        removed_rows = nan_mask.sum()
+        df_qois_work = df_qois_work[~nan_mask]
+        if verbose:
+            print(f"⚠ Data Quality: Removed {removed_rows}/{initial_rows} rows with NaN/inf values")
+        if len(df_qois_work) == 0:
+            raise ValueError("No valid QoI data remaining after removing NaN/inf values. Check data source.")
+    
     # Align parameters
     df_params_aligned = align_params_to_qois(df_params, df_qois_work)
+    
+    # Ensure params and QoIs have matching indices
+    common_idx = df_qois_work.index.intersection(df_params_aligned.index)
+    if len(common_idx) < len(df_qois_work):
+        df_qois_work = df_qois_work.loc[common_idx]
+        df_params_aligned = df_params_aligned.loc[common_idx]
+        if verbose:
+            print(f"⚠ Index alignment: Kept {len(common_idx)} matching (SampleID, time) pairs")
 
     #####################################################
     # Stage 1: Remove EXTREME Outliers Only (Light Filter)
@@ -844,7 +892,7 @@ def recursive_feature_elimination(df_qois_mean, df_qois_mcse, df_params, autoenc
     
     if verbose:
         if removed_extreme_noise:
-            print(f"  Removed {len(removed_extreme_noise)} pathological features: {removed_extreme_noise}")
+            print(f"  Removed {len(removed_extreme_noise)}/{len(df_qois_mcse.columns)} pathological features: {removed_extreme_noise}")
         else:
             print(f"  No features exceed extreme noise threshold (all MCSE ≤ {mcse_threshold*100}%)")
 
@@ -876,7 +924,7 @@ def recursive_feature_elimination(df_qois_mean, df_qois_mcse, df_params, autoenc
     
     if verbose:
         if removed_redundant:
-            print(f"  Removed {len(removed_redundant)} redundant features: {removed_redundant}")
+            print(f"  Removed {len(removed_redundant)}/{len(corr_matrix.columns)} redundant features: {removed_redundant}")
         else:
             print(f"  No near-duplicate features found (correlation ≤ {correlation_threshold*100}%)")
 
@@ -992,6 +1040,7 @@ def recursive_feature_elimination(df_qois_mean, df_qois_mcse, df_params, autoenc
         'removed_extreme_noise': removed_extreme_noise,
         'removed_redundant': removed_redundant,
         'cleaned_qois': list(df_qois_work.columns),
+        'cleaned_index': df_qois_work.index,  # Index of rows kept after NaN/inf removal
         'correlation_matrix': corr_matrix,
         # Full set (on cleaned features)
         'full_autoencoder_results': dict_ae_full,
