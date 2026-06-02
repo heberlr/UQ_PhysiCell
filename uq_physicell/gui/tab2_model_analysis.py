@@ -643,7 +643,8 @@ def open_qoi_definition_window(main_window):
             'template_meanSubstrate': "lambda df_subs: df_subs[ <substrateName>].mean() \n # Replace <substrateName> with the desired substrate name",
             'template_stdSubstrate': "lambda df_subs: df_subs[ <substrateName>].std() \n # Replace <substrateName> with the desired substrate name",
             'template_cellType_meanRadialDistance': "lambda df: df[ df['cell_type'] == <cellType> ][['position_x', 'position_y', 'position_z']].apply(lambda row: ((row['position_x']**2 + row['position_y']**2 + row['position_z']**2)**0.5), axis=1).mean() \n # Replace <cellType> with the desired cell type name",
-            # 'Persistent homology - Vectorisation (muspan - topological data analysis)': "lambda df: _compute_persistent_homology(df)",
+            'radial_density': "lambda df: qoi_func_radial_density_summary(df)",
+            'persistent_homology': "lambda df: qoi_func_persistent_homology(df)[0]", # This needs muspan
         }
 
     # Reset the qois
@@ -1610,7 +1611,6 @@ def plot_qois(main_window):
     plot_qoi_hbox = QHBoxLayout()
     plot_qoi_label = QLabel("Select QoI to plot:")
     plot_qoi_combo = QComboBox()
-    plot_qoi_combo.addItems(list(main_window.qoi_funcs.keys()))
     plot_qoi_hbox.addWidget(plot_qoi_label)
     plot_qoi_hbox.addWidget(plot_qoi_combo)
     plot_qoi_mcse_checkbox = QCheckBox("Show Relative Monte Carlo Standard Error (MCSE)")
@@ -1626,14 +1626,15 @@ def plot_qois(main_window):
         except Exception as e:
             main_window.update_output_tab2(main_window, f"Error calculating QoIs: {e}")
             return
-
+    # Add items to the combo box after calculating QoIs to ensure it is populated with the correct QoI names
+    plot_qoi_combo.addItems(list(main_window.df_summary_qois.columns))
     def update_plot_qoi():
         # Clear the previous plot
         figure.clear()
         ax = figure.add_subplot(111)
         selected_qoi = plot_qoi_combo.currentText()
         # Plot the selected QoI
-        if selected_qoi in main_window.qoi_funcs.keys():
+        if selected_qoi in main_window.df_summary_qois.columns:
             if plot_qoi_mcse_checkbox.isChecked():
                 # Reserve room for legends: right side for samples and bottom for MCSE ranges.
                 figure.subplots_adjust( bottom=0.30)
@@ -1668,21 +1669,23 @@ def run_analysis(main_window):
     main_window.update_output_tab2(main_window, "Running sensitivity analysis...")
      # Calculate the QoIs if not already done
     if main_window.df_summary_qois.empty:
-        try: main_window.df_summary_qois,_, main_window.df_relative_mcse = calculate_qoi_statistics(main_window.df_output, main_window.qoi_funcs, db_file_path = main_window.db_file_name_input.text().strip())
+        try: 
+            main_window.df_summary_qois,_, main_window.df_relative_mcse = calculate_qoi_statistics(main_window.db_file_name_input.text().strip(), main_window.qoi_funcs, main_window.df_output )
         except Exception as e:
             main_window.update_output_tab2(main_window, f"Error calculating QoIs: {e}")
             return
     # Prepare the QoIs for analysis
+    qoi_names = main_window.df_summary_qois.columns.tolist()
     if main_window.sampling_type_dropdown.currentText() == "Global":
         global_method = main_window.SA_method_combo.currentText()
         try:
-            main_window.sa_results, main_window.qoi_time_values = run_global_sa(main_window.global_SA_parameters, global_method, main_window.qoi_funcs, main_window.df_summary_qois)
+            main_window.sa_results, main_window.qoi_time_values = run_global_sa(main_window.global_SA_parameters,  qoi_names,  main_window.df_summary_qois, global_method )
         except Exception as e:
             main_window.update_output_tab2(main_window, f"Error running global sensitivity analysis: {e}")
             return
     elif main_window.sampling_type_dropdown.currentText() == "Local":
         try:
-            main_window.sa_results, main_window.qoi_time_values = run_local_sa(main_window.local_SA_parameters, main_window.qoi_funcs, main_window.df_summary_qois)
+            main_window.sa_results, main_window.qoi_time_values = run_local_sa(main_window.local_SA_parameters, qoi_names, main_window.df_summary_qois)
         except Exception as e:
             main_window.update_output_tab2(main_window, f"Error running local sensitivity analysis: {e}")
             return
