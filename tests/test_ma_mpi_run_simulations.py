@@ -10,7 +10,9 @@ from unittest.mock import patch
 
 try:
     from mpi4py import MPI
-    mpi_available = True
+    # Only meaningful when actually launched under mpiexec with N > 1 processes.
+    # Running under a plain pytest process hangs at comm.Barrier() / MPI.Finalize().
+    mpi_available = MPI.COMM_WORLD.Get_size() > 1
 except (ImportError, RuntimeError):
     mpi_available = False
     MPI = None
@@ -18,7 +20,10 @@ except (ImportError, RuntimeError):
 from uq_physicell.model_analysis.ma_context import ModelAnalysisContext, run_simulations
 
 
-pytestmark = pytest.mark.skipif(not mpi_available, reason="mpi4py not installed")
+pytestmark = pytest.mark.skipif(
+    not mpi_available,
+    reason="MPI tests must be launched with: mpiexec -n N python -m pytest tests/test_ma_mpi_run_simulations.py",
+)
 
 
 # ─── mocks ──────────────────────────────────────────────────────────────────
