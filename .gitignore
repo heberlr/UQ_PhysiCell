@@ -7,8 +7,8 @@ uq_physicell/uq_physicell.egg-*
 /dist
 /examples/PhysiCell-master/*
 /examples/Test_*
-/UQ_PC_InputFolder/*
-/UQ_PC_OutputFolder/*
+/examples/UQ_PC_InputFolder/*
+/examples/UQ_PC_OutputFolder/*
 examples/virus-mac-new/UQ_PC_InputFolder/*
 examples/virus-mac-new/UQ_PC_OutputFolder/*
 examples/template/UQ_PC_InputFolder/*
