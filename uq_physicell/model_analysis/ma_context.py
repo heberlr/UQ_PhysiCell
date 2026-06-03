@@ -78,12 +78,24 @@ class ModelAnalysisContext:
         if isinstance(model_config, (tuple, list)):
             model_config = {'ini_path': model_config[0], 'struc_name': model_config[1]}
 
+        # Check free variables before converting to strings — Python's eval() is lazy
+        # and only detects missing names at call time, not at lambda-creation time.
+        # co_freevars reveals closure references that will fail in worker processes.
+        for qoi_name, func in qois_info.items():
+            if callable(func) and hasattr(func, '__code__'):
+                unresolved = set(func.__code__.co_freevars) - set(qoi_def.keys())
+                if unresolved:
+                    raise ValueError(
+                        f"QoI '{qoi_name}': lambda closes over {sorted(unresolved)} which "
+                        f"cannot be serialized for multiprocessing. Pass via "
+                        f"qoi_def={{name: object}} in ModelAnalysisContext."
+                    )
+
         # QoI functions are stored as source strings so they can be pickled across processes
         self.qois_dict = {key: _convert_qoi_function_to_string(value, key) if not isinstance(value, str) else value for key, value in qois_info.items()}
         self.qoi_def = qoi_def
 
-        # Validate serialization at context creation time — much clearer than a cryptic
-        # eval() failure deep inside a worker process at simulation time
+        # Secondary check: verify string-form QoIs can be eval'd in the restricted namespace
         if self.qois_dict:
             try:
                 recreate_qoi_functions(self.qois_dict, self.qoi_def)
