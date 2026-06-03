@@ -2,7 +2,7 @@
 
 Welcome to the UQ-PhysiCell documentation! This project provides uncertainty quantification tools for PhysiCell models.
 
-**Release:** [v1.2.7 (GitHub link)](https://github.com/heberlr/UQ_PhysiCell/releases/tag/v1.2.7 (GitHub link))
+**Release:** [v1.2.8 (GitHub link)](https://github.com/heberlr/UQ_PhysiCell/releases/tag/v1.2.8 (GitHub link))
 
 ```{note}
 This readthedocs documentation is under active development.
