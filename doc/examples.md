@@ -7,8 +7,8 @@ This section provides comprehensive examples of using UQ-PhysiCell for uncertain
 ```{toctree}
 :maxdepth: 1
 
-examples/ex1_print
-examples/ex2_runModel
+examples/ex1_context_setup
+examples/ex2_storage_modes
 examples/ex3_runSA_MultiTask
 examples/ex4_runSA_MPI
 examples/virus-mac-new/ex5_OAT_example

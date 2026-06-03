@@ -1,35 +1,14 @@
-def get_global_SA_parameters(db_file):
-    from ..database.ma_db import load_parameter_space, load_samples
-    df_parameter_space = load_parameter_space(db_file)
-    global_SA_parameters = {'samples': load_samples(db_file)}
-    for id, param in enumerate(df_parameter_space['ParamName']):
-        global_SA_parameters[param] = {"lower_bound": df_parameter_space['lower_bound'].iloc[id],
-                                                            "upper_bound": df_parameter_space['upper_bound'].iloc[id],
-                                                            "ref_value": df_parameter_space['ref_value'].iloc[id]}
-        perturbation = df_parameter_space['perturbation'].iloc[id]
-        try:
-            global_SA_parameters[param]["perturbation"] = float(perturbation)
-        except Exception as e:
-            print(f"Warning: Could not convert perturbation ({perturbation}) to float for parameter {param}.")
-            # Calculate perturbation as percentage based on bounds and ref_value
-            global_SA_parameters[param]["perturbation"] = 100.0 * (df_parameter_space['upper_bound'].iloc[id]/df_parameter_space['ref_value'].iloc[id] - 1.0)
-    return global_SA_parameters
-
-def get_local_SA_parameters(db_file):
-    from ..database.ma_db import load_parameter_space, load_samples
-    df_parameter_space = load_parameter_space(db_file)
-    local_SA_parameters = {'samples': load_samples(db_file)}
-    for id, param in enumerate(df_parameter_space['ParamName']):
-        perturbation = df_parameter_space['perturbation'].iloc[id]
-        if isinstance(perturbation, list):
-            perturbation = [float(x) for x in perturbation]
-        local_SA_parameters[param] = {"ref_value": df_parameter_space['ref_value'].iloc[id], 
-                                                    "perturbation": perturbation}
-    return local_SA_parameters
+import matplotlib.pyplot as plt
+import seaborn as sns
+from matplotlib.patches import Patch
+import matplotlib.colors as mcolors
+from matplotlib.collections import PatchCollection
+from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
+import numpy as np
+import pandas as pd
+import re
 
 def convert_df_to_df_over_time(df_summary, selected_qoi):
-    import pandas as pd
-    import re
     # Identify the relevant columns
     qoi_pattern = re.compile(rf"^{re.escape(selected_qoi)}_(\d+)$")
     qoi_columns = sorted([
@@ -47,27 +26,66 @@ def convert_df_to_df_over_time(df_summary, selected_qoi):
     })
     return plot_data
 
-def plot_qoi_over_time(df_plot, selected_qoi, ax):
-    import seaborn as sns
+def plot_qoi_over_time(df_plot, selected_qoi, ax, plot_mcse_range=False):
     # Prepare the data for seaborn
-    plot_data = convert_df_to_df_over_time(df_plot, selected_qoi)
+    if 'time' in df_plot.index.names:
+        df_plot = df_plot.reset_index()
+        df_plot.rename(columns={'time': 'Time'}, inplace=True)
+        plot_data = df_plot[['Time', selected_qoi, 'SampleID']].dropna()
+    else:
+        plot_data = convert_df_to_df_over_time(df_plot, selected_qoi)
     # If just one time point, use swarmplot, else use lineplot
     if len(plot_data["Time"].unique()) == 1:
         sns.swarmplot(data=plot_data, x="Time", y=selected_qoi, hue="SampleID", ax=ax)
     else:
         sns.lineplot(data=plot_data, x="Time", y=selected_qoi, hue="SampleID", ax=ax)
+
+    # Plot MCSE range if requested
+    if plot_mcse_range:
+        # Use fixed MCSE intervals and draw only the bands that overlap the plotted QoI scale.
+        _, y_max = ax.get_ylim()
+        y_min = 0.0
+        ranges = [
+            (0.0, 0.01, 'green'),
+            (0.01, 0.05, 'blue'),
+            (0.05, 0.1, 'yellow'),
+            (0.1, 1.0, 'red')
+        ]
+        for lower, upper, color in ranges:
+            clipped_lower = max(lower, y_min)
+            clipped_upper = min(upper, y_max)
+            if clipped_upper > clipped_lower:
+                ax.axhspan(clipped_lower, clipped_upper, color=color, alpha=0.1)
+        ax.set_ylim(y_min, y_max)
+    
     ax.set_xlabel("Time (min)")
     ax.set_ylabel(selected_qoi)
-    # Only add legend if there are labeled artists
-    handles, labels = ax.get_legend_handles_labels()
-    if handles and labels:
-        ax.legend(title="Sample Index")
+    # Add sample legend and, when requested, a dedicated MCSE legend outside the plot.
+    sample_legend = ax.get_legend()
+    if sample_legend is not None:
+        ax.add_artist(sample_legend)
 
-def plot_global_sa_results(global_SA_parameters, sa_method, qoi_time_values, sa_results, selected_qoi, selected_sm, ax, parameter_order=None):
-    import pandas as pd
-    import seaborn as sns
-    # This is necessary because Sobol method does not return the names of the parameters
-    param_names = [key for key in global_SA_parameters.keys() if key != "samples"]
+    if plot_mcse_range:
+        mcse_handles = [
+            Patch(facecolor='green', alpha=0.3, label='Excelent (<1%)'),
+            Patch(facecolor='blue', alpha=0.3, label='Acceptable ([1%,5%])'),
+            Patch(facecolor='yellow', alpha=0.3, label='Cautionary ([5%,10%])'),
+            Patch(facecolor='red', alpha=0.3, label='Unreliable (>10%)')
+        ]
+        # Place MCSE legend below the plot, then call tight_layout to adjust figure
+        mcse_legend = ax.legend(
+            handles=mcse_handles,
+            title='Ranges of MCSE relative to mean',
+            loc='upper center',
+            bbox_to_anchor=(0.5, -0.15),
+            ncol=4,
+            fontsize=8,
+            frameon=True
+        )
+        ax.add_artist(mcse_legend)
+
+
+def plot_global_sa_results(param_names, sa_method, qoi_time_values, sa_results, selected_qoi, selected_sm, ax):
     plot_data = pd.DataFrame([
         {
             "Time": qoi_time_values[time_label],
@@ -77,21 +95,12 @@ def plot_global_sa_results(global_SA_parameters, sa_method, qoi_time_values, sa_
         for time_label in sa_results[selected_qoi].keys()
         for param_id, param in enumerate(param_names)
     ])
-    # print(plot_data)
-    # Sort Parameters by the maximum Sensitivity Index in descending order
-    if parameter_order is None:
-        parameter_order = (
-            plot_data.groupby("Parameter")["Sensitivity Index"]
-            .max()
-            .sort_values(ascending=False)
-            .index
-        )
     custom_palette = sns.color_palette("tab20", len(plot_data["Parameter"].unique()))
     # If just one time point, use barplot, else use lineplot
     if len(sa_results[selected_qoi].keys()) == 1:
-        sns.barplot(data=plot_data, x="Time", y="Sensitivity Index", hue="Parameter", ax=ax, palette=custom_palette, hue_order=parameter_order)
+        sns.barplot(data=plot_data, x="Time", y="Sensitivity Index", hue="Parameter", ax=ax, palette=custom_palette, hue_order=param_names)
     else:
-        sns.lineplot(data=plot_data, x="Time", y="Sensitivity Index", hue="Parameter", ax=ax, palette=custom_palette, hue_order=parameter_order)                
+        sns.lineplot(data=plot_data, x="Time", y="Sensitivity Index", hue="Parameter", ax=ax, palette=custom_palette, hue_order=param_names)                
     ax.set_xlabel("Time (min)")
     ax.set_ylabel(f"Sensitivity Measure ({selected_sm})")
     ax.set_title(f"Global SA - {sa_method}", fontsize=8)
@@ -101,8 +110,6 @@ def plot_global_sa_results(global_SA_parameters, sa_method, qoi_time_values, sa_
         ax.legend(bbox_to_anchor=(1.05, 1), loc="upper left", title_fontsize=8, fontsize=8)
 
 def plot_local_sa_results(sa_method, qoi_time_values, sa_results, selected_qoi, ax):
-    import pandas as pd
-    import seaborn as sns
     plot_data = pd.DataFrame([
         {
             "Time": qoi_time_values[time_label],
@@ -135,12 +142,6 @@ def plot_local_sa_results(sa_method, qoi_time_values, sa_results, selected_qoi, 
 
 
 def plot_cells_2D(df_cells, color_dic=None, ax=None, scale_bar=False, bar_size=200, axes_visible=False, feature='cell_type', cmap='viridis', vmin=None, vmax=None):
-    import matplotlib.pyplot as plt
-    import matplotlib.colors as mcolors
-    import pandas as pd
-    from matplotlib.collections import PatchCollection
-    from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
-
     if ax is None:
         raise ValueError("'ax' must be provided.")
 

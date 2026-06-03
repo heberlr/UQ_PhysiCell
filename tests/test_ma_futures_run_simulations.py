@@ -1,100 +1,268 @@
-import unittest
-import pickle
-import sys
-import traceback
-from unittest.mock import patch, MagicMock
-from uq_physicell.model_analysis.ma_context import run_simulations, ModelAnalysisContext
+"""Integration test for run_simulations with inter-process (concurrent.futures) execution.
 
-# Define the mock function at the module level with correct signature
-def mock_run_replicate_serializable(PC_model_conf, sample_id, replicate_id, ParametersXML, ParametersRules, qoi_functions=None, return_binary_output=False, drop_columns=[], custom_summary_function=None):
-    print(f"Mock replicate called with sampleID={sample_id}, replicateID={replicate_id}")
-    return sample_id, replicate_id, pickle.dumps({"out1": 1.0, "out2": 2.0})
+Mirrors the ex2/ex3 workflow: User-defined sampler, set_samples(), context.run().
+PhysiCell_Model and the replicate runner are mocked so no real PhysiCell binary is needed.
+"""
+
+import pickle
+import pytest
+from unittest.mock import patch, call
+
+from uq_physicell.model_analysis.ma_context import ModelAnalysisContext, run_simulations
+
+
+# ─── mocks ──────────────────────────────────────────────────────────────────
+
+NUM_REPLICATES = 2
+
 
 class MockPhysiCellModel:
-    """A serializable mock object for PhysiCell_Model."""
+    """Minimal stand-in for PhysiCell_Model — no file I/O required."""
     def __init__(self, ini_filePath, strucName):
-        print(f"MockPhysiCellModel initialized with ini_filePath={ini_filePath}, strucName={strucName}")
-        self.numReplicates = 2
-        self.XML_parameters_variable = {'param_xml1': 'param1'}
-        self.parameters_rules_variable = {'param_rule1': 'param2'}
-        self.output_folder = '/tmp/test_output'
+        self.configFilePath = ini_filePath
+        self.keyModel = strucName
+        self.numReplicates = NUM_REPLICATES
+        self.XML_parameters_variable = {"xml_p1": "p1", "xml_p2": "p2"}
+        self.parameters_rules_variable = {}
+        self.output_folder = "/tmp/uq_test_output"
 
     def info(self):
-        return "Mocked PhysiCell Model Info"
+        return "MockPhysiCellModel info"
 
-class TestRunSASimulationsFutures(unittest.TestCase):
-    @patch('uq_physicell.model_analysis.ma_context.PhysiCell_Model', new=MockPhysiCellModel)
-    @patch('uq_physicell.model_analysis.ma_context.check_simulations_db')
-    @patch('uq_physicell.model_analysis.ma_context.create_structure')
-    @patch('uq_physicell.model_analysis.ma_context.insert_metadata')
-    @patch('uq_physicell.model_analysis.ma_context.insert_param_space')
-    @patch('uq_physicell.model_analysis.ma_context.insert_qois')
-    @patch('uq_physicell.model_analysis.ma_context.insert_samples')
-    @patch('uq_physicell.model_analysis.ma_context.insert_output')
-    @patch('uq_physicell.model_analysis.ma_context.run_replicate_serializable', new=mock_run_replicate_serializable)
-    def test_run_sa_simulations_futures(self, mock_insert_output, mock_insert_samples, mock_insert_qoi, mock_insert_param_space, 
-                                        mock_insert_metadata, mock_create_structure, mock_check_simulations_db):
-        print("Starting test...")
-        
-        # Mock check_simulations_db
-        mock_check_simulations_db.return_value = (False, [], [], [])
-        print("Mock check_simulations_db configured")
 
-        # Input parameters - create a mock context
-        model_config = {"ini_path": "test.ini", "struc_name": "test_structure"}
-        sampler = "LHS"
-        params_dict = {
-            "names": ["param1", "param2"],
-            "samples": {0: {"param1": 1.0, "param2": 2.0},
-                       1: {"param1": 1.25, "param2": 0.75},
-                       2: {"param1": 1.75, "param2": 1.25}}
-        }
-        qois_dic = None
-        db_file = "/tmp/test_db.db"
-        print("Test parameters configured")
-        
-        # Create mock context
-        print("Creating ModelAnalysisContext...")
-        mock_context = ModelAnalysisContext(db_file, model_config, sampler, params_dict, qois_dic, num_workers=2)
-        mock_context.dic_samples = params_dict["samples"]
-        mock_context.cancelled = lambda: False
-        print("Context created successfully")
+def mock_run_replicate_serializable(
+    PhysiCellModel_conf, sample_id, replicate_id,
+    ParametersXML, ParametersRules,
+    qoi_functions=None, qoi_def={},
+    return_binary_output=True, drop_columns=None,
+    custom_summary_function=None,
+):
+    return sample_id, replicate_id, pickle.dumps({"out1": 1.0})
 
-        # Run the function
-        print("Running simulations...")
-        run_simulations(mock_context)
-        print("Simulations completed")
 
-        # Assertions
-        print("Asserting database structure creation...")
-        mock_create_structure.assert_called_once_with(db_file)
-        
-        print("Asserting metadata insertion...")
-        mock_insert_metadata.assert_called_once()
-        
-        print("Asserting parameter space insertion...")
-        mock_insert_param_space.assert_called_once()
-        
-        print("Asserting QOI insertion...")
-        mock_insert_qoi.assert_called_once()
-        
-        print("Asserting samples insertion...")
-        mock_insert_samples.assert_called_once()
-        
-        print("Asserting output insertion...")
-        # Check if mock_insert_output was called - if simulations succeeded, it should be
-        print(f"insert_output call count: {mock_insert_output.call_count}")
-        if mock_insert_output.called:
-            print("✅ insert_output was called successfully")
-        else:
-            print("⚠️  insert_output was not called - this might be expected if simulations failed")
-            # For now, let's make this a soft assertion - you can make it strict later
-            # self.assertTrue(mock_insert_output.called, "insert_output should have been called after successful simulations")
-        
-        # Verify that the mock replicate function worked by checking the context
-        print(f"Number of samples processed: {len(mock_context.dic_samples)}")
-        
-        print("All assertions passed!")
+# ─── shared patch set (applied per test function) ───────────────────────────
+
+def mock_run_replicate(
+    PhysiCell_Model=None, sample_id=None, replicate_id=None,
+    ParametersXML=None, ParametersRules=None,
+    qoi_functions=None, qoi_def={},
+    return_binary_output=True, drop_columns=None,
+    custom_summary_function=None,
+):
+    return sample_id, replicate_id, pickle.dumps({"out1": 1.0})
+
+
+PATCHES = [
+    patch("uq_physicell.model_analysis.ma_context.PhysiCell_Model",           new=MockPhysiCellModel),
+    patch("uq_physicell.model_analysis.ma_context.run_replicate_serializable", new=mock_run_replicate_serializable),
+    patch("uq_physicell.model_analysis.ma_context.run_replicate",              new=mock_run_replicate),
+    patch("uq_physicell.model_analysis.ma_context._disable_wal_mode"),
+]
+
+
+def _apply_patches(fn):
+    """Decorator: apply shared patches to a single test function."""
+    for p in reversed(PATCHES):
+        fn = p(fn)
+    return fn
+
+
+# ─── fixtures ────────────────────────────────────────────────────────────────
+
+@pytest.fixture
+def db_path(tmp_path):
+    return str(tmp_path / "test.db")
+
+
+@pytest.fixture
+def model_config():
+    return {"ini_path": "test.ini", "struc_name": "test_model"}
+
+
+@pytest.fixture
+def params_info():
+    return {"p1": {"ref_value": 1.0}, "p2": {"ref_value": 2.0}}
+
+
+@pytest.fixture
+def samples():
+    return {
+        0: {"p1": 1.0, "p2": 2.0},
+        1: {"p1": 1.5, "p2": 2.5},
+        2: {"p1": 0.5, "p2": 1.5},
+    }
+
+
+def _make_ctx(db_path, model_config, params_info, qois_info=None, **kw):
+    return ModelAnalysisContext(
+        db_path, model_config, "User-defined",
+        params_info, qois_info or {}, **kw,
+    )
+
+
+# ─── tests ───────────────────────────────────────────────────────────────────
+
+@_apply_patches
+@patch("uq_physicell.model_analysis.ma_context.check_simulations_db", return_value=(False, [], [], []))
+@patch("uq_physicell.model_analysis.ma_context.create_structure")
+@patch("uq_physicell.model_analysis.ma_context.insert_metadata")
+@patch("uq_physicell.model_analysis.ma_context.insert_param_space")
+@patch("uq_physicell.model_analysis.ma_context.insert_qois")
+@patch("uq_physicell.model_analysis.ma_context.insert_samples")
+@patch("uq_physicell.model_analysis.ma_context.insert_output")
+def test_db_structure_created(
+    mock_output, mock_samples, mock_qois, mock_params,
+    mock_meta, mock_create, mock_check,
+    mock_wal,                           # _disable_wal_mode
+    db_path, model_config, params_info, samples,
+):
+    ctx = _make_ctx(db_path, model_config, params_info, num_workers=2)
+    ctx.set_samples(samples)
+    run_simulations(ctx)
+
+    mock_create.assert_called_once_with(db_path)
+    mock_meta.assert_called_once()
+    mock_params.assert_called_once()
+    mock_qois.assert_called_once()
+    mock_samples.assert_called_once()
+
+
+@_apply_patches
+@patch("uq_physicell.model_analysis.ma_context.check_simulations_db", return_value=(False, [], [], []))
+@patch("uq_physicell.model_analysis.ma_context.create_structure")
+@patch("uq_physicell.model_analysis.ma_context.insert_metadata")
+@patch("uq_physicell.model_analysis.ma_context.insert_param_space")
+@patch("uq_physicell.model_analysis.ma_context.insert_qois")
+@patch("uq_physicell.model_analysis.ma_context.insert_samples")
+@patch("uq_physicell.model_analysis.ma_context.insert_output")
+def test_output_inserted_for_each_sample_replicate(
+    mock_output, mock_samples, mock_qois, mock_params,
+    mock_meta, mock_create, mock_check,
+    mock_wal,
+    db_path, model_config, params_info, samples,
+):
+    ctx = _make_ctx(db_path, model_config, params_info, num_workers=2)
+    ctx.set_samples(samples)
+    run_simulations(ctx)
+
+    expected = len(samples) * NUM_REPLICATES   # 3 samples × 2 replicates = 6
+    assert mock_output.call_count == expected
+
+
+@_apply_patches
+@patch("uq_physicell.model_analysis.ma_context.check_simulations_db", return_value=(False, [], [], []))
+@patch("uq_physicell.model_analysis.ma_context.create_structure")
+@patch("uq_physicell.model_analysis.ma_context.insert_metadata")
+@patch("uq_physicell.model_analysis.ma_context.insert_param_space")
+@patch("uq_physicell.model_analysis.ma_context.insert_qois")
+@patch("uq_physicell.model_analysis.ma_context.insert_samples")
+@patch("uq_physicell.model_analysis.ma_context.insert_output")
+def test_context_run_alias_equivalent(
+    mock_output, mock_samples, mock_qois, mock_params,
+    mock_meta, mock_create, mock_check,
+    mock_wal,
+    db_path, model_config, params_info, samples,
+):
+    ctx = _make_ctx(db_path, model_config, params_info, num_workers=2)
+    ctx.set_samples(samples)
+    ctx.run()   # alias — same result as run_simulations(ctx)
+
+    mock_create.assert_called_once()
+    assert mock_output.call_count == len(samples) * NUM_REPLICATES
+
+
+@_apply_patches
+@patch("uq_physicell.model_analysis.ma_context.check_simulations_db", return_value=(False, [], [], []))
+@patch("uq_physicell.model_analysis.ma_context.create_structure")
+@patch("uq_physicell.model_analysis.ma_context.insert_metadata")
+@patch("uq_physicell.model_analysis.ma_context.insert_param_space")
+@patch("uq_physicell.model_analysis.ma_context.insert_qois")
+@patch("uq_physicell.model_analysis.ma_context.insert_samples")
+@patch("uq_physicell.model_analysis.ma_context.insert_output")
+def test_serial_execution_also_works(
+    mock_output, mock_samples, mock_qois, mock_params,
+    mock_meta, mock_create, mock_check,
+    mock_wal,
+    db_path, model_config, params_info, samples,
+):
+    ctx = _make_ctx(db_path, model_config, params_info,
+                    parallel_method="serial", num_workers=1)
+    ctx.set_samples(samples)
+    ctx.run()
+
+    mock_create.assert_called_once()
+    assert mock_output.call_count == len(samples) * NUM_REPLICATES
+
+
+@_apply_patches
+@patch("uq_physicell.model_analysis.ma_context.check_simulations_db",
+       return_value=(True, [], [], []))   # DB exists, no missing simulations
+@patch("uq_physicell.model_analysis.ma_context.create_structure")
+@patch("uq_physicell.model_analysis.ma_context.insert_metadata")
+@patch("uq_physicell.model_analysis.ma_context.insert_param_space")
+@patch("uq_physicell.model_analysis.ma_context.insert_qois")
+@patch("uq_physicell.model_analysis.ma_context.insert_samples")
+@patch("uq_physicell.model_analysis.ma_context.insert_output")
+def test_existing_db_skips_structure_creation(
+    mock_output, mock_samples, mock_qois, mock_params,
+    mock_meta, mock_create, mock_check,
+    mock_wal,
+    db_path, model_config, params_info, samples,
+):
+    ctx = _make_ctx(db_path, model_config, params_info, num_workers=1)
+    ctx.set_samples(samples)
+    run_simulations(ctx)
+
+    mock_create.assert_not_called()
+    mock_meta.assert_not_called()
+    mock_output.assert_not_called()
+
+
+@_apply_patches
+@patch("uq_physicell.model_analysis.ma_context.check_simulations_db", return_value=(False, [], [], []))
+@patch("uq_physicell.model_analysis.ma_context.create_structure")
+@patch("uq_physicell.model_analysis.ma_context.insert_metadata")
+@patch("uq_physicell.model_analysis.ma_context.insert_param_space")
+@patch("uq_physicell.model_analysis.ma_context.insert_qois")
+@patch("uq_physicell.model_analysis.ma_context.insert_samples")
+@patch("uq_physicell.model_analysis.ma_context.insert_output")
+def test_qoi_funcs_stored_in_db(
+    mock_output, mock_samples, mock_qois, mock_params,
+    mock_meta, mock_create, mock_check,
+    mock_wal,
+    db_path, model_config, params_info, samples,
+):
+    qoi_funcs = {"live": lambda df_cell: len(df_cell[df_cell["dead"] == False])}
+    ctx = _make_ctx(db_path, model_config, params_info, qois_info=qoi_funcs, num_workers=2)
+    ctx.set_samples(samples)
+    ctx.run()
+
+    mock_qois.assert_called_once()
+    stored_qois = mock_qois.call_args[0][1]
+    assert "live" in stored_qois
+
+
+@_apply_patches
+@patch("uq_physicell.model_analysis.ma_context.check_simulations_db", return_value=(False, [], [], []))
+@patch("uq_physicell.model_analysis.ma_context.create_structure")
+@patch("uq_physicell.model_analysis.ma_context.insert_metadata")
+@patch("uq_physicell.model_analysis.ma_context.insert_param_space")
+@patch("uq_physicell.model_analysis.ma_context.insert_qois")
+@patch("uq_physicell.model_analysis.ma_context.insert_samples")
+@patch("uq_physicell.model_analysis.ma_context.insert_output")
+def test_cancellation_before_run_inserts_nothing(
+    mock_output, mock_samples, mock_qois, mock_params,
+    mock_meta, mock_create, mock_check,
+    mock_wal,
+    db_path, model_config, params_info, samples,
+):
+    ctx = _make_ctx(db_path, model_config, params_info, num_workers=2)
+    ctx.set_samples(samples)
+    ctx._cancellation_requested = True
+    run_simulations(ctx)
+
+    mock_output.assert_not_called()
+
 
 if __name__ == "__main__":
-    unittest.main(verbosity=2)
+    pytest.main([__file__, "-v"])

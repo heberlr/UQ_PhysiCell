@@ -145,8 +145,8 @@ def create_tab1(main_window):
     main_window.value_hbox.addWidget(main_window.set_param_button)
     # Button to add parameter to analysis
     main_window.add_analysis_button = QPushButton("Add to Analysis")
-    main_window.add_analysis_button.setEnabled(False)
-    main_window.add_analysis_button.setStyleSheet("background-color: lightgreen; color: darkgray;")
+    main_window.add_analysis_button.setEnabled(True)
+    main_window.add_analysis_button.setStyleSheet("background-color: lightgreen; color: black;")
     main_window.add_analysis_button.clicked.connect(lambda: main_window.add_parameter_to_analysis(main_window))
     main_window.value_hbox.addWidget(main_window.add_analysis_button)
     # Add text into new_value_input enables the set parameter button and disables it if empty (oposite for add_analysis_button)

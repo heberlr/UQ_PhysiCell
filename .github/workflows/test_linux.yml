@@ -34,13 +34,12 @@ jobs:
       run: |
         python -m pytest tests/ -v --tb=short
 
-    - name: Run unit tests with coverage (optional)
+    - name: Run unit tests with coverage
       run: |
         python -m pytest tests/ --cov=uq_physicell --cov-report=term-missing --cov-report=xml
-      continue-on-error: true
 
-    - name: Upload coverage to Codecov (optional)
-      if: success()
+    - name: Upload coverage to Codecov
+      if: always()
       uses: codecov/codecov-action@main
       with:
         file: ./coverage.xml
