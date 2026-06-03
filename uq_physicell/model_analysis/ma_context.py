@@ -123,7 +123,54 @@ class ModelAnalysisContext:
         else:
             raise ValueError("Invalid parallel_method. Use 'inter-node' for MPI, 'inter-process' for futures, or 'serial' for single process.") 
     
+    _GLOBAL_SAMPLERS = frozenset({
+        'Sobol', 'Latin hypercube sampling (LHS)', 'Fast',
+        'Fractional Factorial', 'Finite Difference',
+    })
+
+    def _validate_params_for_sampler(self):
+        """Check that params_info contains the fields required by the chosen sampler
+        and warn about fields that will be silently ignored."""
+        sampler = self.dic_metadata['Sampler']
+
+        if sampler in self._GLOBAL_SAMPLERS:
+            for param, props in self.params_dict.items():
+                missing = [f for f in ('lower_bound', 'upper_bound')
+                           if props.get(f) is None]
+                if missing:
+                    raise ValueError(
+                        f"Parameter '{param}' is missing {missing} required by "
+                        f"sampler='{sampler}'. Global samplers use only "
+                        f"'lower_bound' and 'upper_bound' for sampling."
+                    )
+                if props.get('perturbation') is not None:
+                    self.logger.warning(
+                        f"Parameter '{param}': 'perturbation' is not used by "
+                        f"sampler='{sampler}' and will be ignored — only "
+                        f"'lower_bound' and 'upper_bound' affect global sampling."
+                    )
+
+        elif sampler == 'OAT':
+            for param, props in self.params_dict.items():
+                if props.get('ref_value') is None:
+                    raise ValueError(
+                        f"Parameter '{param}' is missing 'ref_value' required by OAT sampling."
+                    )
+                is_bool = props.get('type') == 'bool'
+                if not is_bool and props.get('perturbation') is None:
+                    raise ValueError(
+                        f"Parameter '{param}' is missing 'perturbation' required by OAT sampling. "
+                        f"Provide a list of percentage values, e.g. [1.0, 5.0, 10.0]."
+                    )
+                for unused in ('lower_bound', 'upper_bound'):
+                    if props.get(unused) is not None:
+                        self.logger.warning(
+                            f"Parameter '{param}': '{unused}' is not used by OAT sampling "
+                            f"(only 'ref_value' and 'perturbation' are used) and will be ignored."
+                        )
+
     def generate_samples(self, N: int = None, M: int = 4, seed: int = 42):
+        self._validate_params_for_sampler()
         if (self.dic_metadata['Sampler'] == 'OAT'):
             self.dic_samples = run_local_sampler(self.params_dict, self.dic_metadata['Sampler'])
         elif (self.dic_metadata['Sampler'] != 'User-defined'):
