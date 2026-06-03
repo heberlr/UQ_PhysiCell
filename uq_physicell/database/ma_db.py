@@ -202,17 +202,17 @@ def insert_param_space(db_file: str, params_dict: dict):
     try:
         for param_name, properties in params_dict.items():
             if param_name == "samples": continue
-            properties['perturbation'] = properties.get('perturbation', None)  # If 'perturbation' key does not exist, then it will be None
-            properties['lower_bound'] = properties.get('lower_bound', None)  # If 'lower_bound' key does not exist, then it will be None
-            properties['upper_bound'] = properties.get('upper_bound', None)  # If 'upper_bound' key does not exist, then it will be None
-            # Convert list to string if it's a list
-            if type(properties['perturbation']) == list:
-                properties['perturbation'] = str(properties['perturbation'])
+            perturbation = properties.get('perturbation', None)
+            lower_bound  = properties.get('lower_bound', None)
+            upper_bound  = properties.get('upper_bound', None)
+            ref_value    = properties.get('ref_value', None)
+            if isinstance(perturbation, list):
+                perturbation = str(perturbation)
             print(f"Inserting parameter: {param_name} with properties: {properties}")
             cursor.execute('''
                 INSERT INTO ParameterSpace (ParamName, Lower_Bound, Upper_Bound, ReferenceValue, Perturbation)
                 VALUES (?, ?, ?, ?, ?)
-            ''', (param_name, properties['lower_bound'], properties['upper_bound'], properties['ref_value'], properties['perturbation']))
+            ''', (param_name, lower_bound, upper_bound, ref_value, perturbation))
         conn.commit()
         conn.close()
     except sqlite3.Error as e:
