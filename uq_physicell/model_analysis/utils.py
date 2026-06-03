@@ -235,36 +235,30 @@ def mcds_list_to_qoi_df_for_calib(recreated_qoi_funcs, all_sample_ids, chunk_siz
 def get_qoi_from_db_file(db_file:str, qoi_names:list) -> pd.DataFrame:
     """Extract quantities of interest (QoIs) from a database file containing simulation results.
 
+    Returns a long-format DataFrame with one row per (SampleID, time, ReplicateID),
+    consistent with the raw-MCDS storage path.  Old Mode-A databases (Data column
+    contains precomputed QoI DataFrames) are handled transparently.
+
     Args:
         db_file (str): Path to the SQLite database containing simulation results.
         qoi_names (list): List of QoI names to extract.
 
     Returns:
-        pd.DataFrame: DataFrame with calculated QoI values indexed by SampleID and ReplicateID, with columns for each QoI.
+        pd.DataFrame: Long-format DataFrame with columns [SampleID, time, ReplicateID, <qoi_names>],
+            sorted by (SampleID, time, ReplicateID).
     """
-    # Load the full output data to extract time column and reshape
     df_qois_data = load_output(db_file, load_data=True)
- 
-    # Extract the consistent 'time' column from the first DataFrame
-    time_column = df_qois_data['Data'].iloc[0]['time'].values
-    # Flatten the 'Data' column into a single DataFrame with SampleID and ReplicateID
+    # Flatten stored QoI DataFrames into a single long-format DataFrame
     expanded_data = pd.concat(
         [
             pd.DataFrame(data).assign(SampleID=SampleID, ReplicateID=ReplicateID)
             for (SampleID, ReplicateID), group in df_qois_data.groupby(['SampleID', 'ReplicateID'])
-            for data in group['Data']  # Ensure 'Data' contains DataFrames
+            for data in group['Data']
         ],
         ignore_index=True
     )
-    # Dynamically calculate the number of repetitions for the time column
-    num_repeats = len(expanded_data) // len(time_column)
-    if len(expanded_data) % len(time_column) != 0:
-        raise ValueError("Mismatch between expanded_data rows and time column length.")
-    expanded_data['time'] = np.tile(time_column, num_repeats)
-    # Reshape the expanded_data to match the expected format
-    reshaped_data = _reshape_sa_expanded_data(expanded_data, qoi_names)
-    
-    return reshaped_data
+    keep_cols = ['SampleID', 'time', 'ReplicateID'] + [q for q in qoi_names if q in expanded_data.columns]
+    return expanded_data[keep_cols].sort_values(['SampleID', 'time', 'ReplicateID'], ignore_index=True)
 
 def calculate_qoi_from_db_file(db_file:str, qoi_functions:dict, qoi_def:dict={}, chunk_size:int=10, mode='long', verbose=False) -> pd.DataFrame:
     """Calculate quantities of interest from sensitivity analysis database results.
