@@ -25,7 +25,7 @@ except ImportError:
 from uq_physicell import PhysiCell_Model
 from .samplers import run_local_sampler, run_global_sampler
 from ..utils.model_wrapper import run_replicate, run_replicate_serializable
-from ..utils.sumstats import _convert_qoi_function_to_string
+from ..utils.sumstats import _convert_qoi_function_to_string, recreate_qoi_functions
 from ..database.ma_db import create_structure, insert_metadata, insert_param_space, insert_qois, insert_samples, insert_output, check_simulations_db, _disable_wal_mode
 
 
@@ -72,20 +72,38 @@ class ModelAnalysisContext:
             summary_function=None,
             logger: logging.Logger=None):
         self.db_path = db_path
-        self.params_dict = params_info  # Dictionary with parameter names, ref value, ranges, and perturbations.
-        # QOI_FUNCTIONS MUST BE STRINGS, BECAUSE THEY NEED TO BE SERIALIZABLE TO BE SAVED IN THE DATABASE AND USED IN THE DEFAULT AGGREGATION FUNCTION.
+        self.params_dict = params_info
+
+        # Accept model_config as (ini_path, key) tuple or {'ini_path': ..., 'struc_name': ...} dict
+        if isinstance(model_config, (tuple, list)):
+            model_config = {'ini_path': model_config[0], 'struc_name': model_config[1]}
+
+        # QoI functions are stored as source strings so they can be pickled across processes
         self.qois_dict = {key: _convert_qoi_function_to_string(value, key) if not isinstance(value, str) else value for key, value in qois_info.items()}
         self.qoi_def = qoi_def
-        self.parallel_method = parallel_method # inter-process (single node) or inter-node (mpi)
+
+        # Validate serialization at context creation time — much clearer than a cryptic
+        # eval() failure deep inside a worker process at simulation time
+        if self.qois_dict:
+            try:
+                recreate_qoi_functions(self.qois_dict, self.qoi_def)
+            except Exception as e:
+                raise ValueError(
+                    f"A QoI function cannot be serialized for multiprocessing. "
+                    f"If it closes over an external variable or function, pass it via "
+                    f"qoi_def={{name: object}} in ModelAnalysisContext. Details: {e}"
+                ) from None
+
+        self.parallel_method = parallel_method
         self.num_workers = num_workers
         self.summary_function = summary_function
         self.logger = logger if logger is not None else logging.getLogger(__name__)
-        
+
         # Initialize cancellation flag and process tracking
         self._cancellation_requested = False
         self.futures = []
         self.model = None  # Will be set in run_simulations
-        
+
         # Initialize metadata for database
         self.dic_metadata = {
             'Sampler': sampler,
@@ -111,9 +129,33 @@ class ModelAnalysisContext:
         elif (self.dic_metadata['Sampler'] != 'User-defined'):
             self.dic_samples = run_global_sampler(self.params_dict, self.dic_metadata['Sampler'], N, M, seed)
 
+    def set_samples(self, samples):
+        """Set user-defined parameter combinations for the 'User-defined' sampler.
+
+        Args:
+            samples: dict mapping integer sample IDs to parameter dicts,
+                e.g. {0: {'param1': 1.0, 'param2': 2.0}, 1: {'param1': 1.5, 'param2': 3.0}}
+                or a list of parameter dicts (IDs are assigned automatically starting from 0),
+                e.g. [{'param1': 1.0}, {'param1': 1.5}]
+        """
+        if isinstance(samples, list):
+            self.dic_samples = {i: s for i, s in enumerate(samples)}
+        else:
+            self.dic_samples = samples
+
+    def run(self):
+        """Run simulations — convenience alias for ``run_simulations(context)``.
+
+        Allows the fluent pattern::
+
+            context.generate_samples(N=8)
+            context.run()
+        """
+        run_simulations(self)
+
     def cancelled(self):
         """Check if cancellation has been requested.
-        
+
         Returns:
             bool: True if cancellation was requested, False otherwise
         """
