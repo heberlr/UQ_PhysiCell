@@ -48,7 +48,7 @@ from uq_physicell.database.ma_db import (
     load_qois as load_ma_qois, 
     load_samples as load_ma_samples
 )
-from uq_physicell.model_analysis.utils import calculate_qoi_from_sa_db
+from ..model_analysis.utils import calculate_qoi_from_db_file
 from ..utils.model_wrapper import run_replicate_serializable
 from ..utils.sumstats import _convert_qoi_function_to_string
 from ..utils.distances import SumSquaredDifferences
@@ -424,7 +424,7 @@ class CalibrationContext:
             train_x_list.append(param_dict_to_tensor(dic_params_i, self.search_space))
 
         # MCDS lists to QoIs
-        df_qois_data = calculate_qoi_from_sa_db(db_file=self.db_path_initial_samples, qoi_functions=self.qoi_functions, qoi_def=self.qoi_def, mode='calib')
+        df_qois_data = calculate_qoi_from_db_file(db_file=self.db_path_initial_samples, qoi_functions=self.qoi_functions, qoi_def=self.qoi_def, mode='calib')
         objectives_list = []
         obj_noise_list = []
         for sample_id in dic_samples.keys():

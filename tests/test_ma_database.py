@@ -203,6 +203,58 @@ class TestModularLoadFunctions:
         assert ids['Data'] is not None
 
 
+class TestInsertParamSpaceEdgeCases:
+    """insert_param_space must not require ref_value — it is optional metadata."""
+
+    def test_bounds_only_no_ref_value(self):
+        """LHS-style params: only lower_bound and upper_bound — ref_value absent."""
+        with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as tmp:
+            db_file = tmp.name
+        try:
+            create_structure(db_file)
+            insert_param_space(db_file, {"mac_rate": {"lower_bound": 0.5, "upper_bound": 1.5}})
+            df = load_parameter_space(db_file)
+            assert df.shape[0] == 1
+            assert df["lower_bound"].values[0] == 0.5
+            assert df["upper_bound"].values[0] == 1.5
+            assert df["ref_value"].isnull().values[0]   # stored as NULL
+        finally:
+            if os.path.exists(db_file):
+                os.remove(db_file)
+
+    def test_ref_value_only_no_bounds(self):
+        """User-defined-style params: only ref_value — bounds absent."""
+        with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as tmp:
+            db_file = tmp.name
+        try:
+            create_structure(db_file)
+            insert_param_space(db_file, {"viral_rate": {"ref_value": 0.125}})
+            df = load_parameter_space(db_file)
+            assert df.shape[0] == 1
+            assert df["ref_value"].values[0] == pytest.approx(0.125)
+            assert df["lower_bound"].isnull().values[0]
+            assert df["upper_bound"].isnull().values[0]
+        finally:
+            if os.path.exists(db_file):
+                os.remove(db_file)
+
+    def test_full_params_backwards_compatible(self):
+        """Sobol-style params with all fields still work."""
+        with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as tmp:
+            db_file = tmp.name
+        try:
+            create_structure(db_file)
+            insert_param_space(db_file, {
+                "p1": {"lower_bound": 0.0, "upper_bound": 1.0, "ref_value": 0.5, "perturbation": [10.0]},
+            })
+            df = load_parameter_space(db_file)
+            assert df.shape[0] == 1
+            assert df["ref_value"].values[0] == pytest.approx(0.5)
+        finally:
+            if os.path.exists(db_file):
+                os.remove(db_file)
+
+
 class TestDatabaseCreation:
     """Test suite for database creation functions."""
     

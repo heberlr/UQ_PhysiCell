@@ -1,109 +1,155 @@
+"""Integration test for run_simulations with inter-node (MPI) execution.
+
+Skipped automatically when mpi4py is not installed.
+PhysiCell_Model and replicate runner are mocked — no real PhysiCell binary needed.
+"""
+
+import pickle
+import pytest
+from unittest.mock import patch
+
 try:
     from mpi4py import MPI
-    mpi_available = True
+    # Only meaningful when actually launched under mpiexec with N > 1 processes.
+    # Running under a plain pytest process hangs at comm.Barrier() / MPI.Finalize().
+    mpi_available = MPI.COMM_WORLD.Get_size() > 1
 except (ImportError, RuntimeError):
     mpi_available = False
     MPI = None
 
-import unittest
-import pickle
-from unittest.mock import MagicMock, patch
-from uq_physicell.model_analysis.ma_context import run_simulations, ModelAnalysisContext
+from uq_physicell.model_analysis.ma_context import ModelAnalysisContext, run_simulations
 
 
-# Create a serializable mock model class
-class SerializableMockModel:
-    def __init__(self, ini_filePath=None, strucName=None):
+pytestmark = pytest.mark.skipif(
+    not mpi_available,
+    reason="MPI tests must be launched with: mpiexec -n N python -m pytest tests/test_ma_mpi_run_simulations.py",
+)
+
+
+# ─── mocks ──────────────────────────────────────────────────────────────────
+
+class MockPhysiCellModel:
+    def __init__(self, ini_filePath, strucName):
+        self.configFilePath = ini_filePath
+        self.keyModel = strucName
         self.numReplicates = 2
-        self.XML_parameters_variable = {'param_xml1': 'param1'}
-        self.parameters_rules_variable = {'param_rule1': 'param2'}
-        self.output_folder = '/tmp/test_output'
-    
+        self.XML_parameters_variable = {"xml_p1": "p1", "xml_p2": "p2"}
+        self.parameters_rules_variable = {}
+        self.output_folder = "/tmp/uq_mpi_test_output"
+
     def info(self):
-        return "Mocked PhysiCell Model Info"
+        return "MockPhysiCellModel info"
+
+    def RunModel(self, *args, **kwargs):
+        return {"out1": 1.0}
 
 
-# Create a serializable mock function
-def mock_run_replicate_func(PhysiCellModel, sample_id, replicate_id, ParametersXML, ParametersRules, qoi_functions=None, qoi_def={}, return_binary_output=False, drop_columns=[], custom_summary_function=None):
-    return sample_id, replicate_id, pickle.dumps({"out1": 1.0, "out2": 2.0})
+def mock_run_replicate(
+    PhysiCellModel, sample_id, replicate_id,
+    ParametersXML, ParametersRules,
+    qoi_functions=None, qoi_def={},
+    return_binary_output=True, drop_columns=None,
+    custom_summary_function=None,
+):
+    return sample_id, replicate_id, pickle.dumps({"out1": 1.0})
 
 
-def mock_run_replicate_serializable_func(PhysiCellModel_conf, sample_id, replicate_id, ParametersXML, ParametersRules, qoi_functions=None, qoi_def={}, return_binary_output=False, drop_columns=[], custom_summary_function=None):
-    return sample_id, replicate_id, pickle.dumps({"out1": 1.0, "out2": 2.0})
+# ─── fixtures ────────────────────────────────────────────────────────────────
+
+@pytest.fixture
+def db_path(tmp_path):
+    return str(tmp_path / "test_mpi.db")
 
 
-class TestRunSASimulationsMPI(unittest.TestCase):
-    @unittest.skipIf(not mpi_available, "MPI not available")
-    @patch('uq_physicell.model_analysis.ma_context.PhysiCell_Model', new=SerializableMockModel)
-    @patch('uq_physicell.model_analysis.ma_context.check_simulations_db')
-    @patch('uq_physicell.model_analysis.ma_context.create_structure')
-    @patch('uq_physicell.model_analysis.ma_context.insert_metadata')
-    @patch('uq_physicell.model_analysis.ma_context.insert_param_space')
-    @patch('uq_physicell.model_analysis.ma_context.insert_qois')
-    @patch('uq_physicell.model_analysis.ma_context.insert_samples')
-    @patch('uq_physicell.model_analysis.ma_context.insert_output')
-    @patch('uq_physicell.model_analysis.ma_context.run_replicate', new=mock_run_replicate_func)
-    @patch('uq_physicell.model_analysis.ma_context.run_replicate_serializable', new=mock_run_replicate_serializable_func)
-    def test_run_sa_simulations_mpi(self, mock_insert_output, mock_insert_samples,
-                                    mock_insert_qoi, mock_insert_param_space, mock_insert_metadata, 
-                                    mock_create_structure, mock_check_simulations_db):
-        # Mock MPI environment
-        if MPI is not None:
-            comm = MPI.COMM_WORLD
-            rank = comm.Get_rank()
-            size = comm.Get_size()
-        else:
-            rank = 0
-            size = 1
+@pytest.fixture
+def model_config():
+    return {"ini_path": "test.ini", "struc_name": "test_model"}
 
-        print(f"Rank {rank}: Starting test on {size} MPI processes")
 
-        # Mock check_simulations_db
-        mock_check_simulations_db.return_value = (False, [], [], [])
+@pytest.fixture
+def params_info():
+    return {"p1": {"ref_value": 1.0}, "p2": {"ref_value": 2.0}}
 
-        # Input parameters
-        model_config = {"ini_path": "test.ini", "struc_name": "test_structure"}
-        sampler = "LHS"
-        params_dict = {
-            "names": ["param1", "param2"],
-            "samples": {0: {"param1": 1.0, "param2": 2.0},
-                       1: {"param1": 1.25, "param2": 0.75},
-                       2: {"param1": 1.75, "param2": 1.25}}
-        }
-        qois_dic = None
-        db_file = "test_db.db"
-        
-        # Create mock context
-        mock_context = ModelAnalysisContext(db_file, model_config, sampler, params_dict, qois_dic)
-        mock_context.dic_samples = params_dict["samples"]
-        mock_context.cancelled = lambda: False
 
-        # Run the function
-        print(f"Rank {rank}: Calling run_simulations")
-        run_simulations(mock_context)
-        print(f"Rank {rank}: Finished run_simulations")
+@pytest.fixture
+def samples():
+    return {
+        0: {"p1": 1.0, "p2": 2.0},
+        1: {"p1": 1.5, "p2": 2.5},
+        2: {"p1": 0.5, "p2": 1.5},
+    }
 
-        # Assertions
+
+# ─── tests ───────────────────────────────────────────────────────────────────
+
+@patch("uq_physicell.model_analysis.ma_context.PhysiCell_Model", new=MockPhysiCellModel)
+@patch("uq_physicell.model_analysis.ma_context.run_replicate", new=mock_run_replicate)
+@patch("uq_physicell.model_analysis.ma_context.check_simulations_db", return_value=(False, [], [], []))
+@patch("uq_physicell.model_analysis.ma_context.create_structure")
+@patch("uq_physicell.model_analysis.ma_context.insert_metadata")
+@patch("uq_physicell.model_analysis.ma_context.insert_param_space")
+@patch("uq_physicell.model_analysis.ma_context.insert_qois")
+@patch("uq_physicell.model_analysis.ma_context.insert_samples")
+@patch("uq_physicell.model_analysis.ma_context.insert_output")
+@patch("uq_physicell.model_analysis.ma_context._disable_wal_mode")
+class TestRunSimulationsMPI:
+
+    def test_rank0_creates_db_structure(
+        self, mock_wal, mock_output, mock_samples, mock_qois,
+        mock_params, mock_meta, mock_create, mock_check,
+        db_path, model_config, params_info, samples,
+    ):
+        ctx = ModelAnalysisContext(
+            db_path, model_config, "User-defined", params_info, {},
+            parallel_method="inter-node",
+        )
+        ctx.set_samples(samples)
+        run_simulations(ctx)
+
+        rank = MPI.COMM_WORLD.Get_rank()
         if rank == 0:
-            # Master rank: Check setup tasks
-            print("Rank 0: Asserting database structure creation...")
-            mock_create_structure.assert_called_once_with(db_file)
-            print("Rank 0: Asserting metadata insertion...")
-            mock_insert_metadata.assert_called_once()
-            print("Rank 0: Asserting parameter space insertion...")
-            mock_insert_param_space.assert_called_once()
-            print("Rank 0: Asserting insert qoi...")
-            mock_insert_qoi.assert_called_once()
-            print("Rank 0: Asserting insert samples...")
-            mock_insert_samples.assert_called()
-            print("Rank 0: Asserting insert outputs...")
-            # Since mocks should succeed, insert_output should be called
-            self.assertTrue(mock_insert_output.called, "insert_output should have been called after successful simulations")
-            print("Rank 0: insert_output was called successfully")
+            mock_create.assert_called_once_with(db_path)
+            mock_meta.assert_called_once()
+            mock_params.assert_called_once()
+            mock_qois.assert_called_once()
+            mock_samples.assert_called_once()
 
-        print(f"Rank {rank}: Test completed successfully.")
+    def test_output_inserted_across_ranks(
+        self, mock_wal, mock_output, mock_samples, mock_qois,
+        mock_params, mock_meta, mock_create, mock_check,
+        db_path, model_config, params_info, samples,
+    ):
+        ctx = ModelAnalysisContext(
+            db_path, model_config, "User-defined", params_info, {},
+            parallel_method="inter-node",
+        )
+        ctx.set_samples(samples)
+        run_simulations(ctx)
+
+        # Each rank inserts its share; total across all ranks = samples × replicates
+        comm = MPI.COMM_WORLD
+        local_count = mock_output.call_count
+        total_count = comm.allreduce(local_count, op=MPI.SUM)
+        expected = len(samples) * MockPhysiCellModel("", "").numReplicates
+        assert total_count == expected
+
+    def test_context_run_alias(
+        self, mock_wal, mock_output, mock_samples, mock_qois,
+        mock_params, mock_meta, mock_create, mock_check,
+        db_path, model_config, params_info, samples,
+    ):
+        ctx = ModelAnalysisContext(
+            db_path, model_config, "User-defined", params_info, {},
+            parallel_method="inter-node",
+        )
+        ctx.set_samples(samples)
+        ctx.run()   # alias — equivalent to run_simulations(ctx)
+
+        rank = MPI.COMM_WORLD.Get_rank()
+        if rank == 0:
+            mock_create.assert_called_once()
+
 
 if __name__ == "__main__":
-    unittest.main()
-    # how to call: mpirun -n 4 python tests/test_mpi_run_sa_simulations.py
-    # or mpiexec -n 4 python tests/test_mpi_run_sa_simulations.py
+    # Run with: mpiexec -n 4 python tests/test_ma_mpi_run_simulations.py
+    pytest.main([__file__, "-v"])

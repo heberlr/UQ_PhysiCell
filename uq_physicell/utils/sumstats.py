@@ -1,5 +1,6 @@
 import pcdl
 import numpy as np
+import scipy
 import pandas as pd
 from shutil import rmtree
 from typing import Union
@@ -355,6 +356,25 @@ def summary_function(outputPath:str, summaryFile:Union[str, None], dic_params:di
     else:
         return df
 
+def qoi_func_radial_density_summary(df, center=[0,0,0]):
+    """
+    Extract summary statistics from radial distribution of cells
+    Args:
+        df: DataFrame with columns ['position_x', 'position_y', 'position_z']
+        center: List or array-like of length 3 representing the center point for radial distance calculation (default is [0,0,0])
+    """
+    cell_centers = df[['position_x', 'position_y', 'position_z']].values
+    dist_from_center = np.linalg.norm(cell_centers - np.array(center), axis=1)
+
+    return {
+        "center_of_mass": np.average(dist_from_center),
+        "median": np.median(dist_from_center),
+        "spread": np.std(dist_from_center),
+        "iqr": np.percentile(dist_from_center, 75) - np.percentile(dist_from_center, 25),
+        "skewness": scipy.stats.skew(dist_from_center),
+        "kurtosis": scipy.stats.kurtosis(dist_from_center),
+    }
+
 def qoi_func_persistent_homology(df:pd.DataFrame, Plot=False) -> tuple:
     """
     Compute persistent homology vectorization using muspan.
@@ -428,15 +448,17 @@ def qoi_func_relational_ph( df: pd.DataFrame, landmark_type: str, witness_type: 
     A_points = df[df["cell_type"] == landmark_type][["position_x","position_y"]].to_numpy()
     B_points = df[df["cell_type"] == witness_type][["position_x","position_y"]].to_numpy()
     if len(A_points) == 0 or len(B_points) == 0:
-        print("Warning:Both landmark_type and witness_type must be present.")
-        return (None, None)
+        print("Warning: Both landmark_type and witness_type must be present.")
+        # Return empty Series without pre-defined index - will be filled with NaN by the caller
+        return pd.Series(dtype=float), None
     # Pairwise distances B×A
     D = cdist(B_points, A_points)
 
     # Build candidate simplex list from landmarks
     if len(A_points) < 3:
         print("Warning: At least 3 landmark points are required for relational PH.")
-        return (None, None)
+        # Return empty Series - will be filled with NaN by the caller
+        return pd.Series(dtype=float), None
     # Use Delaunay to match Python repo behavior
     tri = Delaunay(A_points)
     # vertices = all points
@@ -508,7 +530,8 @@ def qoi_func_relational_ph( df: pd.DataFrame, landmark_type: str, witness_type: 
             f"Warning: Could not vectorize relational PH for "
             f"{landmark_type}->{witness_type}: {e}"
         )
-        return (None, diag)
+        # Return empty Series - will be filled with NaN by the caller
+        vec = pd.Series(dtype=float)
 
     # Plot
     if ax is not None:

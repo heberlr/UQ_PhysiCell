@@ -9,11 +9,17 @@ from uq_physicell import PhysiCell_Model
 from uq_physicell import __version__ as uq_physicell_version
 from pcdl import __version__ as pcdl_version
 
+# Import decompression from compression module
+from .compression import decompress_data, compress_data
+
+
 def _safe_pickle_loads(data):
     """Safely deserialize pickled data from SQLite BLOB storage.
     
     This function handles different data types that might be returned from SQLite
     when retrieving BLOB data, including bytes, buffer objects, and memoryview.
+    It also automatically decompresses zstd or zlib-compressed data before unpickling,
+    enabling transparent reading of both compressed and uncompressed databases.
     
     Args:
         data: The data to deserialize, which can be bytes, buffer, memoryview, or already deserialized.
@@ -32,13 +38,18 @@ def _safe_pickle_loads(data):
     try:
         # Handle different SQLite BLOB return types
         if isinstance(data, bytes):
-            result = pickle.loads(data)
+            # Try decompression first (for zstd/zlib compressed databases)
+            decompressed = decompress_data(data)
+            result = pickle.loads(decompressed)
         elif isinstance(data, memoryview):
-            result = pickle.loads(bytes(data))
+            decompressed = decompress_data(bytes(data))
+            result = pickle.loads(decompressed)
         elif hasattr(data, 'tobytes'):
-            result = pickle.loads(data.tobytes())
+            decompressed = decompress_data(data.tobytes())
+            result = pickle.loads(decompressed)
         elif hasattr(data, '__bytes__'):
-            result = pickle.loads(bytes(data))
+            decompressed = decompress_data(bytes(data))
+            result = pickle.loads(decompressed)
         # Handle SQLite3.Row or other database-specific types
         elif hasattr(data, 'keys') and hasattr(data, '__getitem__'):
             return data
@@ -191,17 +202,17 @@ def insert_param_space(db_file: str, params_dict: dict):
     try:
         for param_name, properties in params_dict.items():
             if param_name == "samples": continue
-            properties['perturbation'] = properties.get('perturbation', None)  # If 'perturbation' key does not exist, then it will be None
-            properties['lower_bound'] = properties.get('lower_bound', None)  # If 'lower_bound' key does not exist, then it will be None
-            properties['upper_bound'] = properties.get('upper_bound', None)  # If 'upper_bound' key does not exist, then it will be None
-            # Convert list to string if it's a list
-            if type(properties['perturbation']) == list:
-                properties['perturbation'] = str(properties['perturbation'])
+            perturbation = properties.get('perturbation', None)
+            lower_bound  = properties.get('lower_bound', None)
+            upper_bound  = properties.get('upper_bound', None)
+            ref_value    = properties.get('ref_value', None)
+            if isinstance(perturbation, list):
+                perturbation = str(perturbation)
             print(f"Inserting parameter: {param_name} with properties: {properties}")
             cursor.execute('''
                 INSERT INTO ParameterSpace (ParamName, Lower_Bound, Upper_Bound, ReferenceValue, Perturbation)
                 VALUES (?, ?, ?, ?, ?)
-            ''', (param_name, properties['lower_bound'], properties['upper_bound'], properties['ref_value'], properties['perturbation']))
+            ''', (param_name, lower_bound, upper_bound, ref_value, perturbation))
         conn.commit()
         conn.close()
     except sqlite3.Error as e:
@@ -272,7 +283,7 @@ def insert_samples(db_file: str, dic_samples: dict):
     except sqlite3.Error as e:
         raise RuntimeError(f"Error inserting samples into the database: {e}")
 
-def insert_output(db_file: str, sample_id: int, replicate_id: int, result_data: bytes):
+def insert_output(db_file: str, sample_id: int, replicate_id: int, result_data: bytes, compress: bool = True):
     """Insert simulation results into the Output table.
     
     Args:
@@ -280,6 +291,7 @@ def insert_output(db_file: str, sample_id: int, replicate_id: int, result_data: 
         sample_id (int): Unique identifier for the parameter sample.
         replicate_id (int): Identifier for the simulation replicate.
         result_data (bytes): Serialized simulation results data.
+        compress (bool): If True, compress data with zstd before storing (default True).
     
     Raises:
         RuntimeError: If output insertion fails due to database errors.
@@ -289,6 +301,9 @@ def insert_output(db_file: str, sample_id: int, replicate_id: int, result_data: 
         >>> data = pd.DataFrame({'time': [0, 1, 2], 'cells': [1, 2, 3]})
         >>> serialized_data = pickle.dumps(data)
         >>> insert_output('study.db', 0, 1, serialized_data)
+        >>> 
+        >>> # With compression
+        >>> insert_output('study.db', 0, 1, serialized_data, compress=True)
     """
     conn = None
     try:
@@ -297,8 +312,15 @@ def insert_output(db_file: str, sample_id: int, replicate_id: int, result_data: 
         cursor.execute("PRAGMA journal_mode=WAL")  # Enable Write-Ahead Logging for concurrent writes
         cursor.execute("PRAGMA synchronous=NORMAL")  # Balance durability with performance
         cursor.execute("PRAGMA busy_timeout=30000")  # 30 second busy timeout in milliseconds
+        
+        # Compress if requested
+        if compress:
+            insert_blob = compress_data(result_data)
+        else:
+            insert_blob = result_data
+        
         cursor.execute('INSERT INTO Output (SampleID, ReplicateID, Data) VALUES (?, ?, ?)',
-                       (sample_id, int(replicate_id), sqlite3.Binary(result_data)))
+                       (sample_id, int(replicate_id), sqlite3.Binary(insert_blob)))
         conn.commit()
     except sqlite3.Error as e:
         raise RuntimeError(f"Error inserting output into the database: {e}")
@@ -310,7 +332,8 @@ def _disable_wal_mode(db_file: str) -> None:
     """Disable WAL mode and truncate WAL/SHM files if possible.
 
     This function runs a WAL checkpoint and switches the journal mode back to
-    DELETE. It only succeeds if no other connections are open.
+    DELETE, then explicitly removes the WAL/SHM files from the filesystem.
+    It only succeeds if no other connections are open.
 
     Args:
         db_file (str): Path to the SQLite database file.
@@ -328,6 +351,20 @@ def _disable_wal_mode(db_file: str) -> None:
         raise RuntimeError(f"Error disabling WAL mode: {e}")
     finally:
         conn.close()
+    
+    # Explicitly remove WAL and SHM files if they exist
+    wal_file = f"{db_file}-wal"
+    shm_file = f"{db_file}-shm"
+    try:
+        if os.path.exists(wal_file):
+            os.remove(wal_file)
+        if os.path.exists(shm_file):
+            os.remove(shm_file)
+    except OSError as e:
+        # Log warning but don't fail - files might be in use
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Could not remove WAL/SHM files: {e}")
 
 def load_metadata(db_file: str) -> pd.DataFrame:
     """Load metadata from the database.

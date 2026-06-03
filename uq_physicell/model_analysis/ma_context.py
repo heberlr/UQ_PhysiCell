@@ -25,6 +25,7 @@ except ImportError:
 from uq_physicell import PhysiCell_Model
 from .samplers import run_local_sampler, run_global_sampler
 from ..utils.model_wrapper import run_replicate, run_replicate_serializable
+from ..utils.sumstats import _convert_qoi_function_to_string, recreate_qoi_functions
 from ..database.ma_db import create_structure, insert_metadata, insert_param_space, insert_qois, insert_samples, insert_output, check_simulations_db, _disable_wal_mode
 
 
@@ -71,19 +72,50 @@ class ModelAnalysisContext:
             summary_function=None,
             logger: logging.Logger=None):
         self.db_path = db_path
-        self.params_dict = params_info  # Dictionary with parameter names, ref value, ranges, and perturbations.
-        self.qois_dict = qois_info
+        self.params_dict = params_info
+
+        # Accept model_config as (ini_path, key) tuple or {'ini_path': ..., 'struc_name': ...} dict
+        if isinstance(model_config, (tuple, list)):
+            model_config = {'ini_path': model_config[0], 'struc_name': model_config[1]}
+
+        # Check free variables before converting to strings — Python's eval() is lazy
+        # and only detects missing names at call time, not at lambda-creation time.
+        # co_freevars reveals closure references that will fail in worker processes.
+        for qoi_name, func in qois_info.items():
+            if callable(func) and hasattr(func, '__code__'):
+                unresolved = set(func.__code__.co_freevars) - set(qoi_def.keys())
+                if unresolved:
+                    raise ValueError(
+                        f"QoI '{qoi_name}': lambda closes over {sorted(unresolved)} which "
+                        f"cannot be serialized for multiprocessing. Pass via "
+                        f"qoi_def={{name: object}} in ModelAnalysisContext."
+                    )
+
+        # QoI functions are stored as source strings so they can be pickled across processes
+        self.qois_dict = {key: _convert_qoi_function_to_string(value, key) if not isinstance(value, str) else value for key, value in qois_info.items()}
         self.qoi_def = qoi_def
-        self.parallel_method = parallel_method # inter-process (single node) or inter-node (mpi)
+
+        # Secondary check: verify string-form QoIs can be eval'd in the restricted namespace
+        if self.qois_dict:
+            try:
+                recreate_qoi_functions(self.qois_dict, self.qoi_def)
+            except Exception as e:
+                raise ValueError(
+                    f"A QoI function cannot be serialized for multiprocessing. "
+                    f"If it closes over an external variable or function, pass it via "
+                    f"qoi_def={{name: object}} in ModelAnalysisContext. Details: {e}"
+                ) from None
+
+        self.parallel_method = parallel_method
         self.num_workers = num_workers
         self.summary_function = summary_function
         self.logger = logger if logger is not None else logging.getLogger(__name__)
-        
+
         # Initialize cancellation flag and process tracking
         self._cancellation_requested = False
         self.futures = []
         self.model = None  # Will be set in run_simulations
-        
+
         # Initialize metadata for database
         self.dic_metadata = {
             'Sampler': sampler,
@@ -103,15 +135,86 @@ class ModelAnalysisContext:
         else:
             raise ValueError("Invalid parallel_method. Use 'inter-node' for MPI, 'inter-process' for futures, or 'serial' for single process.") 
     
+    _GLOBAL_SAMPLERS = frozenset({
+        'Sobol', 'Latin hypercube sampling (LHS)', 'Fast',
+        'Fractional Factorial', 'Finite Difference',
+    })
+
+    def _validate_params_for_sampler(self):
+        """Check that params_info contains the fields required by the chosen sampler
+        and warn about fields that will be silently ignored."""
+        sampler = self.dic_metadata['Sampler']
+
+        if sampler in self._GLOBAL_SAMPLERS:
+            for param, props in self.params_dict.items():
+                missing = [f for f in ('lower_bound', 'upper_bound')
+                           if props.get(f) is None]
+                if missing:
+                    raise ValueError(
+                        f"Parameter '{param}' is missing {missing} required by "
+                        f"sampler='{sampler}'. Global samplers use only "
+                        f"'lower_bound' and 'upper_bound' for sampling."
+                    )
+                if props.get('perturbation') is not None:
+                    self.logger.warning(
+                        f"Parameter '{param}': 'perturbation' is not used by "
+                        f"sampler='{sampler}' and will be ignored — only "
+                        f"'lower_bound' and 'upper_bound' affect global sampling."
+                    )
+
+        elif sampler == 'OAT':
+            for param, props in self.params_dict.items():
+                if props.get('ref_value') is None:
+                    raise ValueError(
+                        f"Parameter '{param}' is missing 'ref_value' required by OAT sampling."
+                    )
+                is_bool = props.get('type') == 'bool'
+                if not is_bool and props.get('perturbation') is None:
+                    raise ValueError(
+                        f"Parameter '{param}' is missing 'perturbation' required by OAT sampling. "
+                        f"Provide a list of percentage values, e.g. [1.0, 5.0, 10.0]."
+                    )
+                for unused in ('lower_bound', 'upper_bound'):
+                    if props.get(unused) is not None:
+                        self.logger.warning(
+                            f"Parameter '{param}': '{unused}' is not used by OAT sampling "
+                            f"(only 'ref_value' and 'perturbation' are used) and will be ignored."
+                        )
+
     def generate_samples(self, N: int = None, M: int = 4, seed: int = 42):
+        self._validate_params_for_sampler()
         if (self.dic_metadata['Sampler'] == 'OAT'):
             self.dic_samples = run_local_sampler(self.params_dict, self.dic_metadata['Sampler'])
         elif (self.dic_metadata['Sampler'] != 'User-defined'):
             self.dic_samples = run_global_sampler(self.params_dict, self.dic_metadata['Sampler'], N, M, seed)
 
+    def set_samples(self, samples):
+        """Set user-defined parameter combinations for the 'User-defined' sampler.
+
+        Args:
+            samples: dict mapping integer sample IDs to parameter dicts,
+                e.g. {0: {'param1': 1.0, 'param2': 2.0}, 1: {'param1': 1.5, 'param2': 3.0}}
+                or a list of parameter dicts (IDs are assigned automatically starting from 0),
+                e.g. [{'param1': 1.0}, {'param1': 1.5}]
+        """
+        if isinstance(samples, list):
+            self.dic_samples = {i: s for i, s in enumerate(samples)}
+        else:
+            self.dic_samples = samples
+
+    def run(self):
+        """Run simulations — convenience alias for ``run_simulations(context)``.
+
+        Allows the fluent pattern::
+
+            context.generate_samples(N=8)
+            context.run()
+        """
+        run_simulations(self)
+
     def cancelled(self):
         """Check if cancellation has been requested.
-        
+
         Returns:
             bool: True if cancellation was requested, False otherwise
         """
@@ -164,10 +267,10 @@ def run_simulations(context: ModelAnalysisContext):
         ImportError: If required parallelization libraries are missing.
     
     Note:
-        This function handles three execution modes:
-        - Serial: Single-threaded execution for small analyses
-        - Inter-process: Multi-processing on a single node using concurrent.futures
-        - Inter-node: Distributed execution across multiple nodes using MPI
+        This function handles three execution modes: 
+            - Serial: Single-threaded execution for small analyses
+            - Inter-process: Multi-processing on a single node using concurrent.futures
+            - Inter-node: Distributed execution across multiple nodes using MPI
     """
     # Only set up signal handlers if we're in the main thread of the main interpreter
     if threading.current_thread() is threading.main_thread():
