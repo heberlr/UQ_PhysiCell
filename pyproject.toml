@@ -17,7 +17,7 @@
 # 6. python -m build --sdist  # make source distribution
 # 7. python -m build --wheel  # make binary distribution python wheel
 # 8. python -m twine upload dist/* --verbose # publising python package
-# 9. Change the badge of pypi on README.md https://badge.fury.io/py/uq-physicell.svg?updated=xxxxxxxx
+# 9. Change the badge of pypi on README.md https://badge.fury.io/py/uq-physicell.svg?updated=xxxxxxxx (test the preview, before to push)
 # 10. Pull request from dev to main
 # Main branch
 # 11. Create the release tag (make sure the release tag is vx.x.x to match with GitHub link from documentation)
