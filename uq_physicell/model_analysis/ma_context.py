@@ -92,11 +92,11 @@ class ModelAnalysisContext:
                     )
 
         # QoI functions are stored as source strings so they can be pickled across processes
-        self.qois_dict = {key: _convert_qoi_function_to_string(value, key) if not isinstance(value, str) else value for key, value in qois_info.items()}
+        self.qois_dict = {key: _convert_qoi_function_to_string(value, key) if not isinstance(value, (str, type(None))) else value for key, value in qois_info.items()}
         self.qoi_def = qoi_def
 
-        # Secondary check: verify string-form QoIs can be eval'd in the restricted namespace
-        if self.qois_dict:
+        # Secondary check: verify string-form QoIs can be eval'd in the restricted namespace (no None values: particular case with functions defined on python scriipt)
+        if self.qois_dict and any(self.qois_dict.values()):
             try:
                 recreate_qoi_functions(self.qois_dict, self.qoi_def)
             except Exception as e:
