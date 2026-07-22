@@ -98,3 +98,20 @@ def _alter_table_add_column(db_file:str, table_name:str, new_column_name:str, co
     cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {new_column_name} {column_type} DEFAULT ''")
     conn.commit()
     conn.close()
+
+def download_file(file_name, base_url="https://zenodo.org/records/21496966/files/", custom_url=None):
+    """
+    Download file from url_base by default or from a custom url if provided. If the file already exists, it will not be downloaded again.
+    Parameters:
+    - file_name: Name of the file to download.
+    - base_url: Base URL to download the file from. Defaults to "https://zenodo.org/records/21496966/files/".
+    - custom_url: Custom URL to download the file from. If provided, this will override the base_url.
+    """
+    import urllib.request, os
+    if not os.path.exists(file_name):
+        if custom_url is not None:
+            url_path = custom_url
+        else:
+            url_path = base_url + file_name
+        print(f"Downloading {file_name} from {url_path} ...")
+        urllib.request.urlretrieve(url_path, file_name)
