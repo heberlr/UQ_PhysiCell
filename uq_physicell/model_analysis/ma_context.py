@@ -15,11 +15,13 @@ try:
     futures_available = True
 except ImportError:
     futures_available = False
+mpi_import_error = None
 try:
     from mpi4py import MPI
     mpi_available = True
-except ImportError:
+except Exception as exc:
     mpi_available = False
+    mpi_import_error = exc
 
 # My local modules
 from uq_physicell import PhysiCell_Model
@@ -92,11 +94,11 @@ class ModelAnalysisContext:
                     )
 
         # QoI functions are stored as source strings so they can be pickled across processes
-        self.qois_dict = {key: _convert_qoi_function_to_string(value, key) if not isinstance(value, (str, type(None))) else value for key, value in qois_info.items()}
+        self.qois_dict = {key: _convert_qoi_function_to_string(value, key) if not isinstance(value, str) else value for key, value in qois_info.items()}
         self.qoi_def = qoi_def
 
-        # Secondary check: verify string-form QoIs can be eval'd in the restricted namespace (no None values: particular case with functions defined on python scriipt)
-        if self.qois_dict and any(self.qois_dict.values()):
+        # Secondary check: verify string-form QoIs can be eval'd in the restricted namespace
+        if self.qois_dict:
             try:
                 recreate_qoi_functions(self.qois_dict, self.qoi_def)
             except Exception as e:
@@ -126,7 +128,12 @@ class ModelAnalysisContext:
         # Validation of the selected parallelization method
         if self.parallel_method == 'inter-node':
             if not mpi_available:
-                raise ImportError("mpi4py is not available. Please install mpi4py or set parallel_method='inter-process'.")
+                details = f" ({mpi_import_error})" if mpi_import_error else ""
+                raise ImportError(
+                    "MPI support is unavailable. Ensure an MPI runtime is installed "
+                    "(e.g., Open MPI/MPICH) and mpi4py is built against it, or set "
+                    f"parallel_method='inter-process'.{details}"
+                )
         elif self.parallel_method == 'inter-process':
             if not futures_available:
                 raise ImportError("concurrent.futures is not available. Please install futures or set parallel_method='inter-node'.")
