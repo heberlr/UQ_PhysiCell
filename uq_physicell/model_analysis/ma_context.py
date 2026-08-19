@@ -314,6 +314,7 @@ def run_simulations(context: ModelAnalysisContext):
         PhysiCellModel = PhysiCell_Model(context.dic_metadata['IniFilePath'], context.dic_metadata['StrucName'])
         # Store the model in the context for cancellation support
         context.model = PhysiCellModel
+        config_fingerprint = PhysiCellModel.build_effective_config_fingerprint()
     except Exception as e:
         context.logger.error(f"Error initializing PhysiCell model: {e}")
         raise
@@ -347,7 +348,17 @@ def run_simulations(context: ModelAnalysisContext):
             # Insert metadata
             context.logger.info(f"Inserting metadata, parameter space, and QoIs into the database")
             try:
-                insert_metadata(context.db_path, context.dic_metadata['Sampler'], context.dic_metadata['IniFilePath'], context.dic_metadata['StrucName'])
+                insert_metadata(
+                    context.db_path,
+                    context.dic_metadata['Sampler'],
+                    context.dic_metadata['IniFilePath'],
+                    context.dic_metadata['StrucName'],
+                    ini_hash=config_fingerprint['ini_file_hash'],
+                    xml_hash=config_fingerprint['xml_file_hash'],
+                    rules_hash=config_fingerprint['rules_file_hash'],
+                    structure_config_hash=config_fingerprint['structure_config_hash'],
+                    effective_run_hash=config_fingerprint['effective_run_hash'],
+                )
                 insert_param_space(context.db_path, context.params_dict)
                 insert_qois(context.db_path, context.qois_dict)
             except Exception as e:
@@ -439,6 +450,10 @@ def run_simulations(context: ModelAnalysisContext):
                             context.logger.info(f"Writing to the database for Sample: {sample_id}, Replicate: {replicate_id}, Result size: {sys.getsizeof(result_data)/1024:.2f} KB")
                             try:
                                 insert_output(context.db_path, sample_id, replicate_id, result_data)
+                                # Drop the reference now that the result is durably written — Future.result()
+                                # caches its return value forever, so leaving it in context.futures keeps the
+                                # full (uncompressed) result blob resident for the entire context's lifetime.
+                                context.futures.remove(future_done)
                             except Exception as e:
                                 context.logger.error(f"Error writing to the database: {e}")
                         except TimeoutError:
