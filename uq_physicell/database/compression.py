@@ -157,7 +157,12 @@ def migrate_to_zstd(input_db: str, output_db: str, verbose: bool = True) -> dict
                 output_db,
                 metadata_row.get('Sampler', ''),
                 metadata_row.get('Ini_File_Path', ''),
-                metadata_row.get('StructureName', '')
+                metadata_row.get('StructureName', ''),
+                ini_hash=metadata_row.get('Ini_Hash', None),
+                xml_hash=metadata_row.get('XML_Hash', None),
+                rules_hash=metadata_row.get('Rules_Hash', None),
+                structure_config_hash=metadata_row.get('Structure_Config_Hash', None),
+                effective_run_hash=metadata_row.get('Effective_Run_Hash', None),
             )
         
         # Convert DataFrame params to dict format for insert_param_space
