@@ -270,6 +270,11 @@ def recreate_qoi_functions(qoi_functions:dict, qoi_def:dict={}) -> dict:
     """
     recreated_qoi_funcs = {}
     for qoi_name, func_str in qoi_functions.items():
+        if func_str is None:
+            # Placeholder QoI (name registered but no function, e.g. a custom
+            # summary_function computes it directly) — nothing to recreate.
+            recreated_qoi_funcs[qoi_name] = None
+            continue
         try:
             if callable(func_str):
                 signature = inspect.signature(func_str)
