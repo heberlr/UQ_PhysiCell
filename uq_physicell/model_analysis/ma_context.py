@@ -93,8 +93,13 @@ class ModelAnalysisContext:
                         f"qoi_def={{name: object}} in ModelAnalysisContext."
                     )
 
-        # QoI functions are stored as source strings so they can be pickled across processes
-        self.qois_dict = {key: _convert_qoi_function_to_string(value, key) if not isinstance(value, str) else value for key, value in qois_info.items()}
+        # QoI functions are stored as source strings so they can be pickled across processes.
+        # A value of None is a valid placeholder (e.g. when a custom summary_function computes
+        # the QoIs directly) and is passed through as-is.
+        self.qois_dict = {
+            key: value if value is None or isinstance(value, str) else _convert_qoi_function_to_string(value, key)
+            for key, value in qois_info.items()
+        }
         self.qoi_def = qoi_def
 
         # Secondary check: verify string-form QoIs can be eval'd in the restricted namespace
