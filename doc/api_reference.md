@@ -48,6 +48,14 @@ Tools for sensitivity analysis, parameter sampling, and model analysis.
    :undoc-members:
 ```
 
+### Visualization
+
+```{eval-rst}
+.. automodule:: uq_physicell.model_analysis.visualization
+   :members:
+   :undoc-members:
+```
+
 ## Bayesian Optimization Module
 
 Multi-objective Bayesian optimization for model calibration.
@@ -72,6 +80,14 @@ Install them with: `pip install botorch gpytorch torch`
    :undoc-members:
 ```
 
+### Utils
+
+```{eval-rst}
+.. automodule:: uq_physicell.bo.utils
+   :members:
+   :undoc-members:
+```
+
 ## Approximate Bayesian Computation Module
 
 ```{eval-rst}
@@ -86,6 +102,15 @@ Install them with: `pip install botorch gpytorch torch`
 The Approximate Bayesian Computation module requires additional dependency (pyabc).
 Install them with: `pip install pyabc`
 ```
+
+### Utils
+
+```{eval-rst}
+.. automodule:: uq_physicell.abc.utils
+   :members:
+   :undoc-members:
+```
+
 ## Database
 ### Model Analysis
 ```{eval-rst}
@@ -97,6 +122,20 @@ Install them with: `pip install pyabc`
 ### Bayesian Optimization
 ```{eval-rst}
 .. automodule:: uq_physicell.database.bo_db
+   :members:
+   :undoc-members:
+```
+
+### Utils
+```{eval-rst}
+.. automodule:: uq_physicell.database.utils
+   :members:
+   :undoc-members:
+```
+
+### Compression
+```{eval-rst}
+.. automodule:: uq_physicell.database.compression
    :members:
    :undoc-members:
 ```
