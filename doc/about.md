@@ -2,8 +2,9 @@
 
 UQ-PhysiCell is a comprehensive framework for performing uncertainty quantification and parameter calibration of PhysiCell models. It provides sophisticated tools for model analysis, calibration, and model selection.
 
-## Quick Start
-The package uses an INI configuration file to define one or more model structures for experiments. For each model structure you should specify the PhysiCell executable path, the XML configuration file, the number of replicates, and which parameters the framework should change during simulations.
+## Describing Your Model
+
+Every workflow — sensitivity analysis, calibration, or a single one-off run — starts from the same thing: an INI configuration file that describes one or more model *structures*. For each structure you specify the PhysiCell executable path, the XML configuration file, the number of replicates, and which parameters the framework is allowed to change during simulations.
 
 The configuration supports the following (examples):
 
@@ -32,7 +33,39 @@ parameters_rules = {
     'epithelial,virus,increases,transform to epithelial_infected,saturation': [None, 'epi2infected_sat'], 
     'epithelial,virus,increases,transform to epithelial_infected,half_max': [None, 'epi2infected_hfm']}
 ```
-You can initialize the model structure, print information, and run a simulation as follows:
+
+## Quick Start: Context Objects
+
+Once you have a configuration file, most work happens through one of three high-level *context* objects. Each one takes your `model_config` (the `.ini` path plus the structure name) together with the parameters/QoIs/search space relevant to the task, and handles sampling, running simulations (serially, in multiple processes, or across MPI nodes — see {doc}`model_analysis`), and storing everything in a SQLite database for later analysis and plotting:
+
+- **`ModelAnalysisContext`** (`uq_physicell.model_analysis`) — global/local sensitivity analysis and general parameter-space exploration. See {doc}`model_analysis` for a worked example.
+- **`CalibrationContext`** (`uq_physicell.bo`) — calibration via multi-objective Bayesian Optimization. See {ref}`Bayesian Optimization <bayesian-optimization>` for a worked example.
+- **`CalibrationContext`** (`uq_physicell.abc`) — calibration via Approximate Bayesian Computation (ABC-SMC). See {ref}`Approximate Bayesian Computation (ABC) <approximate-bayesian-computation-abc>` for a worked example.
+
+For example, running a small Sobol sensitivity analysis:
+```python
+from uq_physicell.model_analysis import ModelAnalysisContext
+
+model_config = {"ini_path": "uq_pc_struc.ini", "struc_name": "Model_struc"}
+params_info = {
+    "mac_phag_rate_infected": {"lower_bound": 0.7, "upper_bound": 1.5},
+    "mac_motility_bias":      {"lower_bound": 0.0, "upper_bound": 1.0},
+}
+qoi_funcs = {
+    "epithelial_live": lambda df_cell: len(df_cell[df_cell['dead'] == False]),
+}
+
+context = ModelAnalysisContext("results.db", model_config, "Sobol", params_info, qoi_funcs, num_workers=8)
+context.generate_samples(N=8)
+context.run()
+```
+
+See {doc}`installation` for the extras (`bo`, `abc`, `mpi`, ...) each of these paths needs beyond the base install.
+
+## Advanced: Running a Single Simulation Directly
+
+The context objects above are built on top of `PhysiCell_Model`, the lower-level class that owns one model structure and knows how to generate its input files and run a single simulation. Most users won't need it directly, but it's there if you want fine-grained control — for example, to drive PhysiCell from your own sampling loop or optimizer rather than one of the built-in contexts.
+
 ```python
 from uq_physicell import PhysiCell_Model
 
