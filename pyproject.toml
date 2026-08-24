@@ -10,17 +10,19 @@
 # 1. Run bash doc/rebuild_docs.sh --clean # Update version on documentation
 # 2. Commit and push the changes
 # 3. Create a PR to development branch from your branch
+# 4. Merge the PR into development
 # Development branch
-# 4. Check if rebuild the documentation in : https://app.readthedocs.org/projects/uq-physicell/
+# 5. Check if rebuild the documentation in : https://app.readthedocs.org/projects/uq-physicell/
 # Prepare to update pypi version
-# 5. rm -r dist # clean previous distribution
-# 6. python -m build --sdist  # make source distribution
-# 7. python -m build --wheel  # make binary distribution python wheel
-# 8. python -m twine upload dist/* --verbose # publising python package
-# 9. Change the badge of pypi on README.md https://badge.fury.io/py/uq-physicell.svg?updated=xxxxxxxx (test the preview, before to push)
-# 10. Pull request from dev to main
+# 6. rm -r dist # clean previous distribution
+# 7. python -m build --sdist  # make source distribution
+# 8. python -m build --wheel  # make binary distribution python wheel
+# 9. python -m twine upload dist/* --verbose # publising python package
+# 10. Change the badge of pypi on README.md https://badge.fury.io/py/uq-physicell.svg?updated=xxxxxxxx (test the preview, before to push), then commit and push the change
+# 11. Pull request from dev to main
+# 12. Merge the PR into main
 # Main branch
-# 11. Create the release tag (make sure the release tag is vx.x.x to match with GitHub link from documentation)
+# 13. Create the release tag (make sure the release tag is vx.x.x to match with GitHub link from documentation)
 
 
 ##### do not use conda env #######
