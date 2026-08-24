@@ -26,7 +26,15 @@ def convert_df_to_df_over_time(df_summary, selected_qoi):
     })
     return plot_data
 
-def plot_qoi_over_time(df_plot, selected_qoi, ax, plot_mcse_range=False):
+def get_mcse_legend_handles():
+    return [
+        Patch(facecolor='green', alpha=0.3, label='Excelent (<1%)'),
+        Patch(facecolor='blue', alpha=0.3, label='Acceptable ([1%,5%])'),
+        Patch(facecolor='yellow', alpha=0.3, label='Cautionary ([5%,10%])'),
+        Patch(facecolor='red', alpha=0.3, label='Unreliable (>10%)')
+    ]
+
+def plot_qoi_over_time(df_plot, selected_qoi, ax, plot_mcse_range=False, show_legend=True):
     # Prepare the data for seaborn
     if 'time' in df_plot.index.names:
         df_plot = df_plot.reset_index()
@@ -61,28 +69,29 @@ def plot_qoi_over_time(df_plot, selected_qoi, ax, plot_mcse_range=False):
     ax.set_xlabel("Time (min)")
     ax.set_ylabel(selected_qoi)
     # Add sample legend and, when requested, a dedicated MCSE legend outside the plot.
+    # Set show_legend=False to suppress per-axes legends, e.g. when combining them
+    # into a single shared legend for the whole figure.
     sample_legend = ax.get_legend()
     if sample_legend is not None:
-        ax.add_artist(sample_legend)
+        if show_legend:
+            ax.add_artist(sample_legend)
+        else:
+            sample_legend.remove()
 
     if plot_mcse_range:
-        mcse_handles = [
-            Patch(facecolor='green', alpha=0.3, label='Excelent (<1%)'),
-            Patch(facecolor='blue', alpha=0.3, label='Acceptable ([1%,5%])'),
-            Patch(facecolor='yellow', alpha=0.3, label='Cautionary ([5%,10%])'),
-            Patch(facecolor='red', alpha=0.3, label='Unreliable (>10%)')
-        ]
-        # Place MCSE legend below the plot, then call tight_layout to adjust figure
-        mcse_legend = ax.legend(
-            handles=mcse_handles,
-            title='Ranges of MCSE relative to mean',
-            loc='upper center',
-            bbox_to_anchor=(0.5, -0.15),
-            ncol=4,
-            fontsize=8,
-            frameon=True
-        )
-        ax.add_artist(mcse_legend)
+        mcse_handles = get_mcse_legend_handles()
+        if show_legend:
+            # Place MCSE legend below the plot, then call tight_layout to adjust figure
+            mcse_legend = ax.legend(
+                handles=mcse_handles,
+                title='Ranges of MCSE relative to mean',
+                loc='upper center',
+                bbox_to_anchor=(0.5, -0.15),
+                ncol=4,
+                fontsize=8,
+                frameon=True
+            )
+            ax.add_artist(mcse_legend)
 
 
 def plot_global_sa_results(param_names, sa_method, qoi_time_values, sa_results, selected_qoi, selected_sm, ax):

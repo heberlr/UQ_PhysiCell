@@ -27,7 +27,8 @@ from .visualization import (
     plot_qoi_over_time,
     plot_global_sa_results,
     plot_local_sa_results,
-    plot_cells_2D
+    plot_cells_2D,
+    get_mcse_legend_handles
 )
 
 from .utils import (
@@ -66,6 +67,7 @@ __all__ = [
     'plot_global_sa_results',
     'plot_local_sa_results',
     'plot_cells_2D',
+    'get_mcse_legend_handles',
     'mcds_list_to_qoi_df_for_sa',
     'mcds_list_to_qoi_df_for_calib',
     'mcds_list_to_qoi_df_long',
