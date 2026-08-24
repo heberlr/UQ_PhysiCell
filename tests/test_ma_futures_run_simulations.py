@@ -29,6 +29,16 @@ class MockPhysiCellModel:
     def info(self):
         return "MockPhysiCellModel info"
 
+    def build_effective_config_fingerprint(self):
+        """Fake fingerprint — the real one hashes files on disk, which this mock avoids."""
+        return {
+            "ini_file_hash": "mock_ini_hash",
+            "xml_file_hash": "mock_xml_hash",
+            "rules_file_hash": "mock_rules_hash",
+            "structure_config_hash": "mock_structure_hash",
+            "effective_run_hash": "mock_effective_hash",
+        }
+
 
 def mock_run_replicate_serializable(
     PhysiCellModel_conf, sample_id, replicate_id,

@@ -17,6 +17,8 @@ import time
 import copy
 import datetime
 import argparse
+import hashlib
+import json
 
 class PhysiCell_Model:
     """ A class to manage PhysiCell model configurations and executions.
@@ -311,6 +313,40 @@ class PhysiCell_Model:
                 info['runtime'] = (datetime.datetime.now() - info['start_time']).total_seconds()
         
         return self.active_processes 
+
+    def build_effective_config_fingerprint(self) -> dict:
+        """Build a stable fingerprint of the active run configuration.
+
+        The fingerprint is derived from:
+        - active structure section content from the INI file
+        - XML reference file content
+        - rules file content (if present)
+
+        Returns:
+            dict: A dictionary with component hashes and a combined effective hash.
+        """
+        ini_file_hash = _sha256_file(self.configFilePath)
+        xml_file_hash = _sha256_file(self.XML_RefPath)
+        rules_file_hash = _sha256_file(self.RULES_RefPath)
+
+        structure_config = _load_ini_section_as_dict(self.configFilePath, self.keyModel)
+        structure_config_hash = _hash_canonical_dict(structure_config)
+
+        # Canonical payload used as the source of truth for compatibility checks.
+        effective_payload = {
+            "structure_name": self.keyModel,
+            "structure_config_hash": structure_config_hash,
+            "xml_file_hash": xml_file_hash,
+            "rules_file_hash": rules_file_hash,
+        }
+
+        return {
+            "ini_file_hash": ini_file_hash,
+            "xml_file_hash": xml_file_hash,
+            "rules_file_hash": rules_file_hash,
+            "structure_config_hash": structure_config_hash,
+            "effective_run_hash": _hash_canonical_dict(effective_payload),
+        }
     
     def remove_io_folders(self):
         if os.path.exists(self.input_folder):
@@ -345,6 +381,30 @@ def _check_parameters_input(model: PhysiCell_Model, parameters_input_xml: Union[
             raise ValueError(f"Error: number of RULES parameters defined input: {parameters_input_rules.shape[0]} are different from keys defined in {model.configFilePath}: {len(model.parameters_rules_variable.keys())}.")
     else:
         raise ValueError("Error: RULES parameters input need to be a numpy array 1D or a dictionary.")
+
+def _sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+def _sha256_file(file_path: Union[str, None]) -> Union[str, None]:
+    if not file_path:
+        return None
+    if not os.path.exists(file_path):
+        raise ValueError(f"Error! File {file_path} not found for hashing.")
+    with open(file_path, "rb") as fd:
+        return _sha256_bytes(fd.read())
+
+def _hash_canonical_dict(payload: dict) -> str:
+    canonical_json = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return _sha256_bytes(canonical_json.encode("utf-8"))
+
+def _load_ini_section_as_dict(config_file_path: str, section: str) -> dict:
+    parser = configparser.ConfigParser()
+    with open(config_file_path) as fd:
+        parser.read_file(fd)
+    if section not in parser:
+        raise ValueError(f"Error! Section '{section}' not found in {config_file_path}.")
+    # Keep the active structure only; unrelated sections should not affect compatibility.
+    return {key: parser[section][key] for key in parser[section]}
 
 def _setup_model_input(model: PhysiCell_Model, SampleID: int, ReplicateID: int, parameters_input: Union[np.ndarray, dict], parameters_rules_input: Union[np.ndarray, dict]) -> None:
     try:

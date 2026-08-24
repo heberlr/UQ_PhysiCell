@@ -106,7 +106,12 @@ def create_structure(db_file: str):
                 Ini_File_Path TEXT,
                 StructureName TEXT,
                 uq_physicell_version TEXT,
-                pcdl_version TEXT
+                pcdl_version TEXT,
+                Ini_Hash TEXT,
+                XML_Hash TEXT,
+                Rules_Hash TEXT,
+                Structure_Config_Hash TEXT,
+                Effective_Run_Hash TEXT
             )
         ''')
         # Create ParameterSpace table
@@ -147,7 +152,17 @@ def create_structure(db_file: str):
     except sqlite3.Error as e:
         raise RuntimeError(f"Error generating tables: {e}")
 
-def insert_metadata(db_file: str, sampler: str, ini_file_path: str, strucName: str):
+def insert_metadata(
+    db_file: str,
+    sampler: str,
+    ini_file_path: str,
+    strucName: str,
+    ini_hash: str = None,
+    xml_hash: str = None,
+    rules_hash: str = None,
+    structure_config_hash: str = None,
+    effective_run_hash: str = None
+):
     """Insert metadata information into the Metadata table.
     
     Args:
@@ -165,10 +180,31 @@ def insert_metadata(db_file: str, sampler: str, ini_file_path: str, strucName: s
     conn = sqlite3.connect(db_file)
     cursor = conn.cursor()
     try:
-        cursor.execute('''
-            INSERT INTO Metadata (Sampler, Ini_File_Path, StructureName, uq_physicell_version, pcdl_version)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (sampler, ini_file_path, strucName, uq_physicell_version, pcdl_version))
+        cursor.execute("PRAGMA table_info(Metadata)")
+        metadata_columns = {row[1] for row in cursor.fetchall()}
+
+        row_data = {
+            'Sampler': sampler,
+            'Ini_File_Path': ini_file_path,
+            'StructureName': strucName,
+            'uq_physicell_version': uq_physicell_version,
+            'pcdl_version': pcdl_version,
+            'Ini_Hash': ini_hash,
+            'XML_Hash': xml_hash,
+            'Rules_Hash': rules_hash,
+            'Structure_Config_Hash': structure_config_hash,
+            'Effective_Run_Hash': effective_run_hash
+        }
+
+        insert_columns = [col for col in row_data.keys() if col in metadata_columns]
+        insert_values = [row_data[col] for col in insert_columns]
+        placeholders = ', '.join(['?'] * len(insert_columns))
+        columns_sql = ', '.join(insert_columns)
+
+        cursor.execute(
+            f"INSERT INTO Metadata ({columns_sql}) VALUES ({placeholders})",
+            insert_values,
+        )
         conn.commit()
         conn.close()
     except sqlite3.Error as e:
@@ -322,6 +358,7 @@ def insert_output(db_file: str, sample_id: int, replicate_id: int, result_data: 
         cursor.execute('INSERT INTO Output (SampleID, ReplicateID, Data) VALUES (?, ?, ?)',
                        (sample_id, int(replicate_id), sqlite3.Binary(insert_blob)))
         conn.commit()
+
     except sqlite3.Error as e:
         raise RuntimeError(f"Error inserting output into the database: {e}")
     finally:
@@ -767,8 +804,25 @@ def check_simulations_db(PhysiCellModel: PhysiCell_Model, sampler: str, param_di
             if df_metadata[key].values[0] != expected:
                 raise ValueError(f"{key} mismatch. Expected: {expected}, Found: {df_metadata[key].values[0]}.")
 
-        # Check if ParameterSpace matches the expected values
+        # If effective hash metadata exists, enforce compatibility for restart safety.
+        if 'Effective_Run_Hash' in df_metadata.columns:
+            stored_effective_hash = df_metadata['Effective_Run_Hash'].values[0]
+            if stored_effective_hash:
+                current_fingerprint = PhysiCellModel.build_effective_config_fingerprint()
+                current_effective_hash = current_fingerprint['effective_run_hash']
+                if stored_effective_hash != current_effective_hash:
+                    raise ValueError(
+                        "Effective run configuration hash mismatch. "
+                        f"Expected: {stored_effective_hash}, Found: {current_effective_hash}."
+                    )
+
+        # Identify missing samples before checking values to avoid KeyError in partial DBs.
+        missing_samples = [sample_id for sample_id in dic_samples.keys() if sample_id not in set(dic_samples_db.keys())]
+
+        # Check if ParameterSpace matches the expected values for samples that already exist.
         for sample_id, params in dic_samples.items():
+            if sample_id in missing_samples:
+                continue
             # Use set items comparison to ignore order of keys
             if set(dic_samples_db[sample_id].items()) != set(params.items()):
                 raise ValueError(f"ParameterSpace mismatch for SampleID {sample_id}. Expected: {params}, Found: {dic_samples_db[sample_id]}.")
@@ -780,18 +834,13 @@ def check_simulations_db(PhysiCellModel: PhysiCell_Model, sampler: str, param_di
             if df_qois['QOI_Function'].to_list() != list(qois_dic.values()):
                 raise ValueError(f"QoI Functions mismatch. Expected: {list(qois_dic.values())}, Found: {df_qois['QOI_Function'].to_list()}.")
 
-        # Check for missing samples
-        missing_samples = [sample_id for sample_id in dic_samples.keys() if sample_id not in set(dic_samples_db.keys())]
         # print(f"Missing samples: {missing_samples}")
         
         # Add missing samples to the database
         if missing_samples:
             print(f"Adding {len(missing_samples)} missing samples to the database.")
-            conn = sqlite3.connect(db_file)
-            cursor = conn.cursor()
-            insert_samples(cursor, dic_samples, missing_samples)
-            conn.commit()
-            conn.close()
+            missing_samples_dict = {sample_id: dic_samples[sample_id] for sample_id in missing_samples}
+            insert_samples(db_file, missing_samples_dict)
 
         # Check for missing replicates
         completed_replicates = df_data_unserialized.groupby("SampleID")["ReplicateID"].apply(set).to_dict()
