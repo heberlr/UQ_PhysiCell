@@ -27,7 +27,7 @@ from .visualization import (
     plot_qoi_over_time,
     plot_global_sa_results,
     plot_local_sa_results,
-    plot_cells_2D
+    plot_cells_2D,
 )
 
 from .utils import (

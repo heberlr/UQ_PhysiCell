@@ -15,11 +15,13 @@ try:
     futures_available = True
 except ImportError:
     futures_available = False
+mpi_import_error = None
 try:
     from mpi4py import MPI
     mpi_available = True
-except ImportError:
+except Exception as exc:
     mpi_available = False
+    mpi_import_error = exc
 
 # My local modules
 from uq_physicell import PhysiCell_Model
@@ -91,12 +93,17 @@ class ModelAnalysisContext:
                         f"qoi_def={{name: object}} in ModelAnalysisContext."
                     )
 
-        # QoI functions are stored as source strings so they can be pickled across processes
-        self.qois_dict = {key: _convert_qoi_function_to_string(value, key) if not isinstance(value, (str, type(None))) else value for key, value in qois_info.items()}
+        # QoI functions are stored as source strings so they can be pickled across processes.
+        # A value of None is a valid placeholder (e.g. when a custom summary_function computes
+        # the QoIs directly) and is passed through as-is.
+        self.qois_dict = {
+            key: value if value is None or isinstance(value, str) else _convert_qoi_function_to_string(value, key)
+            for key, value in qois_info.items()
+        }
         self.qoi_def = qoi_def
 
-        # Secondary check: verify string-form QoIs can be eval'd in the restricted namespace (no None values: particular case with functions defined on python scriipt)
-        if self.qois_dict and any(self.qois_dict.values()):
+        # Secondary check: verify string-form QoIs can be eval'd in the restricted namespace
+        if self.qois_dict:
             try:
                 recreate_qoi_functions(self.qois_dict, self.qoi_def)
             except Exception as e:
@@ -126,7 +133,12 @@ class ModelAnalysisContext:
         # Validation of the selected parallelization method
         if self.parallel_method == 'inter-node':
             if not mpi_available:
-                raise ImportError("mpi4py is not available. Please install mpi4py or set parallel_method='inter-process'.")
+                details = f" ({mpi_import_error})" if mpi_import_error else ""
+                raise ImportError(
+                    "MPI support is unavailable. Ensure an MPI runtime is installed "
+                    "(e.g., Open MPI/MPICH) and mpi4py is built against it, or set "
+                    f"parallel_method='inter-process'.{details}"
+                )
         elif self.parallel_method == 'inter-process':
             if not futures_available:
                 raise ImportError("concurrent.futures is not available. Please install futures or set parallel_method='inter-node'.")
@@ -307,6 +319,7 @@ def run_simulations(context: ModelAnalysisContext):
         PhysiCellModel = PhysiCell_Model(context.dic_metadata['IniFilePath'], context.dic_metadata['StrucName'])
         # Store the model in the context for cancellation support
         context.model = PhysiCellModel
+        config_fingerprint = PhysiCellModel.build_effective_config_fingerprint()
     except Exception as e:
         context.logger.error(f"Error initializing PhysiCell model: {e}")
         raise
@@ -340,7 +353,17 @@ def run_simulations(context: ModelAnalysisContext):
             # Insert metadata
             context.logger.info(f"Inserting metadata, parameter space, and QoIs into the database")
             try:
-                insert_metadata(context.db_path, context.dic_metadata['Sampler'], context.dic_metadata['IniFilePath'], context.dic_metadata['StrucName'])
+                insert_metadata(
+                    context.db_path,
+                    context.dic_metadata['Sampler'],
+                    context.dic_metadata['IniFilePath'],
+                    context.dic_metadata['StrucName'],
+                    ini_hash=config_fingerprint['ini_file_hash'],
+                    xml_hash=config_fingerprint['xml_file_hash'],
+                    rules_hash=config_fingerprint['rules_file_hash'],
+                    structure_config_hash=config_fingerprint['structure_config_hash'],
+                    effective_run_hash=config_fingerprint['effective_run_hash'],
+                )
                 insert_param_space(context.db_path, context.params_dict)
                 insert_qois(context.db_path, context.qois_dict)
             except Exception as e:
@@ -432,6 +455,10 @@ def run_simulations(context: ModelAnalysisContext):
                             context.logger.info(f"Writing to the database for Sample: {sample_id}, Replicate: {replicate_id}, Result size: {sys.getsizeof(result_data)/1024:.2f} KB")
                             try:
                                 insert_output(context.db_path, sample_id, replicate_id, result_data)
+                                # Drop the reference now that the result is durably written — Future.result()
+                                # caches its return value forever, so leaving it in context.futures keeps the
+                                # full (uncompressed) result blob resident for the entire context's lifetime.
+                                context.futures.remove(future_done)
                             except Exception as e:
                                 context.logger.error(f"Error writing to the database: {e}")
                         except TimeoutError:

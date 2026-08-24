@@ -6,6 +6,8 @@ UQ-PhysiCell requires Python 3.10 or later and the following dependencies:
 - [pcdl](https://github.com/elmbeech/physicelldataloader/tree/master)
 - [SALib](https://salib.readthedocs.io/en/latest/index.html)
 
+matplotlib, numpy, pandas, scipy, and seaborn are also installed automatically.
+
 ## Installation from PyPI
 
 We recommend using a virtual environment, such as [venv](https://docs.python.org/3/library/venv.html) or [conda](https://docs.conda.io/projects/conda/en/latest/user-guide/tasks/manage-environments.html).
@@ -29,14 +31,23 @@ pip install uq-physicell
 
 ## Additional Dependencies
 
-For Bayesian optimization features, install the optional dependencies:
+Some features depend on packages that are not installed by default. These are grouped into extras that can be installed with `pip install uq-physicell[<extra>]` (or `pip install -e .[<extra>]` from a source checkout):
+
+- `gui` — [PyQt5](https://pypi.org/project/PyQt5/), required to launch the {doc}`GUI <gui>`
+- `mpi` — [mpi4py](https://mpi4py.readthedocs.io/en/stable/), required for inter-node MPI execution (see {doc}`model_analysis`)
+- `bo` — [torch](https://pytorch.org/), [botorch](https://botorch.org/), and [gpytorch](https://gpytorch.ai/), required for {ref}`Bayesian Optimization <bayesian-optimization>`
+- `abc` — [pyabc](https://pyabc.readthedocs.io/en/latest/) and [dask](https://www.dask.org/), required for {ref}`Approximate Bayesian Computation <approximate-bayesian-computation-abc>`; `dask` is only needed if you select the `"dask"` ABC sampler (the default `"multicore"` sampler only needs `pyabc`)
+- `utils` — extra packages (e.g. [gudhi](https://gudhi.inria.fr/)) used by a few advanced, opt-in summary/QoI functions
+
+For example:
 ```bash
-pip install torch botorch gpytorch
+pip install uq-physicell[gui]
+pip install uq-physicell[bo,abc]
 ```
 
-For Aproximate Bayesian Computation:
+Or install everything at once:
 ```bash
-pip install pyabc
+pip install uq-physicell[all]
 ```
 
 ## Verification

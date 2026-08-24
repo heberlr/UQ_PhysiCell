@@ -20,19 +20,19 @@ Where:
 - $f_i(\theta)$ is the fitness value for the i-th quantity of interest (QoI), measuring agreement between model predictions and observed data
 - The goal is to find the Pareto-optimal set of parameters that maximizes agreement across all QoIs
 
-### 1. Parameter Space ($\Theta$)
+### Parameter Space ($\Theta$)
 The search space is defined by parameter bounds and types:
 - **Real parameters**: Continuous variables with lower and upper bounds
 - **Integer parameters**: Discrete variables with specified ranges
 - **Categorical parameters**: Discrete choices from predefined sets
 
-### 2. Quantities of Interest (QoIs)
+### Quantities of Interest (QoIs)
 QoIs are model outputs that correspond to experimental observables:
 - **Time series data**: Cell counts, concentrations, spatial metrics over time
 - **Aggregate metrics**: Final values, peak values, areas under curves
 - **Derived quantities**: Ratios, differences, or complex functions of raw outputs
 
-### 3. Distance Metrics
+### Distance Metrics
 The discrepancy between model predictions and observed data is quantified using distance metrics:
 
 - **Sum of Squared Differences** ($L_2^2$ norm): 
@@ -47,7 +47,7 @@ The discrepancy between model predictions and observed data is quantified using 
   $d(\text{QoI}, \text{Obs}) = \max_{i=1,...,n}|\text{QoI}_i - \text{Obs}_i|$
   Focuses on maximum deviation
 
-### 4. Fitness Functions
+### Fitness Functions
 Distance values are transformed into fitness values (to be maximized) using one of two methods:
 
 **Standard Transformation (default):**
@@ -67,6 +67,54 @@ Both transformations ensure:
 
 The exponential transformation provides steeper gradients for small distances, which can be beneficial when fine-tuning parameters near optimal values. Enable exponential transformation by setting `use_exponential_fitness: True` in the `bo_options`.
 
+### Example
+
+The entry point is `CalibrationContext` (from `uq_physicell.bo`), which pairs a parameter search space and observed data with the PhysiCell model, plus `run_bayesian_optimization` to drive the optimization loop:
+
+```python
+from uq_physicell.bo import CalibrationContext, run_bayesian_optimization
+
+model_config = {"ini_path": "uq_pc_struc.ini", "struc_name": "Model_struc_Calib"}
+
+# df_cell is the cell DataFrame pcdl builds from each simulation's output.
+qoi_functions = {
+    "epi_":         lambda df_cell: len(df_cell[df_cell['cell_type'] == 'epithelial']),
+    "epi_infected": lambda df_cell: len(df_cell[df_cell['cell_type'] == 'epithelial_infected']),
+}
+
+# Maps each QoI to the corresponding column in the observed-data CSV, plus the time column.
+obs_data_columns = {
+    "time":         "Time",
+    "epi_":         "Healthy Epithelial Cells",
+    "epi_infected": "Infected Epithelial Cells",
+}
+
+search_space = {
+    "mac_phag_rate_infected": {"type": "real", "lower_bound": 0.7, "upper_bound": 1.5},
+    "epi2infected_hfm":       {"type": "real", "lower_bound": 0.1, "upper_bound": 0.5},
+}
+
+bo_options = {
+    "num_initial_samples": 10,  # random evaluations before GP fitting starts
+    "num_iterations": 30,       # BO iterations after the initial samples
+}
+
+calib_context = CalibrationContext(
+    db_path="results.db",
+    obsData="observed_data.csv",
+    obsData_columns=obs_data_columns,
+    model_config=model_config,
+    qoi_functions=qoi_functions,
+    search_space=search_space,
+    bo_options=bo_options,
+)
+run_bayesian_optimization(calib_context)
+```
+
+Results (samples, GP models, Pareto front) are stored in `results.db` and can be reloaded with `uq_physicell.database.bo_db.load_structure`, then explored with the plotting helpers in `uq_physicell.bo.plots` (`plot_parameter_space`, `plot_qoi_param`, `plot_parameter_vs_fitness`) and the analysis helpers in `uq_physicell.bo.utils` (`analyze_pareto_results`, `get_observed_qoi`).
+
+**Full worked example:** {doc}`examples/virus-mac-new/ex7_Calib_BO`
+
 (approximate-bayesian-computation-abc)=
 ## Approximate Bayesian Computation (ABC)
 
@@ -83,6 +131,62 @@ Where:
 - $y_0$ is the observed data.
 - $\epsilon_t$ is the tolerance threshold at iteration $t$, which typically decreases as $t$ increases.
 - The goal is to obtain an approximation of the posterior distribution of parameters given the observational data $y_0$.
+
+### Example
+
+The entry point is `CalibrationContext` (from `uq_physicell.abc`), which pairs a prior, distance functions, and observed data with the PhysiCell model, plus `run_abc_calibration` to drive the ABC-SMC loop:
+
+```python
+from uq_physicell.abc import CalibrationContext, run_abc_calibration
+from pyabc import RV, Distribution
+import numpy as np
+
+model_config = {"ini_path": "uq_pc_struc.ini", "struc_name": "Model_struc_Calib"}
+
+qoi_functions = {
+    "epi_":         lambda df_cell: len(df_cell[df_cell['cell_type'] == 'epithelial']),
+    "epi_infected": lambda df_cell: len(df_cell[df_cell['cell_type'] == 'epithelial_infected']),
+}
+
+obs_data_columns = {
+    "time":         "Time",
+    "epi_":         "Healthy Epithelial Cells",
+    "epi_infected": "Infected Epithelial Cells",
+}
+
+def euclidean_distance_epi(data1, data2):
+    return np.sum((np.array(data1['epi_']) - np.array(data2['epi_'])) ** 2)
+
+distance_functions = {
+    "epi_": {"function": euclidean_distance_epi},
+}
+
+# Uniform prior: mac_phag_rate_infected ~ U[0.7, 1.5]
+prior = Distribution(mac_phag_rate_infected=RV("uniform", 0.7, 0.8))
+
+abc_options = {
+    "max_populations": 2,
+    "max_simulations": 100,
+    "sampler": "multicore",   # or "dask" — requires the `dask` package (see installation)
+    "num_workers": 6,
+}
+
+calib_context = CalibrationContext(
+    db_path="results.db",
+    obsData="observed_data.csv",
+    obsData_columns=obs_data_columns,
+    model_config=model_config,
+    qoi_functions=qoi_functions,
+    distance_functions=distance_functions,
+    prior=prior,
+    abc_options=abc_options,
+)
+history = run_abc_calibration(calib_context=calib_context)
+```
+
+`run_abc_calibration` returns the [pyabc](https://pyabc.readthedocs.io/en/latest/what.html) `History` object, which gives direct access to `pyabc.visualization` (posterior KDE matrices, epsilon schedules, etc.) in addition to the results stored in `results.db`.
+
+**Full worked example:** {doc}`examples/virus-mac-new/ex8_ABC_Calib`
 
 ## References
 
