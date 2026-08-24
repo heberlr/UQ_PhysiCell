@@ -54,11 +54,9 @@ keywords = [
 
 dependencies = [
     "matplotlib",
-    "mpi4py",
     "numpy",
     "pandas",
     "pcdl",
-    "pyqt5",
     "SALib",
     "scipy",
     "seaborn",
@@ -74,6 +72,14 @@ bo = [
     "botorch",
     "gpytorch",
     "torch",
+]
+
+gui = [
+    "pyqt5",
+]
+
+mpi = [
+    "mpi4py",
 ]
 
 docs = [
@@ -93,6 +99,8 @@ utils = [
 all = [
     "uq_physicell[abc]",
     "uq_physicell[bo]",
+    "uq_physicell[gui]",
+    "uq_physicell[mpi]",
     "uq_physicell[utils]",
 ]
 
