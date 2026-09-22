@@ -538,9 +538,11 @@ def qoi_func_relational_ph( df: pd.DataFrame, landmark_type: str, witness_type: 
     """
     Relational Persistent Homology using Dowker/Witness idea.
     A→B (A as vertices, B as witnesses) describes how B are arranged around A geometry.
+    This is a relational PH, which is different from the standard PH of a point cloud. 
+    This is useful for analyzing the spatial relationship between two different cell types in a 2D/3D biological context.
 
     Args:
-        df : DataFrame with columns ['position_x','position_y','cell_type']
+        df : DataFrame with columns ['position_x','position_y', 'position_z', 'radius', 'cell_type']
         landmark_type : cell type to use as landmarks (A)
         witness_type : cell type to use as witnesses (B)
         max_dim : PH dimension (0 or 1)
