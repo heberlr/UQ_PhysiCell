@@ -624,6 +624,8 @@ class TestQoiFuncRelationalPhGuards:
         df = pd.DataFrame({
             "position_x": [0.0, 1.0],
             "position_y": [0.0, 1.0],
+            "position_z": [0.0, 0.0],
+            "radius": [5.0, 5.0],
             "cell_type": ["B", "B"],
         })
         vec, diag = qoi_func_relational_ph(df, landmark_type="A", witness_type="B")
@@ -635,6 +637,8 @@ class TestQoiFuncRelationalPhGuards:
         df = pd.DataFrame({
             "position_x": [0.0, 1.0],
             "position_y": [0.0, 1.0],
+            "position_z": [0.0, 0.0],
+            "radius": [5.0, 5.0],
             "cell_type": ["A", "A"],
         })
         vec, diag = qoi_func_relational_ph(df, landmark_type="A", witness_type="B")
@@ -645,6 +649,8 @@ class TestQoiFuncRelationalPhGuards:
         df = pd.DataFrame({
             "position_x": [0.0, 1.0, 0.5, 0.6],
             "position_y": [0.0, 0.0, 1.0, 1.0],
+            "position_z": [0.0, 0.0, 0.0, 0.0],
+            "radius": [5.0, 5.0, 5.0, 5.0],
             "cell_type": ["A", "A", "B", "B"],
         })
         vec, diag = qoi_func_relational_ph(df, landmark_type="A", witness_type="B")
@@ -660,9 +666,12 @@ class TestQoiFuncRelationalPhComputation:
 
     def _make_df(self, seed=1, n_per_type=6):
         rng = np.random.default_rng(seed)
+        n = 2 * n_per_type
         return pd.DataFrame({
             "position_x": list(rng.random(n_per_type)) + list(rng.random(n_per_type)),
             "position_y": list(rng.random(n_per_type)) + list(rng.random(n_per_type)),
+            "position_z": [0.0] * n,
+            "radius": [0.02] * n,
             "cell_type": ["A"] * n_per_type + ["B"] * n_per_type,
         })
 
