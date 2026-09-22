@@ -1160,6 +1160,38 @@ def test_run_abc_calibration_final_persist_failure_logs_warning(tmp_path, caplog
     assert any("Could not persist calibration metadata" in r.message for r in caplog.records)
 
 
+def test_patch_pyabc_nan_particle_weight_guards_degenerate_weight():
+    """A proposed parameter landing far enough into a transition kernel's tail
+    can make both prior and transition density underflow to exactly 0.0,
+    producing a 0.0/0.0 = nan particle weight that (unpatched) crashes pyABC's
+    own population-weight-normalization assertion only after every simulation
+    in that population has already finished. The patch (applied automatically
+    on `import uq_physicell.abc`) must substitute 0.0 for any non-finite
+    weight instead, and leave normal weight computation untouched.
+    """
+    import numpy as np
+    import uq_physicell.abc  # noqa: F401 -- applies the patch as an import side effect
+    from pyabc.inference_util.inference_util import create_weight_function, _weight_function
+
+    assert getattr(_weight_function, "_uq_physicell_nan_guard", False)
+
+    # numpy-float 0/0 -> nan silently, the actual real-world failure mode
+    wf_nan = create_weight_function(prior_pdf=lambda m, t: np.float64(0.0), transition_pdf=lambda m, t: np.float64(0.0))
+    assert wf_nan(0, {"x": 1.0}, acceptance_weight=1.0) == 0.0
+
+    # plain-Python-float 0/0 raises ZeroDivisionError instead -- same guard applies
+    wf_zde = create_weight_function(prior_pdf=lambda m, t: 0.0, transition_pdf=lambda m, t: 0.0)
+    assert wf_zde(0, {"x": 1.0}, acceptance_weight=1.0) == 0.0
+
+    # nonzero / 0 -> inf, also guarded
+    wf_inf = create_weight_function(prior_pdf=lambda m, t: np.float64(2.0), transition_pdf=lambda m, t: np.float64(0.0))
+    assert wf_inf(0, {"x": 1.0}, acceptance_weight=1.0) == 0.0
+
+    # Non-degenerate weight computation is unaffected
+    wf_ok = create_weight_function(prior_pdf=lambda m, t: 2.0, transition_pdf=lambda m, t: 4.0)
+    assert wf_ok(0, {"x": 1.0}, acceptance_weight=1.0) == 0.5
+
+
 def main():
     """Run all tests."""
     print("🧪 Testing ABC CalibrationContext")

@@ -1,5 +1,6 @@
 
 import logging
+import math
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -57,6 +58,57 @@ def patch_pyabc_dataframe_csv_fallback():
 
     _df_from_bytes_parquet_with_csv_fallback._uq_physicell_csv_fallback = True
     _dbs.df_from_bytes_parquet = _df_from_bytes_parquet_with_csv_fallback
+
+
+def patch_pyabc_nan_particle_weight():
+    """Make pyABC treat a non-finite particle importance weight as zero instead
+    of letting it poison the whole population.
+
+    pyABC computes each particle's weight as
+    ``acceptance_weight * prior_pd / transition_pd``
+    (pyabc/inference_util/inference_util.py:_weight_function). A proposed
+    parameter that lands far enough into a transition kernel's tail -- or just
+    outside a uniform prior's support -- can make both the prior density and
+    the perturbation kernel's density underflow to exactly 0.0 in floating
+    point, producing ``0.0 / 0.0 = nan``. pyABC's own normalize_weights() only
+    guards against an exact total of 0.0 (``total_weight_accepted == 0.0``),
+    which nan fails (``nan == 0.0`` is False in Python) -- so this one
+    degenerate particle's nan weight silently poisons the entire population's
+    normalization, crashing with "AssertionError: The population total weight
+    nan is not normalized." only once every simulation in that population has
+    already finished (observed after a 2+ day cluster run). A weight of 0.0 --
+    an unmeasurably-unlikely proposal contributes nothing -- is the
+    mathematically sensible outcome, so that's substituted instead.
+
+    Called automatically on `import uq_physicell.abc`; safe to call more than
+    once.
+    """
+    from pyabc.inference_util import inference_util as _iu
+
+    if getattr(_iu._weight_function, "_uq_physicell_nan_guard", False):
+        return  # already patched
+
+    _orig_weight_function = _iu._weight_function
+
+    def _weight_function_with_nan_guard(m_ss, theta_ss, acceptance_weight, prior_pdf, transition_pdf):
+        try:
+            weight = _orig_weight_function(m_ss, theta_ss, acceptance_weight, prior_pdf, transition_pdf)
+            is_degenerate = not math.isfinite(weight)
+        except ZeroDivisionError:
+            # prior_pd/transition_pd as plain Python floats raise here instead of
+            # silently producing nan/inf the way numpy floats do -- same outcome.
+            is_degenerate = True
+        if is_degenerate:
+            logger.debug(
+                f"pyABC importance weight was non-finite for model {m_ss}, "
+                f"parameter {theta_ss} -- treating as zero weight instead of letting it "
+                "propagate to the whole population's normalization."
+            )
+            return 0.0
+        return weight
+
+    _weight_function_with_nan_guard._uq_physicell_nan_guard = True
+    _iu._weight_function = _weight_function_with_nan_guard
 
 
 def insert_adaptive_weights_db(db_file, dict_distances, dict_adaptive_weights):

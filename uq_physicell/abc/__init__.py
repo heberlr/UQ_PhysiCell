@@ -10,11 +10,12 @@ from .abc_context import (
     ModelSpec,
     run_abc_calibration,
 )
-from .utils import patch_pyabc_dataframe_csv_fallback
+from .utils import patch_pyabc_dataframe_csv_fallback, patch_pyabc_nan_particle_weight
 
 # Applied on import so every user of CalibrationContext/run_abc_calibration gets
-# it for free -- see patch_pyabc_dataframe_csv_fallback's docstring.
+# them for free -- see each patch function's docstring.
 patch_pyabc_dataframe_csv_fallback()
+patch_pyabc_nan_particle_weight()
 
 __all__ = [
     'CalibrationContext',
