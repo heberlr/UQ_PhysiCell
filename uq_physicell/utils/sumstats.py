@@ -141,7 +141,8 @@ def safe_call_qoi_function(
         data_cache:
             Caller-owned dictionary valid for exactly one timestep.
             Reusing the same dictionary across QoI calls allows derived
-            representations such as df_cell, df_subs, and adata to be reused.
+            representations such as df_cell, df_conc, adata, and sdata
+            to be reused.
             Never reuse the cache across timesteps.
 
         input_name:
@@ -166,6 +167,8 @@ def safe_call_qoi_function(
             'df', 'df_cell',
             'df_subs', 'df_conc',
             'adata',
+            'sdata',
+            'domain',
             'mcds',
             'mcds_ts',
         }:
@@ -193,6 +196,20 @@ def safe_call_qoi_function(
         if 'adata' not in data_cache:
             data_cache['adata'] = mcds.get_anndata()
         return func(data_cache['adata'])
+
+    if input_name == 'sdata':
+        if mcds is None:
+            raise ValueError("QoI function expects 'sdata', but mcds is None.")
+        if 'sdata' not in data_cache:
+            data_cache['sdata'] = mcds.get_spatialdata()
+        return func(data_cache['sdata'])
+
+    if input_name == 'domain':
+        if mcds is None:
+            raise ValueError("QoI function expects 'domain', but mcds is None.")
+        if 'domain' not in data_cache:
+            data_cache['domain'] = mcds.get_muspan()
+        return func(data_cache['domain'])
 
     if input_name == 'mcds':
         if mcds is None:
