@@ -329,7 +329,8 @@ class CalibrationContext:
         agg_noise = {}
         for key in replicate_results[0].keys():
             agg_results[key] = np.mean([r[key] for r in replicate_results], axis=0)
-            agg_noise[key] = np.std([r[key] for r in replicate_results], axis=0)
+            # Standard error of the mean
+            agg_noise[key] = np.std([r[key] for r in replicate_results], axis=0) / np.sqrt(len(replicate_results))  
 
         # Convert the results in a dataframe with all replicates
         dic_results = {}
@@ -376,7 +377,8 @@ class CalibrationContext:
         for qoi in self.distance_functions.keys():
             qoi_values = [rep_obj[qoi] for rep_obj in objectives_per_replicate]
             objectives[qoi] = np.mean(qoi_values)
-            obj_noise[qoi] = np.std(qoi_values)
+            # Standard error of the mean
+            obj_noise[qoi] = np.std(qoi_values) / np.sqrt(len(qoi_values))  
 
         return objectives, obj_noise, dic_results
 
