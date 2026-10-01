@@ -8,6 +8,9 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      # Headless runner: let PyQt5 GUI tests create a QApplication without a display.
+      QT_QPA_PLATFORM: offscreen
 
     steps:
     - name: Checkout repository
