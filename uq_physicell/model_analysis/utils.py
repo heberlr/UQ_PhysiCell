@@ -543,7 +543,7 @@ def get_summary_statistics_qois(df_qois: pd.DataFrame) -> tuple:
 
     return df_mean, df_std, df_relative_mcse
 
-def calculate_qoi_statistics(db_file_path: str, qoi_funcs: dict, df_qois_data: pd.DataFrame = None,  ignore_db_consistency: bool = False, qoi_def: dict = {}, chunk_size: int = 10) -> tuple:
+def calculate_qoi_statistics(db_file_path: str, qoi_funcs: dict, df_qois_data: pd.DataFrame = None,  ignore_db_consistency: bool = False, qoi_def: dict = {}, chunk_size: int = 10, n_jobs: int = 1) -> tuple:
     """Calculate statistical summaries (mean and relative MCSE) of quantities of interest across replicates.
 
     This function computes mean and relative Monte Carlo Standard Error (MCSE) of QoI values across
@@ -564,6 +564,7 @@ def calculate_qoi_statistics(db_file_path: str, qoi_funcs: dict, df_qois_data: p
                         then the qoi_def dict would look like this:
                         {'my_func': my_func}
         chunk_size (int, optional): Number of samples to process at a time when loading from the database. Default is 10. Adjust based on available memory and data size.
+        n_jobs (int, optional): Number of worker processes used for parallel processing when loading from the database. Default is 1.
     Returns:
         tuple: A tuple containing:
             - df_mean (pd.DataFrame): DataFrame with statistical summaries (mean) of QoIs grouped by SampleID, with columns for each QoI statistic.
@@ -585,7 +586,7 @@ def calculate_qoi_statistics(db_file_path: str, qoi_funcs: dict, df_qois_data: p
         ...     'live_cells': lambda df: len(df[df['dead'] == False]),
         ...     'dead_cells': lambda df: len(df[df['dead'] == True])
         ... }
-        >>> df_mean, df_std, df_mcse = calculate_qoi_statistics(qoi_data, qoi_funcs, 'study.db')
+        >>> df_mean, df_std, df_mcse = calculate_qoi_statistics(qoi_data, qoi_funcs, 'study.db', n_jobs=4)
     """
 
     if df_qois_data is None:
@@ -617,7 +618,7 @@ def calculate_qoi_statistics(db_file_path: str, qoi_funcs: dict, df_qois_data: p
         elif isinstance(df_qois_data['Data'].iloc[0], list):
             print("Calculating QoIs from mcds list...")
             try:
-                df_qois = calculate_qoi_from_db_file(db_file_path, qoi_funcs, qoi_def=qoi_def, chunk_size=chunk_size)
+                df_qois = calculate_qoi_from_db_file(db_file_path, qoi_funcs, qoi_def=qoi_def, chunk_size=chunk_size, n_jobs=n_jobs)
             except Exception as e:
                 raise ValueError(f"Error calculating QoIs from mcds list: {e}")
             if df_qois.empty:
