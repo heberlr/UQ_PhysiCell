@@ -20,7 +20,8 @@ from .sensitivity_analysis import (
     run_local_sa,
     get_global_SA_parameters,
     get_local_SA_parameters,
-    get_sa_results
+    get_sa_results,
+    get_sobol_convergence
 )
 
 from .visualization import (
@@ -28,6 +29,7 @@ from .visualization import (
     plot_qoi_over_time,
     plot_global_sa_results,
     plot_local_sa_results,
+    plot_sobol_convergence,
     plot_cells_2D,
 )
 
@@ -63,10 +65,12 @@ __all__ = [
     'get_global_SA_parameters',
     'get_local_SA_parameters',
     'get_sa_results',
+    'get_sobol_convergence',
     'get_mcse_legend_handles',
     'plot_qoi_over_time',
     'plot_global_sa_results',
     'plot_local_sa_results',
+    'plot_sobol_convergence',
     'plot_cells_2D',
     'mcds_list_to_qoi_df_for_sa',
     'mcds_list_to_qoi_df_for_calib',
