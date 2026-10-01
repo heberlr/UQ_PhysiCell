@@ -212,6 +212,36 @@ class TestSafeCallQoiFunction:
         mcds = _fake_mcds(conc_df=pd.DataFrame({"substrate": [1.0, 3.0]}))
         assert safe_call_qoi_function(func, mcds=mcds) == 2.0
 
+    def test_sdata_dispatches_spatialdata_and_caches(self):
+        func = _create_wrapper_for_qoi_function(lambda sdata: sdata, "sdata", "q")
+        mcds = _fake_mcds()
+        data_cache = {}
+        assert safe_call_qoi_function(func, mcds=mcds, data_cache=data_cache) is mcds.get_spatialdata.return_value
+        assert safe_call_qoi_function(func, mcds=mcds, data_cache=data_cache) is mcds.get_spatialdata.return_value
+        mcds.get_spatialdata.assert_called_once()
+
+    def test_domain_dispatches_muspan_and_caches(self):
+        func = _create_wrapper_for_qoi_function(lambda domain: domain, "domain", "q")
+        mcds = _fake_mcds()
+        data_cache = {}
+        assert safe_call_qoi_function(func, mcds=mcds, data_cache=data_cache) is mcds.get_muspan.return_value
+        assert safe_call_qoi_function(func, mcds=mcds, data_cache=data_cache) is mcds.get_muspan.return_value
+        mcds.get_muspan.assert_called_once()
+
+    @pytest.mark.parametrize("param_name", ["sdata", "domain"])
+    def test_sdata_domain_bare_function_dispatches(self, param_name):
+        namespace = {}
+        exec(f"def bare({param_name}):\n    return {param_name}", namespace)
+        mcds = _fake_mcds()
+        expected = mcds.get_spatialdata.return_value if param_name == "sdata" else mcds.get_muspan.return_value
+        assert safe_call_qoi_function(namespace["bare"], mcds=mcds) is expected
+
+    @pytest.mark.parametrize("param_name", ["sdata", "domain"])
+    def test_sdata_domain_raise_when_mcds_is_none(self, param_name):
+        func = _create_wrapper_for_qoi_function(lambda x: x, param_name, "q")
+        with pytest.raises(ValueError, match="mcds is None"):
+            safe_call_qoi_function(func, mcds=None)
+
     def test_mcds_param_passes_mcds_object(self):
         func = _create_wrapper_for_qoi_function(lambda mcds: mcds.get_time(), "mcds", "q")
         mcds = _fake_mcds(time=42.0)

@@ -204,7 +204,7 @@ def safe_call_qoi_function(
             data_cache['sdata'] = mcds.get_spatialdata()
         return func(data_cache['sdata'])
 
-    if input_name == 'domian':
+    if input_name == 'domain':
         if mcds is None:
             raise ValueError("QoI function expects 'domain', but mcds is None.")
         if 'domain' not in data_cache:
