@@ -852,7 +852,8 @@ def align_params_to_qois(df_params: pd.DataFrame, df_qois: pd.DataFrame) -> pd.D
     
     # Encode categorical columns to numeric for regression compatibility
     for col in df_params_aligned.columns:
-        if df_params_aligned[col].dtype == 'object':  # String/categorical column
+        # String/categorical column (object dtype, or pandas >= 3 string dtype)
+        if pd.api.types.is_object_dtype(df_params_aligned[col]) or pd.api.types.is_string_dtype(df_params_aligned[col]):
             le = LabelEncoder()
             df_params_aligned[col] = le.fit_transform(df_params_aligned[col].astype(str))
     
@@ -922,9 +923,9 @@ def _regression_accuracy_with_weights(df_parameters: pd.DataFrame, encoder_outpu
         model = RandomForestRegressor(n_estimators=100, random_state=42)
         
         if mcse_weights is not None:
-            # Use sample_weight to favor stable features (passed via fit_params)
+            # Use sample_weight to favor stable features (passed via params; fit_params was removed in scikit-learn 1.6)
             model.fit(encoder_output, y, sample_weight=mcse_weights)
-            scores = cross_val_score(model, encoder_output, y, cv=5, scoring='r2', fit_params={'sample_weight': mcse_weights})
+            scores = cross_val_score(model, encoder_output, y, cv=5, scoring='r2', params={'sample_weight': mcse_weights})
         else:
             model.fit(encoder_output, y)
             scores = cross_val_score(model, encoder_output, y, cv=5, scoring='r2')

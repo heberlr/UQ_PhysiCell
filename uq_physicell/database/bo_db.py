@@ -465,6 +465,8 @@ def load_parameter_space(db_file: str) -> pd.DataFrame:
         cursor.execute('SELECT * FROM ParameterSpace')
         param_space = cursor.fetchall()
         df_param_space = pd.DataFrame(param_space, columns=['ParamName', 'type', 'lower_bound', 'upper_bound', 'regulates'])
+        # pandas >= 3 stores missing strings as NaN; keep None for "regulates nothing"
+        df_param_space['regulates'] = df_param_space['regulates'].astype(object).where(df_param_space['regulates'].notna(), None)
         return df_param_space
     except sqlite3.Error as e:
         raise RuntimeError(f"Error loading BO parameter space: {e}")
@@ -536,7 +538,7 @@ def load_gp_models(db_file: str) -> pd.DataFrame:
         )
         if 'ConvergenceStatus' in df_gp_models.columns:
             df_gp_models['ConvergenceStatus'] = df_gp_models['ConvergenceStatus'].apply(
-                lambda s: json.loads(s) if s else None
+                lambda s: json.loads(s) if isinstance(s, str) and s else None
             )
         return df_gp_models
     except sqlite3.Error as e:

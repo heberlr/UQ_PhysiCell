@@ -7,6 +7,7 @@ no real simulation output or files are required.
 """
 
 import errno
+import importlib.util
 import pickle
 import warnings
 
@@ -649,6 +650,14 @@ class TestQoiFuncRadialDensitySummary:
 
 # ─── qoi_func_relational_ph (early-return / guard branches only) ────────────
 
+# muspan is not on PyPI (see pyproject.toml), so it is absent on CI runners.
+requires_muspan = pytest.mark.skipif(
+    importlib.util.find_spec("muspan") is None or importlib.util.find_spec("gudhi") is None,
+    reason="muspan and gudhi are required",
+)
+
+
+@requires_muspan
 class TestQoiFuncRelationalPhGuards:
     def test_missing_landmark_type_returns_empty_series(self):
         df = pd.DataFrame({
@@ -688,6 +697,7 @@ class TestQoiFuncRelationalPhGuards:
         assert diag is None
 
 
+@requires_muspan
 class TestQoiFuncRelationalPhComputation:
     """These exercise the real gudhi/muspan computation path (both are
     installed in this environment) rather than mocking them, since the
@@ -728,6 +738,7 @@ class TestQoiFuncPersistentHomology:
     """Real muspan/gudhi computation (both installed here) for the happy
     path, plus the ImportError guard when muspan genuinely is unavailable."""
 
+    @requires_muspan
     def test_returns_series_with_persistence_features(self):
         rng = np.random.default_rng(42)
         df = pd.DataFrame({
