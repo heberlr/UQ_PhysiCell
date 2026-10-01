@@ -4,7 +4,7 @@
   <img src="https://raw.githubusercontent.com/heberlr/UQ_PhysiCell/development/uq_physicell/doc/icon.png" alt="pyABC logo" width="50%">
 </p>
 
-[![codecov](https://codecov.io/github/heberlr/uq_physicell/graph/badge.svg)](https://codecov.io/github/heberlr/uq_physicell)
+[![codecov](https://codecov.io/github/heberlr/uq_physicell/branch/development/graph/badge.svg)](https://codecov.io/github/heberlr/uq_physicell)
 [![Run Unit Tests](https://github.com/heberlr/UQ_PhysiCell/actions/workflows/test_linux.yml/badge.svg)](https://github.com/heberlr/UQ_PhysiCell/actions/workflows/test_linux.yml)
 [![Documentation Status](https://readthedocs.org/projects/uq-physicell/badge/?version=latest)](https://uq-physicell.readthedocs.io/en/latest/?badge=latest)
 [![PyPI](https://badge.fury.io/py/uq-physicell.svg?v=1.2.10)](https://badge.fury.io/py/uq-physicell)
