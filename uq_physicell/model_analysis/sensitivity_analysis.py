@@ -245,6 +245,70 @@ def run_global_sa(params_dict: dict, qoi_names: list, df_qois: pd.DataFrame, met
 
     return sa_results_dict, qoi_time_values
 
+def get_sobol_convergence(dbfile: str, qoi_names: list, df_qois: pd.DataFrame, time_value, N_values: list) -> dict:
+    """Check whether Sobol total-order indices (ST) have stabilized, by
+    re-analyzing prefixes of an already-run Sobol design at smaller N.
+
+    SALib's Sobol/Saltelli sampler builds its design incrementally: the first
+    N*(2*num_vars+2) rows (in the original sampling order) of a design built
+    for a larger N are exactly the design that would have been generated for
+    that smaller N on its own (same seed). This re-analyzes those prefixes
+    directly from already-computed QoI results, so no new simulations are run
+    -- it is purely a diagnostic on results the database already has.
+
+    Args:
+        dbfile (str): Path to the database file. Must have been sampled with 'Sobol'.
+        qoi_names (list): QoI names (columns of df_qois) to check convergence for.
+        df_qois (pd.DataFrame): QoI values indexed by ('SampleID', 'time'), as
+            returned by calculate_qoi_statistics.
+        time_value: The single time point (a value present in df_qois's 'time'
+            index level) at which to evaluate convergence, for every QoI. There is
+            no default: a convergence check is only meaningful at a time the
+            caller has deliberately chosen (e.g. simulation end), not one picked
+            for them.
+        N_values (list): Sobol base sample sizes to re-analyze, e.g. [4, 8, 16, 32].
+            The largest must not exceed the N originally used to build dbfile's
+            samples.
+
+    Returns:
+        dict: {qoi_name: {param_name: {'ST': [...], 'ST_conf': [...]}}}, each
+            list ordered to match N_values.
+
+    Raises:
+        ValueError: If N_values requires more samples than dbfile has, if
+            time_value is not present in df_qois, or if df_qois is not indexed
+            by ('SampleID', 'time').
+    """
+    params_dict = get_global_SA_parameters(dbfile)
+    problem = _get_SA_problem(params_dict)
+    block_size = 2 * problem['num_vars'] + 2  # Saltelli design block size (calc_second_order=True)
+
+    total_samples = len(params_dict['samples'])
+    max_n = max(N_values)
+    if max_n * block_size > total_samples:
+        raise ValueError(
+            f"N={max_n} needs {max_n * block_size} samples, but '{dbfile}' only has {total_samples}."
+        )
+
+    if 'time' not in df_qois.index.names:
+        raise ValueError("df_qois must be indexed by ('SampleID', 'time').")
+    df_at_time = df_qois.reset_index()
+    df_at_time = df_at_time[df_at_time['time'] == time_value].sort_values('SampleID')
+    if df_at_time.empty:
+        raise ValueError(f"time_value={time_value} not found in df_qois.")
+
+    convergence = {qoi: {p: {'ST': [], 'ST_conf': []} for p in problem['names']} for qoi in qoi_names}
+    for N in N_values:
+        n_rows = N * block_size
+        for qoi in qoi_names:
+            Y = df_at_time[qoi].to_numpy()[:n_rows]
+            result = sobol_analyze.analyze(problem, Y, calc_second_order=True)
+            for pid, p in enumerate(problem['names']):
+                convergence[qoi][p]['ST'].append(result['ST'][pid])
+                convergence[qoi][p]['ST_conf'].append(result['ST_conf'][pid])
+
+    return convergence
+
 def OAT_analyze(dic_samples: dict, dic_qoi: dict, sample_ref: int = 0) -> dict:
     """Perform One-At-a-Time (OAT) analysis on the simulation results.
     
