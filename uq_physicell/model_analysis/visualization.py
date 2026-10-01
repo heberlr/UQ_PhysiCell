@@ -214,6 +214,53 @@ def plot_global_sa_results(param_names, sa_method, qoi_time_values, sa_results, 
     if handles and labels:
         ax.legend(bbox_to_anchor=(1.05, 1), loc="upper left", title_fontsize=8, fontsize=8)
 
+def plot_sobol_convergence(N_values: list, convergence: dict, qoi_names: list, param_names: list, axes, xlim: tuple = None, ylim: tuple = None) -> None:
+    """Plot Sobol total-order index (ST) vs. sample size N, one panel per QoI.
+
+    Draws one line per parameter with a shaded confidence-interval ribbon (from
+    SALib's ST_conf) on a log2 x-axis, so equal spacing between successive
+    doublings of N makes a flattening (converged) trend visually obvious.
+    Intended to be called with the output of get_sobol_convergence.
+
+    Args:
+        N_values (list): Sobol base sample sizes, in the same order used to build convergence.
+        convergence (dict): Nested results as returned by get_sobol_convergence,
+            structured as {qoi_name: {param_name: {'ST': [...], 'ST_conf': [...]}}}.
+        qoi_names (list): QoIs to plot, one subplot each, in the given order.
+        param_names (list): Parameter names, in a fixed order for consistent coloring.
+        axes: Sequence of matplotlib axes, one per qoi_names entry.
+        xlim (tuple, optional): The x-axis limits for the plot.
+        ylim (tuple, optional): The y-axis limits for the plot.
+
+    Returns:
+        None. The plots are drawn in place on axes.
+    """
+    colors = sns.color_palette("tab20", len(param_names))
+    for ax, qoi in zip(axes, qoi_names):
+        for pid, param in enumerate(param_names):
+            st = np.array(convergence[qoi][param]['ST'])
+            conf = np.array(convergence[qoi][param]['ST_conf'])
+            ax.plot(N_values, st, marker='o', color=colors[pid % len(colors)], label=param)
+            ax.fill_between(N_values, st - conf, st + conf, color=colors[pid % len(colors)], alpha=0.2, linewidth=0)
+        if st.size == 0 or np.all(np.isnan(st)):  # Check if all values are NaN or empty for this qoi and parameter combination
+            ax.remove()  # Remove the empty subplot if no data for this qoi and parameter combination
+            continue  # Skip if no data for this qoi and parameter combination
+        else:
+            # Plot a horizontal green band from 0 to 1 to indicate the valid range of Sobol indices
+            ax.axhspan(0, 1, alpha=0.2, color='gray', zorder=0)
+            ax.set_xscale('log', base=2)
+            ax.set_xticks(N_values)
+            ax.set_xticklabels(N_values)
+            ax.set_xlabel('N (Sobol base sample size)')
+            ax.set_ylabel('Total-order Sobol index (ST)')
+            ax.set_title(qoi)
+            if xlim:
+                ax.set_xlim(xlim)
+            if ylim:
+                ax.set_ylim(ylim)
+    if len(axes) > 0:
+        axes[0].legend(loc='best', fontsize=8)
+
 def plot_local_sa_results(sa_method, qoi_time_values, sa_results, selected_qoi, ax) -> None:
     """Plot local (OAT) sensitivity indices over time for one QoI, on a given axis.
 
