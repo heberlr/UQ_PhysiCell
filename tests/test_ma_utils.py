@@ -204,6 +204,76 @@ class TestMcdsListToQoiDfLong(unittest.TestCase):
         self.assertTrue(pd.isna(row_t1['multi_a']))
         self.assertTrue(pd.isna(row_t1['multi_b']))
 
+    @patch('uq_physicell.model_analysis.utils.load_output')
+    def test_wrapped_timeseries_dataframe_expands_by_time(self, mock_load_output):
+        mock_load_output.return_value = pd.DataFrame({
+            'SampleID': [0],
+            'ReplicateID': [0],
+            'Data': [[FakeMCDS(0.0), FakeMCDS(1.0)]],
+        })
+
+        def many_per_timestep(mcds_ts):
+            return pd.DataFrame({
+                'time': [1.0, 0.0],
+                'a': [11.0, 10.0],
+                'b': [21.0, 20.0],
+            })
+
+        wrapped = _create_wrapper_for_qoi_function(
+            func=many_per_timestep,
+            param_name='mcds_ts',
+            qoi_name='perplexity',
+        )
+        result = mcds_list_to_qoi_df_long(
+            {'perplexity': wrapped},
+            [0],
+            chunk_size=10,
+            db_file='dummy.db',
+        )
+
+        self.assertNotIn('perplexity', result.columns)
+        self.assertIn('perplexity_a', result.columns)
+        self.assertIn('perplexity_b', result.columns)
+        self.assertListEqual(result['perplexity_a'].tolist(), [10.0, 11.0])
+        self.assertListEqual(result['perplexity_b'].tolist(), [20.0, 21.0])
+
+    @patch('uq_physicell.model_analysis.utils.load_output')
+    def test_wrapped_timeseries_scalar_and_scalar_mapping_broadcast(self, mock_load_output):
+        mock_load_output.return_value = pd.DataFrame({
+            'SampleID': [0],
+            'ReplicateID': [0],
+            'Data': [[FakeMCDS(0.0), FakeMCDS(1.0)]],
+        })
+        recreated = _qoi_funcs(
+            series_count=lambda mcds_ts: len(mcds_ts),
+            summary=lambda mcds_ts: {'auc': 12.0, 'peak': 7.0},
+        )
+
+        result = mcds_list_to_qoi_df_long(recreated, [0], chunk_size=10, db_file='dummy.db')
+
+        self.assertListEqual(result['series_count'].tolist(), [2, 2])
+        self.assertListEqual(result['summary_auc'].tolist(), [12.0, 12.0])
+        self.assertListEqual(result['summary_peak'].tolist(), [7.0, 7.0])
+
+    @patch('uq_physicell.model_analysis.utils.load_output')
+    def test_wrapped_timeseries_mapping_sequences_use_mapping_keys(self, mock_load_output):
+        mock_load_output.return_value = pd.DataFrame({
+            'SampleID': [0],
+            'ReplicateID': [0],
+            'Data': [[FakeMCDS(0.0), FakeMCDS(1.0)]],
+        })
+        recreated = _qoi_funcs(
+            trajectory=lambda mcds_ts: {'live': [1, 2], 'dead': [0, 1]},
+        )
+
+        result = mcds_list_to_qoi_df_long(recreated, [0], chunk_size=10, db_file='dummy.db')
+
+        self.assertIn('trajectory_live', result.columns)
+        self.assertIn('trajectory_dead', result.columns)
+        self.assertNotIn('trajectory_key', result.columns)
+        self.assertListEqual(result['trajectory_live'].tolist(), [1, 2])
+        self.assertListEqual(result['trajectory_dead'].tolist(), [0, 1])
+
 
 class TestCalculateQoiFromDbFile(unittest.TestCase):
     @patch('uq_physicell.model_analysis.utils.load_output')

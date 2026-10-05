@@ -112,19 +112,47 @@ def mcds_list_to_qoi_df_for_sa(recreated_qoi_funcs, all_sample_ids, chunk_size, 
 
 
 _QOI_WORKER = {}
+_QOI_INPUT_NAMES = {
+    "df", "df_cell",
+    "df_subs", "df_conc",
+    "adata",
+    "sdata",
+    "domain",
+    "mcds",
+    "mcds_ts", "mcdsts",
+}
+_QOI_TIMESERIES_INPUT_NAMES = {"mcds_ts", "mcdsts"}
+
+
+def _qoi_dispatch_input_name(qoi_func: Any) -> str | None:
+    """Return the QoI input name used by the dispatcher and planner."""
+    input_name = _qoi_first_parameter_name(qoi_func)
+    if input_name not in _QOI_INPUT_NAMES:
+        param_name = getattr(qoi_func, "__param_name__", None)
+        if param_name is not None:
+            input_name = param_name
+    return input_name
+
+
 def _qoi_worker_init(db_file, recreated_qoi_funcs_bytes):
     """Initialize QoI state once per worker process."""
     recreated_qoi_funcs = cloudpickle.loads(recreated_qoi_funcs_bytes)
     qoi_plan = [
-        (qoi_name, qoi_func, _qoi_first_parameter_name(qoi_func))
+        (qoi_name, qoi_func, _qoi_dispatch_input_name(qoi_func))
         for qoi_name, qoi_func
         in recreated_qoi_funcs.items()
     ]
     _QOI_WORKER.clear()
     _QOI_WORKER.update({
         "db_file": db_file,
-        "timestep_plan": [entry for entry in qoi_plan if not (entry[2] in {"mcds_ts", "mcdsts"})],
-        "timeseries_plan": [entry for entry in qoi_plan if entry[2] in {"mcds_ts", "mcdsts"}],
+        "timestep_plan": [
+            entry for entry in qoi_plan
+            if entry[2] not in _QOI_TIMESERIES_INPUT_NAMES
+        ],
+        "timeseries_plan": [
+            entry for entry in qoi_plan
+            if entry[2] in _QOI_TIMESERIES_INPUT_NAMES
+        ],
     })
 
 
@@ -159,16 +187,108 @@ def _flatten_qoi_value(qoi_name: str, value: Any) -> dict[str, Any]:
     return {qoi_name: value}
 
 
-def _expand_timeseries_qoi_value(qoi_name: str, value: Any, n_time: int) -> dict[str, list[Any]]:
-    """Convert a time-series QoI result to a dictionary of value lists."""
+def _expand_timeseries_qoi_value(
+        qoi_name: str,
+        value: Any,
+        n_time: int,
+        times: Sequence[Any] | None = None,
+    ) -> dict[str, list[Any]]:
+    """Convert a full-time-series QoI result to per-row long-format columns."""
+    def broadcast(item: Any) -> list[Any]:
+        if isinstance(item, np.generic):
+            item = item.item()
+        return [item] * n_time
+
+    def index_matches_times(index: pd.Index) -> bool:
+        if times is None or len(index) != len(times):
+            return False
+        index_values = list(index)
+        time_values = list(times)
+        if index_values == time_values:
+            return True
+        try:
+            return set(index_values) == set(time_values)
+        except TypeError:
+            return False
+
+    def validate_time_index(index: pd.Index) -> None:
+        if times is None:
+            return
+        if index.has_duplicates:
+            raise ValueError(
+                f"Time-series QoI '{qoi_name}' returned duplicate time values."
+            )
+        index_values = list(index)
+        missing = [time for time in times if time not in index_values]
+        extra = [time for time in index_values if time not in times]
+        if missing or extra:
+            raise ValueError(
+                f"Time-series QoI '{qoi_name}' returned time values that do not "
+                f"match the simulation times. Missing={missing[:5]}, extra={extra[:5]}."
+            )
+
+    def expand_series(name: str, series: pd.Series) -> dict[str, list[Any]]:
+        is_position_index = (
+            isinstance(series.index, pd.RangeIndex)
+            and list(series.index) == list(range(n_time))
+        )
+        is_timestep_sequence = (
+            len(series) == n_time
+            and (times is None or is_position_index or index_matches_times(series.index))
+        )
+
+        if is_timestep_sequence:
+            if times is not None and not is_position_index and index_matches_times(series.index):
+                validate_time_index(series.index)
+                series = series.reindex(times)
+            return {name: series.tolist()}
+
+        if times is not None and series.index.name == "time":
+            validate_time_index(series.index)
+
+        if len(series) == 1:
+            return {name: broadcast(series.iloc[0])}
+
+        return {
+            f"{name}_{idx}": broadcast(item)
+            for idx, item in series.items()
+        }
 
     if isinstance(value, pd.DataFrame):
         df_value = value.copy()
-        if len(df_value) != n_time:
+        if "time" in df_value.columns:
+            df_value = df_value.set_index("time")
+            if times is not None:
+                validate_time_index(df_value.index)
+                df_value = df_value.reindex(times)
+            elif len(df_value) != n_time:
+                raise ValueError(
+                    f"Time-series QoI '{qoi_name}' returned "
+                    f"{len(df_value)} rows, expected {n_time}."
+                )
+        elif (
+                times is not None
+                and (df_value.index.name == "time" or index_matches_times(df_value.index))
+            ):
+            validate_time_index(df_value.index)
+            df_value = df_value.reindex(times)
+        elif len(df_value) == n_time:
+            pass
+        elif len(df_value) == 1:
+            row = df_value.iloc[0]
+            return {
+                f"{qoi_name}_{column}": broadcast(row[column])
+                for column in df_value.columns
+            }
+        else:
+            squeezed = df_value.squeeze()
+            if isinstance(squeezed, pd.Series):
+                return expand_series(qoi_name, squeezed)
             raise ValueError(
                 f"Time-series QoI '{qoi_name}' returned "
-                f"{len(df_value)} rows, expected {n_time}."
+                f"{len(df_value)} rows, expected {n_time} or 1."
             )
+
         return {
             f"{qoi_name}_{column}": df_value[column].tolist()
             for column in df_value.columns
@@ -176,59 +296,61 @@ def _expand_timeseries_qoi_value(qoi_name: str, value: Any, n_time: int) -> dict
 
     if isinstance(value, Mapping):
         result = {}
-        for key, sequence in value.items():
-            sequence = list(sequence)
-            if len(sequence) != n_time:
-                raise ValueError(
-                    f"Time-series QoI '{qoi_name}_{key}' returned "
-                    f"{len(sequence)} values, expected {n_time}."
+        for key, item in value.items():
+            result.update(
+                _expand_timeseries_qoi_value(
+                    qoi_name=f"{qoi_name}_{key}",
+                    value=item,
+                    n_time=n_time,
+                    times=times,
                 )
-            result[f'{qoi_name}_key'] = sequence
+            )
         return result
 
     if isinstance(value, pd.Series):
-        sequence = value.tolist()
-        if len(sequence) != n_time:
-            raise ValueError(
-                f"Time-series QoI '{qoi_name}' returned "
-                f"{len(sequence)} values, expected {n_time}."
-            )
-
-        return {qoi_name: sequence}
+        return expand_series(qoi_name, value)
 
     if isinstance(value, np.ndarray):
+        if value.ndim == 0:
+            return {qoi_name: broadcast(value.item())}
         if value.ndim == 1:
-            sequence = value.tolist()
-            if len(sequence) != n_time:
-                raise ValueError(
-                    f"Time-series QoI '{qoi_name}' returned "
-                    f"{len(sequence)} values, expected {n_time}."
-                )
-            return {qoi_name: sequence}
-        if value.ndim == 2:
-            if value.shape[0] != n_time:
-                raise ValueError(
-                    f"Time-series QoI '{qoi_name}' returned shape "
-                    f"{value.shape}, expected first dimension "
-                    f"to be {n_time}."
-                )
+            if value.size == n_time:
+                return {qoi_name: value.tolist()}
+            if value.size == 1:
+                return {qoi_name: broadcast(value[0])}
             return {
-                f"{qoi_name}_{i}": value[:, i].tolist()
-                for i in range(value.shape[1])
+                f"{qoi_name}_{i}": broadcast(item)
+                for i, item in enumerate(value.tolist())
             }
+        if value.ndim == 2:
+            if value.shape[0] == n_time:
+                return {
+                    f"{qoi_name}_{i}": value[:, i].tolist()
+                    for i in range(value.shape[1])
+                }
+            if value.shape[0] == 1:
+                return {
+                    f"{qoi_name}_{i}": broadcast(value[0, i])
+                    for i in range(value.shape[1])
+                }
 
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
-        if len(value) != n_time:
-            raise ValueError(
-                f"Time-series QoI '{qoi_name}' returned "
-                f"{len(value)} values, expected {n_time}."
-            )
-        return {qoi_name: list(value)}
+        raise ValueError(
+            f"Time-series QoI '{qoi_name}' returned array shape {value.shape}; "
+            f"expected a scalar, {n_time} values, or {n_time} rows."
+        )
 
-    raise ValueError(
-        f"Unsupported time-series QoI return type for '{qoi_name}': "
-        f"{type(value).__name__}"
-    )
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        sequence = list(value)
+        if len(sequence) == n_time:
+            return {qoi_name: sequence}
+        if len(sequence) == 1:
+            return {qoi_name: broadcast(sequence[0])}
+        return {
+            f"{qoi_name}_{i}": broadcast(item)
+            for i, item in enumerate(sequence)
+        }
+
+    return {qoi_name: broadcast(value)}
 
 
 def _qoi_process_run(run_key):
@@ -271,6 +393,7 @@ def _qoi_process_run(run_key):
     # full-timeseries QoIs
     if run_records and _QOI_WORKER["timeseries_plan"]:
         n_time = len(run_records)
+        times = [record["time"] for record in run_records]
         for qoi_name, qoi_func, input_name in _QOI_WORKER["timeseries_plan"]:
             value = safe_call_qoi_function(
                 qoi_func,
@@ -284,6 +407,7 @@ def _qoi_process_run(run_key):
                     qoi_name=qoi_name,
                     value=value,
                     n_time=n_time,
+                    times=times,
                 )
                 for column_name, values in qoi_columns.items():
                     for record, item in zip(run_records, values):
@@ -345,15 +469,21 @@ def mcds_list_to_qoi_df_long(
     if n_jobs == 1:
         # inspect qoi functions
         qoi_plan = [
-            (qoi_name, qoi_func, _qoi_first_parameter_name(qoi_func))
+            (qoi_name, qoi_func, _qoi_dispatch_input_name(qoi_func))
             for qoi_name, qoi_func in recreated_qoi_funcs.items()
         ]
         # update worker
         _QOI_WORKER.clear()
         _QOI_WORKER.update({
             "db_file": db_file,
-            "timestep_plan": [entry for entry in qoi_plan if not (entry[2] in {"mcds_ts", "mcdsts"})],
-            "timeseries_plan": [entry for entry in qoi_plan if entry[2] in {"mcds_ts", "mcdsts"}],
+            "timestep_plan": [
+                entry for entry in qoi_plan
+                if entry[2] not in _QOI_TIMESERIES_INPUT_NAMES
+            ],
+            "timeseries_plan": [
+                entry for entry in qoi_plan
+                if entry[2] in _QOI_TIMESERIES_INPUT_NAMES
+            ],
         })
         # process run
         for i, run_key in enumerate(run_keys, start=1):
