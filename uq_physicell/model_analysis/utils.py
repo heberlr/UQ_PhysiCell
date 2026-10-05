@@ -1,6 +1,6 @@
 from __future__ import annotations
 import cloudpickle
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from concurrent.futures import ProcessPoolExecutor
 import gc
 import numpy as np
@@ -123,8 +123,8 @@ def _qoi_worker_init(db_file, recreated_qoi_funcs_bytes):
     _QOI_WORKER.clear()
     _QOI_WORKER.update({
         "db_file": db_file,
-        "timestep_plan": [entry for entry in qoi_plan if entry[2] != "mcds_ts"],
-        "timeseries_plan": [entry for entry in qoi_plan if entry[2] == "mcds_ts"],
+        "timestep_plan": [entry for entry in qoi_plan if not (entry[2] in {"mcds_ts", "mcdsts"})],
+        "timeseries_plan": [entry for entry in qoi_plan if entry[2] in {"mcds_ts", "mcdsts"}],
     })
 
 
@@ -157,6 +157,79 @@ def _flatten_qoi_value(qoi_name: str, value: Any) -> dict[str, Any]:
         return {qoi_name: value}
 
     return {qoi_name: value}
+
+
+def _expand_timeseries_qoi_value(qoi_name: str, value: Any, n_time: int) -> dict[str, list[Any]]:
+    """Convert a time-series QoI result to a dictionary of value lists."""
+
+    if isinstance(value, pd.DataFrame):
+        df_value = value.copy()
+        if len(df_value) != n_time:
+            raise ValueError(
+                f"Time-series QoI '{qoi_name}' returned "
+                f"{len(df_value)} rows, expected {n_time}."
+            )
+        return {
+            f"{qoi_name}_{column}": df_value[column].tolist()
+            for column in df_value.columns
+        }
+
+    if isinstance(value, Mapping):
+        result = {}
+        for key, sequence in value.items():
+            sequence = list(sequence)
+            if len(sequence) != n_time:
+                raise ValueError(
+                    f"Time-series QoI '{qoi_name}_{key}' returned "
+                    f"{len(sequence)} values, expected {n_time}."
+                )
+            result[f'{qoi_name}_key'] = sequence
+        return result
+
+    if isinstance(value, pd.Series):
+        sequence = value.tolist()
+        if len(sequence) != n_time:
+            raise ValueError(
+                f"Time-series QoI '{qoi_name}' returned "
+                f"{len(sequence)} values, expected {n_time}."
+            )
+
+        return {qoi_name: sequence}
+
+    if isinstance(value, np.ndarray):
+        if value.ndim == 1:
+            sequence = value.tolist()
+            if len(sequence) != n_time:
+                raise ValueError(
+                    f"Time-series QoI '{qoi_name}' returned "
+                    f"{len(sequence)} values, expected {n_time}."
+                )
+            return {qoi_name: sequence}
+        if value.ndim == 2:
+            if value.shape[0] != n_time:
+                raise ValueError(
+                    f"Time-series QoI '{qoi_name}' returned shape "
+                    f"{value.shape}, expected first dimension "
+                    f"to be {n_time}."
+                )
+            return {
+                f"{qoi_name}_{i}": value[:, i].tolist()
+                for i in range(value.shape[1])
+            }
+
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        if len(value) != n_time:
+            raise ValueError(
+                f"Time-series QoI '{qoi_name}' returned "
+                f"{len(value)} values, expected {n_time}."
+            )
+        return {qoi_name: list(value)}
+
+    raise ValueError(
+        f"Unsupported time-series QoI return type for '{qoi_name}': "
+        f"{type(value).__name__}"
+    )
+
 
 def _qoi_process_run(run_key):
     """Process one SampleID/ReplicateID run."""
@@ -197,23 +270,31 @@ def _qoi_process_run(run_key):
 
     # full-timeseries QoIs
     if run_records and _QOI_WORKER["timeseries_plan"]:
-        # process full-timeseries qois
-        mcds_last = list_mcds[-1]
+        n_time = len(run_records)
         for qoi_name, qoi_func, input_name in _QOI_WORKER["timeseries_plan"]:
             value = safe_call_qoi_function(
                 qoi_func,
-                mcds=mcds_last,
+                mcds=list_mcds[-1],
                 list_mcds=list_mcds,
                 data_cache=None,
                 input_name=input_name,
             )
-            # update the record
-            run_records[-1].update(_flatten_qoi_value(qoi_name, value))
+            if not (value is None):
+                qoi_columns = _expand_timeseries_qoi_value(
+                    qoi_name=qoi_name,
+                    value=value,
+                    n_time=n_time,
+                )
+                for column_name, values in qoi_columns.items():
+                    for record, item in zip(run_records, values):
+                        record[column_name] = item
+
     # free memory
     del list_mcds
 
     # output
     return run_records
+
 
 def mcds_list_to_qoi_df_long(
         recreated_qoi_funcs,
@@ -271,8 +352,8 @@ def mcds_list_to_qoi_df_long(
         _QOI_WORKER.clear()
         _QOI_WORKER.update({
             "db_file": db_file,
-            "timestep_plan": [entry for entry in qoi_plan if entry[2] != "mcds_ts"],
-            "timeseries_plan": [entry for entry in qoi_plan if entry[2] == "mcds_ts"],
+            "timestep_plan": [entry for entry in qoi_plan if not (entry[2] in {"mcds_ts", "mcdsts"})],
+            "timeseries_plan": [entry for entry in qoi_plan if entry[2] in {"mcds_ts", "mcdsts"}],
         })
         # process run
         for i, run_key in enumerate(run_keys, start=1):
