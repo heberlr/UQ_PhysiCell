@@ -170,7 +170,7 @@ def safe_call_qoi_function(
             'sdata',
             'domain',
             'mcds',
-            'mcds_ts',
+            'mcds_ts', 'mcdsts',
         }:
         param_name = getattr(func, '__param_name__', None)
         if param_name is not None:
@@ -216,11 +216,11 @@ def safe_call_qoi_function(
             raise ValueError("QoI function expects 'mcds', but mcds is None.")
         return func(mcds)
 
-    if input_name == 'mcds_ts':
+    if input_name in {'mcds_ts', 'mcdsts'}:
         if list_mcds is None:
-            raise ValueError("QoI function expects 'mcds_ts', but list_mcds is None.")
+            raise ValueError(f"QoI function expects '{input_name}', but list_mcds is None.")
         if mcds is None:
-            raise ValueError("QoI function expects 'mcds_ts', but mcds is None.")
+            raise ValueError(f"QoI function expects '{input_name}', but mcds is None.")
         # Compute time-series QoIs only once, on the last snapshot.
         if mcds is list_mcds[-1]:
             return func(list_mcds)
