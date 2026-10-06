@@ -262,8 +262,12 @@ class TestMcdsListToQoiDfLong(unittest.TestCase):
             'ReplicateID': [0],
             'Data': [[FakeMCDS(0.0), FakeMCDS(1.0)]],
         })
+        # per-timestep values must be labelled with the simulation times
         recreated = _qoi_funcs(
-            trajectory=lambda mcds_ts: {'live': [1, 2], 'dead': [0, 1]},
+            trajectory=lambda mcds_ts: {
+                'live': pd.Series([1, 2], index=[m.get_time() for m in mcds_ts]),
+                'dead': pd.Series([0, 1], index=[m.get_time() for m in mcds_ts]),
+            },
         )
 
         result = mcds_list_to_qoi_df_long(recreated, [0], chunk_size=10, db_file='dummy.db')
@@ -273,6 +277,83 @@ class TestMcdsListToQoiDfLong(unittest.TestCase):
         self.assertNotIn('trajectory_key', result.columns)
         self.assertListEqual(result['trajectory_live'].tolist(), [1, 2])
         self.assertListEqual(result['trajectory_dead'].tolist(), [0, 1])
+
+    @patch('uq_physicell.model_analysis.utils.load_output')
+    def test_wrapped_timeseries_unlabelled_values_are_never_split_by_length(self, mock_load_output):
+        # as many summary values as timesteps must still describe the whole run
+        mock_load_output.return_value = pd.DataFrame({
+            'SampleID': [0],
+            'ReplicateID': [0],
+            'Data': [[FakeMCDS(0.0), FakeMCDS(1.0), FakeMCDS(2.0)]],
+        })
+        recreated = _qoi_funcs(
+            stats=lambda mcds_ts: [10.0, 20.0, 30.0],
+            arr=lambda mcds_ts: np.array([1.0, 2.0, 3.0]),
+            traj=lambda mcds_ts: {'live': [1, 2, 3]},
+        )
+
+        result = mcds_list_to_qoi_df_long(recreated, [0], chunk_size=10, db_file='dummy.db')
+
+        self.assertNotIn('stats', result.columns)
+        self.assertListEqual(result['stats_0'].tolist(), [10.0, 10.0, 10.0])
+        self.assertListEqual(result['stats_1'].tolist(), [20.0, 20.0, 20.0])
+        self.assertListEqual(result['stats_2'].tolist(), [30.0, 30.0, 30.0])
+        self.assertListEqual(result['arr_2'].tolist(), [3.0, 3.0, 3.0])
+        self.assertListEqual(result['traj_live_0'].tolist(), [1, 1, 1])
+
+    @patch('uq_physicell.model_analysis.utils.load_output')
+    def test_wrapped_timeseries_series_and_mapping_keyed_by_time_expand_by_time(self, mock_load_output):
+        mock_load_output.return_value = pd.DataFrame({
+            'SampleID': [0],
+            'ReplicateID': [0],
+            'Data': [[FakeMCDS(0.0), FakeMCDS(60.0), FakeMCDS(120.0)]],
+        })
+        recreated = _qoi_funcs(
+            cum=lambda mcds_ts: pd.Series([0, 2, 5], index=[m.get_time() for m in mcds_ts]).cumsum(),
+            by_key=lambda mcds_ts: {m.get_time(): m.get_time() / 60 for m in mcds_ts},
+        )
+
+        result = mcds_list_to_qoi_df_long(recreated, [0], chunk_size=10, db_file='dummy.db')
+
+        self.assertListEqual(result['cum'].tolist(), [0, 2, 7])
+        self.assertListEqual(result['by_key'].tolist(), [0.0, 1.0, 2.0])
+        self.assertFalse(any(column.startswith('by_key_') for column in result.columns))
+
+    @patch('uq_physicell.model_analysis.utils.load_output')
+    def test_wrapped_timeseries_default_index_is_not_time_even_when_times_are_0_to_n(self, mock_load_output):
+        # snapshots saved at t = 0, 1, 2 coincide with a default 0..n-1 index
+        mock_load_output.return_value = pd.DataFrame({
+            'SampleID': [0],
+            'ReplicateID': [0],
+            'Data': [[FakeMCDS(0.0), FakeMCDS(1.0), FakeMCDS(2.0)]],
+        })
+        recreated = _qoi_funcs(
+            stats=lambda mcds_ts: pd.Series([10.0, 20.0, 30.0]),
+            keyed=lambda mcds_ts: {0: 'a', 1: 'b', 2: 'c'},
+            named=lambda mcds_ts: pd.Series([5, 6, 7], index=pd.RangeIndex(3, name='time')),
+        )
+
+        result = mcds_list_to_qoi_df_long(recreated, [0], chunk_size=10, db_file='dummy.db')
+
+        self.assertListEqual(result['stats_0'].tolist(), [10.0, 10.0, 10.0])
+        self.assertListEqual(result['stats_2'].tolist(), [30.0, 30.0, 30.0])
+        self.assertListEqual(result['keyed_1'].tolist(), ['b', 'b', 'b'])
+        # explicitly named 'time' still counts as per-timestep
+        self.assertListEqual(result['named'].tolist(), [5, 6, 7])
+
+    @patch('uq_physicell.model_analysis.utils.load_output')
+    def test_wrapped_timeseries_time_index_with_wrong_times_raises(self, mock_load_output):
+        mock_load_output.return_value = pd.DataFrame({
+            'SampleID': [0],
+            'ReplicateID': [0],
+            'Data': [[FakeMCDS(0.0), FakeMCDS(1.0)]],
+        })
+        recreated = _qoi_funcs(
+            bad=lambda mcds_ts: pd.Series([1, 2], index=pd.Index([0.0, 5.0], name='time')),
+        )
+
+        with self.assertRaisesRegex(ValueError, "do not match the simulation times"):
+            mcds_list_to_qoi_df_long(recreated, [0], chunk_size=10, db_file='dummy.db')
 
 
 class TestCalculateQoiFromDbFile(unittest.TestCase):

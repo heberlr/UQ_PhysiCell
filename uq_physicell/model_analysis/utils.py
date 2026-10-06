@@ -193,7 +193,18 @@ def _expand_timeseries_qoi_value(
         n_time: int,
         times: Sequence[Any] | None = None,
     ) -> dict[str, list[Any]]:
-    """Convert a full-time-series QoI result to per-row long-format columns."""
+    """Convert a full-time-series QoI result to per-row long-format columns.
+
+    A result is treated as one value per timestep only when it is labelled with
+    the simulation times: a Series indexed by time, a DataFrame with a ``time``
+    column or time index, or a Mapping keyed by time. Anything else (scalars,
+    lists, arrays, other Series/Mappings) describes the whole run and is
+    repeated on every row. Length alone is never used to decide, so e.g. three
+    summary statistics on a run with three snapshots are not split across rows.
+    Per-timestep results must be labelled with all simulation times; use NaN
+    where there is no value (e.g. keep the leading NaN of ``Series.diff()``).
+    A default 0..n-1 index only counts as time labels when it is named ``time``.
+    """
     def broadcast(item: Any) -> list[Any]:
         if isinstance(item, np.generic):
             item = item.item()
@@ -201,6 +212,13 @@ def _expand_timeseries_qoi_value(
 
     def index_matches_times(index: pd.Index) -> bool:
         if times is None or len(index) != len(times):
+            return False
+        # a default 0..n-1 index (or dict keys) is positional, not time, unless named 'time'
+        if (
+                index.name != "time"
+                and pd.api.types.is_integer_dtype(index)
+                and list(index) == list(range(len(index)))
+            ):
             return False
         index_values = list(index)
         time_values = list(times)
@@ -228,24 +246,12 @@ def _expand_timeseries_qoi_value(
             )
 
     def expand_series(name: str, series: pd.Series) -> dict[str, list[Any]]:
-        is_position_index = (
-            isinstance(series.index, pd.RangeIndex)
-            and list(series.index) == list(range(n_time))
-        )
-        is_timestep_sequence = (
-            len(series) == n_time
-            and (times is None or is_position_index or index_matches_times(series.index))
-        )
-
-        if is_timestep_sequence:
-            if times is not None and not is_position_index and index_matches_times(series.index):
-                validate_time_index(series.index)
-                series = series.reindex(times)
-            return {name: series.tolist()}
-
-        if times is not None and series.index.name == "time":
+        # per timestep: labelled with the simulation times
+        if times is not None and (series.index.name == "time" or index_matches_times(series.index)):
             validate_time_index(series.index)
+            return {name: series.reindex(times).tolist()}
 
+        # whole run
         if len(series) == 1:
             return {name: broadcast(series.iloc[0])}
 
@@ -272,8 +278,6 @@ def _expand_timeseries_qoi_value(
             ):
             validate_time_index(df_value.index)
             df_value = df_value.reindex(times)
-        elif len(df_value) == n_time:
-            pass
         elif len(df_value) == 1:
             row = df_value.iloc[0]
             return {
@@ -285,8 +289,8 @@ def _expand_timeseries_qoi_value(
             if isinstance(squeezed, pd.Series):
                 return expand_series(qoi_name, squeezed)
             raise ValueError(
-                f"Time-series QoI '{qoi_name}' returned "
-                f"{len(df_value)} rows, expected {n_time} or 1."
+                f"Time-series QoI '{qoi_name}' returned {len(df_value)} rows without "
+                f"time labels; use a 'time' column or time index for per-timestep values."
             )
 
         return {
@@ -295,6 +299,9 @@ def _expand_timeseries_qoi_value(
         }
 
     if isinstance(value, Mapping):
+        # keyed by the simulation times: one value per timestep
+        if times is not None and value and index_matches_times(pd.Index(list(value.keys()))):
+            return expand_series(qoi_name, pd.Series(value))
         result = {}
         for key, item in value.items():
             result.update(
@@ -314,8 +321,6 @@ def _expand_timeseries_qoi_value(
         if value.ndim == 0:
             return {qoi_name: broadcast(value.item())}
         if value.ndim == 1:
-            if value.size == n_time:
-                return {qoi_name: value.tolist()}
             if value.size == 1:
                 return {qoi_name: broadcast(value[0])}
             return {
@@ -323,11 +328,6 @@ def _expand_timeseries_qoi_value(
                 for i, item in enumerate(value.tolist())
             }
         if value.ndim == 2:
-            if value.shape[0] == n_time:
-                return {
-                    f"{qoi_name}_{i}": value[:, i].tolist()
-                    for i in range(value.shape[1])
-                }
             if value.shape[0] == 1:
                 return {
                     f"{qoi_name}_{i}": broadcast(value[0, i])
@@ -336,13 +336,12 @@ def _expand_timeseries_qoi_value(
 
         raise ValueError(
             f"Time-series QoI '{qoi_name}' returned array shape {value.shape}; "
-            f"expected a scalar, {n_time} values, or {n_time} rows."
+            f"expected a scalar, a 1-D array, or a single row. For per-timestep "
+            f"values, return a pandas Series or DataFrame indexed by time."
         )
 
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
         sequence = list(value)
-        if len(sequence) == n_time:
-            return {qoi_name: sequence}
         if len(sequence) == 1:
             return {qoi_name: broadcast(sequence[0])}
         return {
