@@ -111,7 +111,7 @@ calib_context = CalibrationContext(
 run_bayesian_optimization(calib_context)
 ```
 
-Results (samples, GP models, Pareto front) are stored in `results.db` and can be reloaded with `uq_physicell.database.bo_db.load_structure`, then explored with the plotting helpers in `uq_physicell.bo.plots` (`plot_parameter_space`, `plot_qoi_param`, `plot_parameter_vs_fitness`) and the analysis helpers in `uq_physicell.bo.utils` (`analyze_pareto_results`, `get_observed_qoi`).
+Results (samples, GP models, Pareto front) are stored in `results.db` and can be reloaded with `uq_physicell.database.bo_db.load_structure`, then explored with the plotting helpers in `uq_physicell.bo.plots` (`plot_parameter_space`, `plot_qoi_param`, `plot_parameter_vs_fitness`) and the analysis helpers in `uq_physicell.bo.utils` (`analyze_pareto_results`, `get_observed_qoi`). See {doc}`databases` for the database layout and recipes (best parameters, convergence history).
 
 **Full worked example:** {doc}`examples/virus-mac-new/ex7_Calib_BO`
 

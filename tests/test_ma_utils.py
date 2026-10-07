@@ -494,22 +494,36 @@ class TestCalculateQoiStatistics(unittest.TestCase):
             calculate_qoi_statistics('dummy.db', qoi_funcs={}, df_qois_data=df_qois_data)
         self.assertIn('consistency check failed', str(ctx.exception))
 
-    @patch('uq_physicell.model_analysis.utils.load_output', side_effect=RuntimeError('disk error'))
-    def test_load_output_failure_wrapped_in_value_error(self, mock_load_output):
+    @patch('uq_physicell.model_analysis.utils.get_storage_mode', side_effect=RuntimeError('disk error'))
+    def test_load_output_failure_wrapped_in_value_error(self, mock_get_mode):
         with self.assertRaises(ValueError) as ctx:
             calculate_qoi_statistics('dummy.db', qoi_funcs={})
         self.assertIn('Error loading output data from database', str(ctx.exception))
 
-    @patch('uq_physicell.model_analysis.utils.check_db_consistency', return_value=True)
-    @patch('uq_physicell.model_analysis.utils.load_output')
-    def test_no_data_provided_and_metadata_only_frame_fails_downstream(self, mock_load_output, mock_check):
-        # load_data=False path -> no 'Data' column and no 'time' column either,
-        # so get_summary_statistics_qois raises and gets wrapped.
-        mock_load_output.return_value = pd.DataFrame({'SampleID': [0], 'ReplicateID': [0]})
+    @patch('uq_physicell.model_analysis.utils.get_storage_mode', return_value=None)
+    def test_no_data_provided_and_no_output_stored_raises(self, mock_get_mode):
         with self.assertRaises(ValueError) as ctx:
-            calculate_qoi_statistics('dummy.db', qoi_funcs={})
-        mock_load_output.assert_called_once_with('dummy.db', load_data=False)
-        self.assertIn('Error taking the mean', str(ctx.exception))
+            calculate_qoi_statistics('dummy.db', qoi_funcs={'qoi': None})
+        mock_get_mode.assert_called_once_with('dummy.db')
+        self.assertIn('No simulation output stored', str(ctx.exception))
+
+    @patch('uq_physicell.model_analysis.utils.check_db_consistency', return_value=True)
+    @patch('uq_physicell.model_analysis.utils.calculate_qoi_from_db_file')
+    @patch('uq_physicell.model_analysis.utils.get_storage_mode', return_value='raw_mcds')
+    def test_no_data_provided_raw_mode_computes_qois(self, mock_get_mode, mock_calc, mock_check):
+        mock_calc.return_value = pd.DataFrame({
+            'SampleID': [0, 0], 'time': [0, 0], 'ReplicateID': [0, 1], 'qoi': [10.0, 12.0],
+        })
+        df_mean, _, _ = calculate_qoi_statistics('dummy.db', qoi_funcs={'qoi': 'lambda df: len(df)'})
+        mock_calc.assert_called_once()
+        self.assertAlmostEqual(df_mean.loc[(0, 0), 'qoi'], 11.0)
+
+    @patch('uq_physicell.model_analysis.utils.check_db_consistency', return_value=True)
+    @patch('uq_physicell.model_analysis.utils.get_storage_mode', return_value='custom')
+    def test_no_data_provided_custom_mode_raises(self, mock_get_mode, mock_check):
+        with self.assertRaises(ValueError) as ctx:
+            calculate_qoi_statistics('dummy.db', qoi_funcs={'qoi': None})
+        self.assertIn('neither a QoI DataFrame', str(ctx.exception))
 
     @patch('uq_physicell.model_analysis.utils.check_db_consistency', return_value=True)
     def test_data_column_present_but_no_qoi_funcs_raises(self, mock_check):
@@ -566,7 +580,19 @@ class TestCalculateQoiStatistics(unittest.TestCase):
         })
         with self.assertRaises(ValueError) as ctx:
             calculate_qoi_statistics('dummy.db', qoi_funcs={'qoi': None}, df_qois_data=df_qois_data)
-        self.assertIn('neither Dataframe nor List', str(ctx.exception))
+        self.assertIn('neither a QoI DataFrame', str(ctx.exception))
+
+    @patch('uq_physicell.model_analysis.utils.check_db_consistency', return_value=True)
+    @patch('uq_physicell.model_analysis.utils.get_qoi_from_db_file')
+    def test_data_column_dataframe_without_time_raises(self, mock_get_qoi, mock_check):
+        # A custom summary DataFrame without 'time' is not a QoI DataFrame: fail clearly up front
+        df_qois_data = pd.DataFrame({
+            'SampleID': [0], 'ReplicateID': [0], 'Data': [pd.DataFrame({'cell_type': ['a'], 'count': [3]})],
+        })
+        with self.assertRaises(ValueError) as ctx:
+            calculate_qoi_statistics('dummy.db', qoi_funcs={'count': None}, df_qois_data=df_qois_data)
+        self.assertIn('neither a QoI DataFrame', str(ctx.exception))
+        mock_get_qoi.assert_not_called()
 
 
 # ─── apply_pca_to_qois ────────────────────────────────────────────────────────

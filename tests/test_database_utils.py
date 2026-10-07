@@ -16,6 +16,7 @@ from uq_physicell.database.utils import (
     _create_table,
     _alter_table_add_column,
     download_file,
+    get_database_type,
 )
 
 
@@ -164,3 +165,46 @@ class TestDownloadFile:
             download_file(str(target), custom_url="https://example.com/custom_file")
             args, _ = mock_retrieve.call_args
             assert args[0] == "https://example.com/custom_file"
+
+
+class TestGetDatabaseType:
+    def test_model_analysis(self, db_path):
+        _make_table(db_path, 'Metadata', 'Sampler TEXT, Ini_File_Path TEXT', [('Sobol', 'm.ini')])
+        assert get_database_type(db_path) == 'MA'
+
+    def test_bayesian_optimization(self, db_path):
+        _make_table(db_path, 'Metadata', 'BO_Method TEXT, ObsData_Path TEXT', [('qNEHVI', 'obs.csv')])
+        assert get_database_type(db_path) == 'BO'
+
+    def test_abc_from_metadata(self, db_path):
+        _make_table(db_path, 'Metadata', 'Method TEXT, ObsData_Path TEXT', [('ABC', 'obs.csv')])
+        assert get_database_type(db_path) == 'ABC'
+
+    def test_abc_from_pyabc_tables_without_metadata(self, db_path):
+        _make_table(db_path, 'abc_smc', 'id INTEGER PRIMARY KEY')
+        assert get_database_type(db_path) == 'ABC'
+
+    def test_metadata_with_other_method_is_unknown(self, db_path):
+        _make_table(db_path, 'Metadata', 'Method TEXT', [('Other',)])
+        assert get_database_type(db_path) is None
+
+    def test_no_metadata_table_is_unknown(self, db_path):
+        _make_table(db_path, 'Samples', 'SampleID INTEGER')
+        assert get_database_type(db_path) is None
+
+    def test_missing_file(self, tmp_path):
+        missing = tmp_path / 'missing.db'
+        assert get_database_type(str(missing)) is None
+        assert not missing.exists()  # must not create the file
+
+    def test_non_sqlite_file(self, tmp_path):
+        not_db = tmp_path / 'notes.db'
+        not_db.write_text('this is not a sqlite database')
+        assert get_database_type(str(not_db)) is None
+
+    def test_backward_compatible_imports(self):
+        from uq_physicell.database import get_database_type as from_package
+        from uq_physicell.database.ma_db import get_database_type as from_ma_db
+        assert from_package is get_database_type
+        assert from_ma_db is get_database_type
+

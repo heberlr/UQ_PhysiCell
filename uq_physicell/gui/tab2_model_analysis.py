@@ -22,7 +22,7 @@ from ..model_analysis.sensitivity_analysis import run_global_sa, run_local_sa, s
 from ..model_analysis.ma_context import ModelAnalysisContext, run_simulations
 from ..model_analysis.utils import calculate_qoi_statistics
 from ..model_analysis.visualization import plot_qoi_over_time, plot_global_sa_results, plot_local_sa_results
-from ..database.ma_db import load_structure
+from ..database.ma_db import load_structure, load_qois, get_storage_mode
 
 
 class QtTextEditLogHandler(logging.Handler):
@@ -623,10 +623,10 @@ def open_qoi_definition_window(main_window):
     # Predefined QoIs dictionary based on the database structure
     predefined_qoi_funcs = {}
     custom_qoi_option = True
-    if not main_window.df_output.empty and 'Data' in main_window.df_output.columns:
-        if isinstance(main_window.df_output['Data'].iloc[0], pd.DataFrame):
-            predefined_qoi_funcs = {qoi_name: None for qoi_name in main_window.df_output['Data'].iloc[0].columns if qoi_name not in ['time'] }
-            custom_qoi_option = False
+    # QoIs precomputed at simulation time: offer the stored QoI names, no custom QoIs
+    if not main_window.df_output.empty and get_storage_mode(main_window.ma_file_path) == 'qoi':
+        predefined_qoi_funcs = {qoi_name: None for qoi_name in load_qois(main_window.ma_file_path)['QOI_Name'] if qoi_name is not None}
+        custom_qoi_option = not predefined_qoi_funcs
     if not predefined_qoi_funcs:
         predefined_qoi_funcs = {
             'total_cells': "lambda df: len(df)",

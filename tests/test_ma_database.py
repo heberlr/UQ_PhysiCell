@@ -21,7 +21,8 @@ from uq_physicell.database.ma_db import (
     load_samples,
     load_output,
     load_data_unserialized,
-    load_structure
+    load_structure,
+    get_storage_mode,
 )
 
 
@@ -128,7 +129,8 @@ class TestModularLoadFunctions:
         assert df_output.shape[0] == 4
         assert 'SampleID' in df_output.columns
         assert 'ReplicateID' in df_output.columns
-        assert df_output['Data'] is not None
+        # IDs only: no placeholder Data column, nothing deserialized
+        assert 'Data' not in df_output.columns
     
     def test_load_output_filter_by_sample(self, sample_database):
         """Test load_output with sample_ids filter."""
@@ -200,7 +202,45 @@ class TestModularLoadFunctions:
         assert ids.shape[0] == 4
         assert 'SampleID' in ids.columns
         assert 'ReplicateID' in ids.columns
-        assert ids['Data'] is not None
+        assert 'Data' not in ids.columns
+
+
+class _FakeTimeStep:
+    """Picklable stand-in for pcdl.TimeStep (only the duck-typed method matters)."""
+    def get_cell_df(self):
+        return pd.DataFrame()
+
+
+class TestGetStorageMode:
+    @pytest.fixture
+    def db_file(self, tmp_path):
+        path = str(tmp_path / 'mode.db')
+        create_structure(path)
+        return path
+
+    @pytest.mark.parametrize("data, expected", [
+        (pd.DataFrame({'time': [0.0], 'qoi': [1.0]}), 'qoi'),
+        (pd.DataFrame({'cell_type': ['a'], 'count': [3]}), 'custom'),  # no 'time' column
+        ([_FakeTimeStep(), _FakeTimeStep()], 'raw_mcds'),
+        ([pd.DataFrame({'ID': [0]})], 'custom'),  # drop_columns output is not a public mode
+        ({'anything': 1}, 'custom'),
+        ([], 'custom'),
+    ])
+    def test_modes(self, db_file, data, expected):
+        insert_output(db_file, 0, 0, pickle.dumps(data))
+        assert get_storage_mode(db_file) == expected
+
+    def test_no_output_returns_none(self, db_file):
+        assert get_storage_mode(db_file) is None
+
+    def test_uses_lowest_run(self, db_file):
+        # Insert out of order: the probe must be (SampleID 0, ReplicateID 0), not the first row written
+        insert_output(db_file, 3, 1, pickle.dumps({'custom': True}))
+        insert_output(db_file, 0, 0, pickle.dumps(pd.DataFrame({'time': [0.0]})))
+        assert get_storage_mode(db_file) == 'qoi'
+
+    def test_sample_database_is_qoi(self, sample_database):
+        assert get_storage_mode(sample_database) == 'qoi'
 
 
 class TestInsertParamSpaceEdgeCases:

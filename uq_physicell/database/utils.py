@@ -1,5 +1,6 @@
+import os
 import sqlite3
-from typing import Union
+from typing import Optional, Union
 
 def update_db_value(db_file:str, table_name:str, column_name:str, new_value:Union[str, int, float], old_value:Union[str, int, float]):
     """
@@ -115,3 +116,60 @@ def download_file(file_name, base_url="https://zenodo.org/records/21496966/files
             url_path = base_url + file_name
         print(f"Downloading {file_name} from {url_path} ...")
         urllib.request.urlretrieve(url_path, file_name)
+
+
+def get_database_type(db_file: str) -> Optional[str]:
+    """Determine which kind of UQ-PhysiCell study wrote a database file.
+
+    The kind is read from the ``Metadata`` table: model-analysis databases have a
+    ``Sampler`` column, BO databases a ``BO_Method`` column, and ABC databases a
+    ``Method`` column set to ``'ABC'``. An ABC database written before its
+    ``Metadata`` row existed is still recognized by pyABC's ``abc_smc`` table.
+    Nothing is deserialized, so this is safe to call on untrusted files.
+
+    Args:
+        db_file (str): Path to the SQLite database file to examine.
+
+    Returns:
+        str or None: ``'MA'`` for Model Analysis, ``'BO'`` for Bayesian Optimization,
+        ``'ABC'`` for ABC-SMC calibration (read it with ``pyabc.History``), or None if
+        the file does not exist, is not a SQLite database, or is not a recognized
+        UQ-PhysiCell database.
+
+    Example:
+        >>> db_type = get_database_type('analysis.db')
+        >>> if db_type == 'MA':
+        ...     print("This is a Model Analysis database")
+        >>> elif db_type == 'ABC':
+        ...     print("This is an ABC database - read it with pyabc.History")
+    """
+    if not os.path.isfile(db_file):
+        return None
+
+    conn = sqlite3.connect(db_file)
+    try:
+        cursor = conn.cursor()
+        tables = {row[0] for row in cursor.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        if 'Metadata' in tables:
+            columns = [col[1] for col in cursor.execute("PRAGMA table_info(Metadata)").fetchall()]
+            # Model analysis database should have one column as 'Sampler'
+            if 'Sampler' in columns:
+                return 'MA'
+            # BO database should have one column as 'BO_Method'
+            if 'BO_Method' in columns:
+                return 'BO'
+            # ABC database has a 'Method' column holding 'ABC'
+            if 'Method' in columns:
+                row = cursor.execute("SELECT Method FROM Metadata LIMIT 1").fetchone()
+                if row and row[0] == 'ABC':
+                    return 'ABC'
+        # pyABC's own run table, present even without UQ-PhysiCell's Metadata row
+        if 'abc_smc' in tables:
+            return 'ABC'
+        return None
+    except sqlite3.DatabaseError:
+        # Not a SQLite database (or a corrupted one)
+        return None
+    finally:
+        conn.close()

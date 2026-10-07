@@ -6,7 +6,7 @@ import traceback
 
 from PyQt5.QtWidgets import QFileDialog, QInputDialog
 
-from ..database.ma_db import get_database_type
+from ..database.utils import get_database_type
 
 
 def _get_rules_format_from_xml(main_window):
@@ -272,6 +272,12 @@ def load_db_file(main_window, filePath=None):
                     main_window.load_bo_database(main_window)
                     # Switch the selected tab to Tab 3 - Bayesian Optimization
                     main_window.tabs.setCurrentIndex(2)
+                # ABC database: stored in pyABC's format, not loaded by the GUI
+                elif db_type == 'ABC':
+                    error_message = ("The selected file is an ABC calibration database, which the GUI does not load. "
+                                     "Read it with pyabc.History (see the 'Working with Result Databases' documentation).")
+                    main_window.update_output_tab2(main_window, error_message)
+                    return
                 else:
                     error_message = "The selected file is not a valid MA or BO database."
                     main_window.update_output_tab2(main_window, error_message)

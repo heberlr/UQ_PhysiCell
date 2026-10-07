@@ -428,15 +428,18 @@ def check_database(db_file: str) -> tuple:
         tuple: ``(ok, message)``; ``message`` explains the problem, or summarizes the runs when ok.
     """
     import sqlite3
-    from uq_physicell.database.ma_db import get_database_type, load_output
+    from uq_physicell.database.ma_db import load_output
+    from uq_physicell.database.utils import get_database_type
     if not os.path.isfile(db_file):
         return False, f'{db_file} does not exist.'
     db_type = get_database_type(db_file)
     if db_type == 'BO':
         return False, 'Bayesian optimization database: it stores objective values, not simulation output.'
+    if db_type == 'ABC':
+        return False, 'ABC calibration database: it stores pyABC particles, not simulation output.'
     if db_type != 'MA':
         return False, ('Not a UQ-PhysiCell model-analysis database (no Metadata table with a Sampler); '
-                       'ABC and data-assimilation databases are not supported.')
+                       'data-assimilation databases are not supported.')
     try:
         conn = sqlite3.connect(db_file)
         try:

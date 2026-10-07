@@ -16,6 +16,7 @@ installation
 gui
 model_analysis
 calibration
+databases
 api_reference
 examples
 publications
