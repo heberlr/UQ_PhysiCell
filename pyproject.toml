@@ -63,6 +63,7 @@ dependencies = [
     "SALib",
     "scipy",
     "seaborn",
+    "zstandard",
 ]
 
 [project.optional-dependencies]
@@ -96,6 +97,7 @@ docs = [
 
 utils = [
     "gudhi",
+    "scikit-learn",
     #"muspan",
 ]
 
