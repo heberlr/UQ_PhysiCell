@@ -80,6 +80,12 @@ def patch_pyabc_nan_particle_weight():
     an unmeasurably-unlikely proposal contributes nothing -- is the
     mathematically sensible outcome, so that's substituted instead.
 
+    This is meant for a *rare* degenerate particle. Every zeroed weight is
+    counted between generations by ``safeguards.check_population_weights``,
+    which stops the run when a model has more than a small share of them --
+    many zeroed weights mean a broken transition kernel, and silently zeroing
+    them all would remove that model from a model-selection run.
+
     Called automatically on `import uq_physicell.abc`; safe to call more than
     once.
     """

@@ -193,6 +193,10 @@ history = run_abc_calibration(calib_context=calib_context)
 
 **Handling a failed simulation.** A PhysiCell crash (segfault, malformed output, a transient filesystem hiccup, ...) is a property of one particle, not of the whole calibration. When that happens, `CalibrationContext` catches it and passes `None` as the simulated data instead of letting the exception kill the pyABC worker process — every custom distance function must therefore check for `None` (as above) and return `np.inf` to reject that particle, the same convention used for a malformed or short simulation output. The built-in distance functions in `uq_physicell.utils.distances` (`SumSquaredDifferences`, `Manhattan`, `Chebyshev`) already do this.
 
+**Parameters on very different scales.** Between generations, ABC-SMC proposes new parameters from a kernel fitted to the previous population. Parameters often differ by orders of magnitude (a rate of `1e-5` 1/min next to a half-max of `20` mmHg), and a kernel fitted in those raw units can collapse: it stops perturbing the small parameters and gives most new proposals zero density. The default `transition_strategy="multivariate"` therefore uses `ScaledMultivariateNormalTransition`, which fits the kernel on standardized parameters and reports densities in the original units, so no rescaling of your priors is needed. `transition_strategy="local"` selects pyABC's `LocalTransition` instead. Each candidate model gets its own kernel.
+
+**Safeguards between generations.** Before every generation, the run checks that each model's fitted kernel gives positive density to its own proposals, and that the previous generation's importance weights are finite. If a model's kernel is degenerate, or more than `abc_options["max_zero_weight_fraction"]` (default `0.05`) of its particles ended up with a zero or non-finite weight, the run stops with an `ABCSafeguardError` naming the model, before any simulation of the next generation runs. Continuing would silently give that model a wrong probability and posterior. Completed generations stay in the database.
+
 **Full worked example:** {doc}`examples/virus-mac-new/ex8_ABC_Calib`
 
 ## References

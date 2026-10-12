@@ -740,7 +740,29 @@ def test_setup_transition_function_local():
     ctx = CalibrationContext(db_path="dummy.db", **_minimal_kwargs(
         abc_options={'transition_strategy': 'local'}
     ))
-    assert isinstance(ctx.setup_transition_function(), LocalTransition)
+    transitions = ctx.setup_transition_function()
+    # One kernel per candidate model (a single shared instance breaks model selection)
+    assert len(transitions) == ctx.num_models
+    assert all(isinstance(tr, LocalTransition) for tr in transitions)
+
+
+def test_setup_transition_function_default_is_scaled_multivariate():
+    from uq_physicell.abc import CalibrationContext, ScaledMultivariateNormalTransition
+
+    ctx = CalibrationContext(db_path="dummy.db", **_minimal_kwargs())
+    transitions = ctx.setup_transition_function()
+    assert len(transitions) == ctx.num_models
+    assert all(isinstance(tr, ScaledMultivariateNormalTransition) for tr in transitions)
+
+
+def test_setup_transition_function_unsupported_raises():
+    from uq_physicell.abc import CalibrationContext
+
+    ctx = CalibrationContext(db_path="dummy.db", **_minimal_kwargs(
+        abc_options={'transition_strategy': 'bogus'}
+    ))
+    with pytest.raises(ValueError, match="not supported"):
+        ctx.setup_transition_function()
 
 
 def test_setup_epsilon_function_unsupported_raises():

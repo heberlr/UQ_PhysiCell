@@ -17,7 +17,13 @@ from .utils import patch_pyabc_dataframe_csv_fallback, patch_pyabc_nan_particle_
 patch_pyabc_dataframe_csv_fallback()
 patch_pyabc_nan_particle_weight()
 
+from .safeguards import ABCSafeguardError, CheckedABCSMC
+from .transitions import ScaledMultivariateNormalTransition
+
 __all__ = [
+    'ABCSafeguardError',
+    'CheckedABCSMC',
+    'ScaledMultivariateNormalTransition',
     'CalibrationContext',
     'ModelSpec',
     'run_abc_calibration',

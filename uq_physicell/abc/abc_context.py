@@ -11,7 +11,7 @@ import pandas as pd
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # pyABC imports
-from pyabc import ABCSMC, sampler, LocalTransition, AdaptiveAggregatedDistance, AggregatedDistance, QuantileEpsilon, History, RV, Distribution
+from pyabc import sampler, LocalTransition, AdaptiveAggregatedDistance, AggregatedDistance, QuantileEpsilon, History, RV, Distribution
 from pyabc.populationstrategy import AdaptivePopulationSize
 from pyabc.storage import load_dict_from_json
 from dask.distributed import Client, get_worker
@@ -23,6 +23,8 @@ from uq_physicell.abc.utils import (
     insert_metadata_db,
     insert_models_db,
 )
+from uq_physicell.abc.safeguards import CheckedABCSMC
+from uq_physicell.abc.transitions import ScaledMultivariateNormalTransition
 from uq_physicell.utils import run_replicate_serializable
 from ..utils.sumstats import _convert_qoi_function_to_string
 
@@ -150,6 +152,8 @@ class CalibrationContext:
         
         # Transition and distance configuration
         self.transition_strategy = abc_options.get("transition_strategy", "multivariate")  # "local" or "multivariate"
+        # Largest share of one model's particles that may get a zeroed importance weight in a generation
+        self.max_zero_weight_fraction = abc_options.get("max_zero_weight_fraction", 0.05)
         self.adaptive_distance = abc_options.get("adaptive_distance", False)
         self.adaptive_distance_file = abc_options.get("adaptive_distance_file", None if not self.adaptive_distance else "adaptive_distance_log.json")
         self.convergence_check_func = abc_options.get("convergence_check_func", None)
@@ -169,9 +173,6 @@ class CalibrationContext:
         self.aggregation_func = abc_options.get("custom_aggregation_func", self._default_aggregation_func)
         self.custom_run_single_replicate_func = abc_options.get("custom_run_single_replicate_func", None)
 
-
-        # Parameter scaling
-        self.log_scale = abc_options.get("log_scale", False)
 
         # Parallelization setup
         self._setup_parallelization()
@@ -387,11 +388,18 @@ class CalibrationContext:
         return distance_func
 
     def setup_transition_function(self):
-        """Setup transition function for ABC-SMC."""
+        """Setup transition functions for ABC-SMC, one kernel per candidate model.
+
+        "multivariate" (default) uses ScaledMultivariateNormalTransition, a multivariate
+        normal kernel fitted on standardized parameters so that parameters on very
+        different scales are all perturbed. "local" uses pyABC's LocalTransition.
+        """
         if self.transition_strategy == "local":
-            return LocalTransition()
+            return [LocalTransition() for _ in self.models]
+        elif self.transition_strategy == "multivariate":
+            return [ScaledMultivariateNormalTransition() for _ in self.models]
         else:
-            return None  # Default - multivariate normal transitions
+            raise ValueError(f"Transition strategy '{self.transition_strategy}' is not supported. Use 'multivariate' or 'local'.")
 
     def setup_epsilon_function(self):
         """Setup epsilon (tolerance) function for ABC-SMC."""
@@ -423,10 +431,6 @@ class CalibrationContext:
         ex11_ABC_ModelSelection.ipynb's `_relative_rmse`.
         """
         try:
-            # Convert parameters from log scale if needed
-            if self.log_scale and hasattr(self, '_convert_params_to_linear_scale'):
-                pars = self._convert_params_to_linear_scale(pars)
-
             # Choose parallelization strategy based on sampler
             if self.sampler_type == 'multicore' and workers_inner is not None:
                 return self._run_replicates_parallel(workers_inner, pars, model_spec)
@@ -562,8 +566,9 @@ class CalibrationContext:
         return worker_id
 
     def setup_abc_smc(self, models_list, priors_list, distance_function, population_size, transitions_func, my_sampler, eps_function):
-        """Setup the ABC-SMC object."""
-        return ABCSMC(
+        """Setup the ABC-SMC object (with between-generation weight and kernel checks)."""
+        return CheckedABCSMC(
+            max_zero_weight_fraction=self.max_zero_weight_fraction,
             models=models_list,
             parameter_priors=priors_list,
             distance_function=distance_function,
