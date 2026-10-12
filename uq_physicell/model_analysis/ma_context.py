@@ -327,6 +327,8 @@ def run_simulations(context: ModelAnalysisContext):
     # Initialize the PhysiCell model - in all ranks to avoid issues with MPI
     try:
         PhysiCellModel = PhysiCell_Model(context.dic_metadata['IniFilePath'], context.dic_metadata['StrucName'])
+        # Every sampled parameter must reach PhysiCell, or it would be silently dropped
+        PhysiCellModel.check_parameter_names(list(context.params_dict), context="Sampled parameters")
         # Store the model in the context for cancellation support
         context.model = PhysiCellModel
         config_fingerprint = PhysiCellModel.build_effective_config_fingerprint()

@@ -1510,6 +1510,12 @@ def run_bayesian_optimization(calib_context: CalibrationContext, additional_iter
         additional_iterations (Optional[int]): Additional iterations for resume functionality
     """
     logger = calib_context.logger
+    if not calib_context.custom_run_single_replicate_func:
+        # Every searched or fixed parameter must reach PhysiCell, or it would be silently dropped
+        PhysiCell_Model(calib_context.model_config["ini_path"], calib_context.model_config["struc_name"]).check_parameter_names(
+            list(calib_context.search_space) + list(calib_context.fixed_params),
+            context="Search-space/fixed parameters",
+        )
     try:
         resume_from_db = os.path.exists(calib_context.db_path)
         single_qoi = len(calib_context.qoi_details['QOI_Name']) == 1

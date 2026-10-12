@@ -8,6 +8,7 @@ import pickle
 import pytest
 from unittest.mock import patch, call
 
+from uq_physicell import PhysiCell_Model
 from uq_physicell.model_analysis.ma_context import ModelAnalysisContext, run_simulations
 
 
@@ -28,6 +29,9 @@ class MockPhysiCellModel:
 
     def info(self):
         return "MockPhysiCellModel info"
+
+    # The real check only needs the parameter mappings above
+    check_parameter_names = PhysiCell_Model.check_parameter_names
 
     def build_effective_config_fingerprint(self):
         """Fake fingerprint — the real one hashes files on disk, which this mock avoids."""

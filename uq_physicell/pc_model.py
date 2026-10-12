@@ -19,6 +19,27 @@ import datetime
 import argparse
 import hashlib
 import json
+import difflib
+
+# Keys a model section of the .ini file may contain (configparser lowercases keys)
+_MODEL_SECTION_KEYS = (
+    'executable', 'configfile_ref', 'numreplicates', 'physicell_path', 'model_path',
+    'timeout_per_simulation', 'projname', 'configfile_name', 'configfile_folder',
+    'outputs_folder', 'outputs_folder_name', 'timeout_writexml', 'generate_summary_file',
+    'rulesfile_ref', 'rulesfile_name', 'omp_num_threads', 'parameters', 'parameters_rules',
+)
+
+
+def _suggest_key(key: str) -> Union[str, None]:
+    """Closest valid .ini key: same words in another order first (rules_parameters ->
+    parameters_rules), then the closest spelling."""
+    words = sorted(key.split('_'))
+    for valid in _MODEL_SECTION_KEYS:
+        if sorted(valid.split('_')) == words:
+            return valid
+    matches = difflib.get_close_matches(key, _MODEL_SECTION_KEYS, n=1, cutoff=0.6)
+    return matches[0] if matches else None
+
 
 class PhysiCell_Model:
     """ A class to manage PhysiCell model configurations and executions.
@@ -51,7 +72,20 @@ class PhysiCell_Model:
             print(f"\t\t>> Reading config file: {configFilePath} ...")
         with open(configFilePath) as fd:
             configFile.read_file(fd)
-        
+        if keyModel not in configFile:
+            raise ValueError(f"Error! Model section [{keyModel}] not found in {configFilePath}.")
+
+        # An unknown key is otherwise silently ignored (e.g. a misspelled parameters_rules
+        # would run every simulation with the rules file's default values)
+        unknown_keys = [key for key in configFile[keyModel] if key not in _MODEL_SECTION_KEYS and key not in configFile.defaults()]
+        if unknown_keys:
+            hints = []
+            for key in unknown_keys:
+                suggestion = _suggest_key(key)
+                hints.append(f"'{key}'" + (f" (did you mean '{suggestion}'?)" if suggestion else ""))
+            raise ValueError(f"Error! Unknown key(s) in section [{keyModel}] of {configFilePath}: {', '.join(hints)}. "
+                             f"Valid keys: {', '.join(_MODEL_SECTION_KEYS)}.")
+
         # Mandatory variables
         self.XML_RefPath = configFile[keyModel]['configFile_ref']
         if not os.path.exists(self.XML_RefPath): raise ValueError(f"Error! XML file {self.XML_RefPath} not found!")
@@ -100,6 +134,10 @@ class PhysiCell_Model:
             self.parameters_rules = ast.literal_eval(self.parameters_rules)
         self.parameters_rules_variable = {k: v[1] for k, v in self.parameters_rules.items() if isinstance(v, list)}
         self.parameters_rules_fixed = {k: v for k, v in self.parameters_rules.items() if not isinstance(v, list)}
+        if self.RULES_RefPath and not self.parameters_rules:
+            raise ValueError(f"Error! Section [{keyModel}] sets rulesFile_ref = {self.RULES_RefPath} but no parameters_rules, "
+                             f"so that rules file would not be used (the XML's own ruleset file would be). "
+                             f"Add parameters_rules, or remove rulesFile_ref and point the XML to the rules file.")
 
     def _load_xml_reference(self) -> None:
         tree = ET.parse(self.XML_RefPath)
@@ -119,6 +157,49 @@ class PhysiCell_Model:
         if self.RULES_name.endswith('.csv') and self.RULES_Format != 'csv':
             # Rewrite the extension of rules file to match the format defined in the reference XML file
             self.RULES_name = self.RULES_name[:-4] + f'.{self.RULES_Format}'
+        self._check_xml_rules_file()
+
+    def _check_xml_rules_file(self) -> None:
+        """Make sure an enabled ruleset the XML points to exists.
+
+        Only applies when no rules file is generated per run (no parameters_rules): the
+        XML's own reference is then passed to PhysiCell unchanged. PhysiCell resolves a
+        relative folder from its working directory (the executable's folder) and runs
+        *without rules* if the file is missing, so a wrong path would silently change the model.
+        """
+        ruleset = self.xml_ref_root.find('.//cell_rules/rulesets/ruleset')
+        if ruleset is None or str(ruleset.get('enabled', 'false')).lower() != 'true' or self.parameters_rules:
+            return
+        folder, filename = ruleset.findtext('folder', default=''), ruleset.findtext('filename', default='')
+        rules_path = os.path.join(folder, filename)
+        if not os.path.isabs(rules_path):
+            rules_path = os.path.join(os.path.dirname(os.path.abspath(self.PC_executable)), rules_path)
+        if not os.path.isfile(rules_path):
+            raise ValueError(f"Error! {self.XML_RefPath} enables the rules file {os.path.join(folder, filename)}, "
+                             f"which does not exist at {os.path.normpath(rules_path)} (relative paths are resolved "
+                             f"from the PhysiCell executable's folder). PhysiCell would run without any rules. "
+                             f"Fix the XML ruleset, or set rulesFile_ref and parameters_rules in section [{self.keyModel}].")
+
+    def check_parameter_names(self, names, context: str = "parameters") -> None:
+        """Raise if any name is not a variable parameter of this model.
+
+        A parameter that maps to neither a variable XML parameter (``parameters``) nor a
+        variable rules parameter (``parameters_rules``) would be sampled and then silently
+        dropped, so the simulations would never depend on it.
+
+        Args:
+            names: Parameter names to check (e.g. a prior's or search space's parameters).
+            context (str): What the names are, for the error message.
+
+        Raises:
+            ValueError: If some names are not variable parameters of this model.
+        """
+        known = set(self.XML_parameters_variable.values()) | set(self.parameters_rules_variable.values())
+        unmapped = [name for name in names if name not in known]
+        if unmapped:
+            raise ValueError(f"Error! {context} {unmapped} of model [{self.keyModel}] are not variable parameters in "
+                             f"{self.configFilePath}: they would never reach PhysiCell. Variable parameters of this "
+                             f"model: {sorted(known)} (from 'parameters' and 'parameters_rules').")
 
     def _load_rules_reference(self) -> None:
         if self.verbose:

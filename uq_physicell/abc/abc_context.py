@@ -674,6 +674,13 @@ def run_abc_calibration( calib_context: CalibrationContext) -> History:
         models_list = []
         priors_list = []
         for spec in calib_context.models:
+            # Every sampled or fixed parameter must reach PhysiCell, or it would be silently dropped
+            # (a custom run_single_replicate function maps parameters itself)
+            if not calib_context.custom_run_single_replicate_func:
+                calib_context._instantiate_model(spec).check_parameter_names(
+                    list(spec.prior.get_parameter_names()) + list(spec.fixed_params),
+                    context=f"Prior/fixed parameters of '{spec.name}'",
+                )
             wrapper = calib_context.create_model_wrapper(spec, calib_context.workers_inner)
             # Register by name in module globals so pickle-by-reference samplers (Dask) resolve it
             globals()[wrapper.__name__] = wrapper

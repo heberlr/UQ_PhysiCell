@@ -406,8 +406,10 @@ def test_metadata_persisted_before_calibration_runs():
             abc_options={},
         )
 
-        # Simulate a crash inside the (normally multi-hour) calibration call.
-        with patch.object(CalibrationContext, "run_calibration", side_effect=RuntimeError("simulated crash mid-run")):
+        # Simulate a crash inside the (normally multi-hour) calibration call. The placeholder
+        # .ini has no real model, so the parameter-mapping check gets a mocked model.
+        with patch.object(CalibrationContext, "run_calibration", side_effect=RuntimeError("simulated crash mid-run")), \
+             patch.object(CalibrationContext, "_instantiate_model"):
             with pytest.raises(RuntimeError, match="simulated crash mid-run"):
                 run_abc_calibration(calib_context=calib_context)
 
