@@ -138,8 +138,8 @@ abc_options = {
     "models": models,
     "max_populations": 5,
     "max_simulations": 5000,
-    "max_population_size": 250, # with "fixed", this is the population size
     "population_strategy": "fixed",
+    "population_size": 250,
     "adaptive_distance": False,
     "sampler": "multicore",
     "num_workers": num_workers,
