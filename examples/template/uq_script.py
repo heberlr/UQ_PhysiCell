@@ -137,7 +137,8 @@ num_workers = _resolve_num_workers()
 abc_options = {
     "models": models,
     "max_populations": 5,
-    "max_simulations": 1000,
+    "max_simulations": 5000,
+    "max_population_size": 250, # with "fixed", this is the population size
     "population_strategy": "fixed",
     "adaptive_distance": False,
     "sampler": "multicore",
