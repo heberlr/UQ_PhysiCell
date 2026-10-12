@@ -708,6 +708,21 @@ def test_setup_population_strategy_fixed():
     assert ctx.setup_population_strategy() == 250
 
 
+def test_setup_population_strategy_fixed_population_size():
+    from uq_physicell.abc import CalibrationContext
+
+    # population_size is the clearer name; it wins over max_population_size when both are given
+    ctx = CalibrationContext(db_path="dummy.db", **_minimal_kwargs(
+        abc_options={'population_strategy': 'fixed', 'population_size': 250, 'max_population_size': 400}
+    ))
+    assert ctx.setup_population_strategy() == 250
+
+    with pytest.raises(ValueError, match="population_size must be a positive integer"):
+        CalibrationContext(db_path="dummy.db", **_minimal_kwargs(
+            abc_options={'population_strategy': 'fixed', 'population_size': 0}
+        ))
+
+
 def test_setup_distance_function_multi_qoi_branches():
     from uq_physicell.abc import CalibrationContext
     from pyabc import AggregatedDistance, AdaptiveAggregatedDistance

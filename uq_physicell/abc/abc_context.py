@@ -147,6 +147,11 @@ class CalibrationContext:
         self.population_strategy = abc_options.get("population_strategy", "adaptive")
         self.min_population_size = abc_options.get("min_population_size", 100)
         self.max_population_size = abc_options.get("max_population_size", 500)
+        # Number of particles per generation for the "fixed" strategy (starting size for "adaptive").
+        # Defaults to max_population_size, which older configurations used for this.
+        self.population_size = abc_options.get("population_size", self.max_population_size)
+        if not isinstance(self.population_size, (int, np.integer)) or self.population_size < 1:
+            raise ValueError(f"population_size must be a positive integer, got {self.population_size!r}")
         self.epsilon_strategy = abc_options.get("epsilon_strategy", "quantile")
         self.epsilon_alpha = abc_options.get("epsilon_alpha", 0.5) # Quantile for epsilon threshold (e.g., 0.5 for median distance)
         
@@ -349,14 +354,14 @@ class CalibrationContext:
         """Setup population size strategy."""
         if self.population_strategy == "adaptive":
             return AdaptivePopulationSize(
-                start_nr_particles=self.max_population_size,
+                start_nr_particles=min(self.population_size, self.max_population_size),
                 mean_cv=0.2,
                 min_population_size=self.min_population_size,
                 max_population_size=self.max_population_size
             )
         else:
-            # Fixed population size - use max_population_size as the fixed size
-            return self.max_population_size
+            # Fixed population size
+            return self.population_size
 
     def setup_distance_function(self, distances_dict):
         qois = list(self.qoi_functions.keys())
