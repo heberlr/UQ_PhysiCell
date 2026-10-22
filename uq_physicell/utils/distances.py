@@ -86,6 +86,16 @@ def chi2_distance(dic_obs_data:dict, dic_model_data:dict, rel_noise:float=0.05)-
     ``dic_model_data`` even though they are actually called with the observed data first; this
     is invisible for them only because they are symmetric under swapping the two inputs.)
 
+    .. warning::
+        **Argument order: (observed, model).** This is the Bayesian-optimization (BO) calling
+        convention. It is NOT a drop-in for ABC-SMC: pyABC calls distances as
+        ``distance(simulated, observed)`` (i.e. ``(x, x_0)``), so passing ``chi2_distance``
+        straight to the ABC ``CalibrationContext`` would silently compute ``sigma`` from the
+        *simulated* values instead of the observations -- no error is raised, the distance is
+        just wrong. For ABC, wrap it with swapped arguments, e.g.
+        ``lambda sim, obs: chi2_distance(obs, sim)`` (``relative_rmse`` already follows the
+        pyABC order).
+
     Because the weight (1/sigma^2) is built into the distance itself, pass this function with
     ``"weight": 1.0`` in ``distance_functions`` so CalibrationContext does not override it with
     its default range-based estimate.

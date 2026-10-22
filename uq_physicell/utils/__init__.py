@@ -6,6 +6,7 @@ and quantity of interest (QoI) calculations for PhysiCell simulations.
 """
 from .distances import (
     relative_rmse,
+    chi2_distance,
     SumSquaredDifferences,
     Manhattan,
     Chebyshev
@@ -24,6 +25,7 @@ from .sumstats import (
 
 __all__ = [
     'relative_rmse',
+    'chi2_distance',
     'SumSquaredDifferences',
     'Manhattan',
     'Chebyshev',
