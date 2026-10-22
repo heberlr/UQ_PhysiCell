@@ -5,7 +5,7 @@ candidate models (ModelA/B/C), their priors, the QoI/distance functions, and
 the ABC-SMC options. It is used two ways:
 
 - As a script, for the real (cluster-scale, multi-hour) run:
-    python uq_script.py <num_workers>        # or via uq_slurm.sh on SLURM
+    python ex11_uq_script.py <num_workers>
 - As a module, imported by ex11_ABC_ModelSelection.ipynb so the notebook never
   redefines this setup -- it only loads the resulting database and visualizes
   it (`import uq_script`, then e.g. `uq_script.db_path`, `uq_script.calib_context`,
@@ -24,7 +24,7 @@ import os, sys
 # spins up one thread per detected CPU core for every Python process (main or
 # worker), which can blow through a shared machine's process/thread budget
 # (RLIMIT_NPROC) long before any simulation runs. Set here so it also covers
-# ad-hoc runs (e.g. `python uq_script.py 48`) that don't go through uq_slurm.sh.
+# ad-hoc runs (e.g. `python ex11_uq_script.py 48`) that don't go through uq_slurm.sh.
 for _blas_env in (
     "OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS",
     "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS",
@@ -39,8 +39,9 @@ import pandas as pd
 from uq_physicell.abc import CalibrationContext, run_abc_calibration
 from uq_physicell.utils import relative_rmse
 from pyabc import RV, Distribution, History
+from uq_physicell.database.utils import download_file
 
-# Timestamped so a plain `nohup python -u uq_script.py <n> > output.log 2>&1 &`
+# Timestamped so a plain `nohup python -u ex11_uq_script.py <n> > output.log 2>&1 &`
 # is enough on its own -- no need to pipe through `awk` for timestamps, which is
 # fragile under nohup: a pipeline run with `&` is one job sharing one process
 # group, but `nohup` only protects the process it directly wraps. On SSH
@@ -52,7 +53,11 @@ logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s:%(na
 logger = logging.getLogger(__name__)
 
 db_path = "ex11_ABC_ModelSelection.db"
-obs_data_path = "ObsData.csv"
+obs_data_path = "ex9_ObsData.csv"
+
+# Download the pre-computed database from zenodo (skip the calibration cell below).
+for file_name in [db_path, obs_data_path]:
+    download_file(file_name)
 
 # Ground-truth parameters behind ObsData.csv (ModelA only).
 dic_real_value = {"cell_cycle_entry": 1440.0, "apoptosis_rate": 5.787e-05}
@@ -117,7 +122,7 @@ distance_functions = {
 # ABC-SMC configuration (scaled up for a cluster run)
 # ---------------------------------------------------------------------------
 def _resolve_num_workers():
-    """CLI arg (e.g. `python uq_script.py 48`) takes priority, then
+    """CLI arg (e.g. `python ex11_uq_script.py 48`) takes priority, then
     UQ_NUM_WORKERS / SLURM_CPUS_PER_TASK (see uq_slurm.sh), then all detected
     CPUs. The CLI arg is only consulted when this file is run as the entry-point
     script (__name__ == "__main__") -- not when it's imported (e.g. `import
