@@ -683,6 +683,52 @@ class TestCalibrationContextBusinessLogic(unittest.TestCase):
         objectives, _, _ = self.context.default_aggregation_func(self.replicate_results, sample_id=3)
         self.assertEqual(objectives['obj1'], 1e-8)
 
+    def test_default_aggregation_func_noise_is_standard_error_of_the_mean(self):
+        """The noise returned for each objective must be the SEM of the replicate
+        fitnesses (std / sqrt(n)), not the raw replicate std. The reported objective is the
+        replicate MEAN, so its uncertainty (train_Yvar for the GP, SNR in analyze_convergence)
+        shrinks with the number of replicates. Using the raw std overstated the noise by
+        sqrt(n_replicates) (regression test)."""
+        # Per-replicate distance = model value at t=0, with inverse-distance fitness 1/(1+d):
+        #   d = [0, 1, 0, 1]  ->  fitness = [1.0, 0.5, 1.0, 0.5]
+        self.context.use_exponential_fitness = False
+        self.context.distance_functions = {
+            'obj1': {'function': lambda dObs, dModel: float(dModel['value'][0]), 'weight': 1.0},
+            'obj2': {'function': lambda dObs, dModel: 0.0, 'weight': 1.0},
+        }
+        t = np.array([0., 1., 2., 3.])
+        replicates = [
+            {'time': t, 'obj1': np.array([d, 0., 0., 0.]), 'obj2': np.zeros(4)}
+            for d in (0.0, 1.0, 0.0, 1.0)
+        ]
+        fitness = np.array([1.0, 0.5, 1.0, 0.5])
+
+        objectives, obj_noise, _ = self.context.default_aggregation_func(replicates, sample_id=0)
+
+        self.assertAlmostEqual(objectives['obj1'], fitness.mean(), places=12)
+        self.assertAlmostEqual(obj_noise['obj1'], fitness.std() / np.sqrt(len(replicates)), places=12)
+        self.assertAlmostEqual(obj_noise['obj1'], 0.125, places=12)
+        # strictly smaller than the raw replicate std by exactly sqrt(n)
+        self.assertAlmostEqual(fitness.std() / obj_noise['obj1'], np.sqrt(len(replicates)), places=12)
+        # a constant objective has zero noise
+        self.assertEqual(obj_noise['obj2'], 0.0)
+
+    def test_default_aggregation_func_noise_shrinks_with_more_replicates(self):
+        """Same per-replicate spread, 4x as many replicates -> half the reported noise."""
+        self.context.use_exponential_fitness = False
+        self.context.distance_functions = {
+            'obj1': {'function': lambda dObs, dModel: float(dModel['value'][0]), 'weight': 1.0},
+            'obj2': {'function': lambda dObs, dModel: 0.0, 'weight': 1.0},
+        }
+        t = np.array([0., 1., 2., 3.])
+
+        def reps(pattern):
+            return [{'time': t, 'obj1': np.array([d, 0., 0., 0.]), 'obj2': np.zeros(4)} for d in pattern]
+
+        _, noise_4, _ = self.context.default_aggregation_func(reps([0.0, 1.0] * 2), sample_id=0)
+        _, noise_16, _ = self.context.default_aggregation_func(reps([0.0, 1.0] * 8), sample_id=1)
+        self.assertAlmostEqual(noise_16['obj1'], noise_4['obj1'] / 2.0, places=12)
+
     # -- save_results_to_db ----------------------------------------------------------
 
     def test_save_results_to_db_success(self):

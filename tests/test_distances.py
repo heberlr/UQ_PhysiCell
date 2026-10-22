@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 
 # Import the distance functions to test
-from uq_physicell.utils import SumSquaredDifferences, Manhattan, Chebyshev, relative_rmse
+from uq_physicell.utils import SumSquaredDifferences, Manhattan, Chebyshev, relative_rmse, chi2_distance
 
 
 class TestDistanceFunctions(unittest.TestCase):
@@ -324,6 +324,89 @@ class TestRelativeRMSE(unittest.TestCase):
         # only the last point is finite in both: diff=-2, denom=max(10,1)=10 -> 0.2
         result = relative_rmse(sim, obs, "QoI1")
         self.assertAlmostEqual(result, 0.2, places=10)
+
+
+class TestChi2Distance(unittest.TestCase):
+    """chi2_distance(dic_obs_data, dic_model_data, rel_noise): observed data FIRST
+    (the BO calling convention), sigma = rel_noise * |obs|."""
+
+    def _d(self, t, v):
+        return {"time": np.asarray(t, dtype=float), "value": np.asarray(v, dtype=float)}
+
+    def test_exported_from_utils(self):
+        import uq_physicell.utils as utils
+        self.assertIn("chi2_distance", utils.__all__)
+        self.assertIs(utils.chi2_distance, chi2_distance)
+
+    def test_none_model_returns_inf(self):
+        """A failed simulation must reject the particle via np.inf."""
+        self.assertEqual(chi2_distance(self._d([0, 1], [1.0, 2.0]), None), np.inf)
+
+    def test_perfect_match_is_zero(self):
+        d = self._d([0, 1, 2], [100.0, 200.0, 300.0])
+        self.assertEqual(chi2_distance(d, d), 0.0)
+
+    def test_hand_computed_value(self):
+        # obs = [100, 200], model = [105, 190], rel_noise = 0.05
+        # sigma = [5, 10]; z = [5/5, -10/10] = [1, -1]; mean(z^2) = 1
+        obs = self._d([0, 1], [100.0, 200.0])
+        model = self._d([0, 1], [105.0, 190.0])
+        self.assertAlmostEqual(chi2_distance(obs, model), 1.0, places=12)
+
+    def test_rel_noise_parameter_scales_distance(self):
+        obs = self._d([0], [100.0])
+        model = self._d([0], [105.0])
+        self.assertAlmostEqual(chi2_distance(obs, model, rel_noise=0.05), 1.0, places=12)
+        # doubling sigma divides the distance by 4
+        self.assertAlmostEqual(chi2_distance(obs, model, rel_noise=0.10), 0.25, places=12)
+
+    def test_argument_order_is_observed_then_model(self):
+        """Not symmetric: sigma comes from the FIRST argument (the observation).
+        Swapping the arguments (the pyABC order) silently gives a different value."""
+        obs = self._d([0], [100.0])
+        model = self._d([0], [105.0])
+        self.assertAlmostEqual(chi2_distance(obs, model), 1.0, places=12)               # sigma = 5.00
+        self.assertAlmostEqual(chi2_distance(model, obs), (5.0 / 5.25) ** 2, places=12)  # sigma = 5.25
+        self.assertNotAlmostEqual(chi2_distance(obs, model), chi2_distance(model, obs), places=6)
+
+    def test_distance_independent_of_number_of_points(self):
+        """Mean (not sum): a long series and a single end-point with the same relative
+        error give the same distance -- what makes time-series and endpoint QoIs comparable."""
+        n = 31
+        obs_series = self._d(np.arange(n), np.full(n, 1000.0))
+        model_series = self._d(np.arange(n), np.full(n, 1050.0))
+        obs_point = self._d([7200], [1000.0])
+        model_point = self._d([7200], [1050.0])
+        # diff = 50, sigma = 0.05 * 1000 = 50 -> z = 1 -> distance = 1 for both
+        self.assertAlmostEqual(chi2_distance(obs_series, model_series), 1.0, places=12)
+        self.assertAlmostEqual(chi2_distance(obs_point, model_point), 1.0, places=12)
+
+    def test_partial_time_overlap_uses_common_points_only(self):
+        obs = self._d([0, 1, 2, 3], [100.0, 200.0, 300.0, 400.0])
+        model = self._d([0, 1, 2, 5], [105.0, 190.0, 300.0, 9999.0])
+        # common t = {0, 1, 2}: z^2 = [1, 1, 0] -> mean = 2/3
+        self.assertAlmostEqual(chi2_distance(obs, model), 2.0 / 3.0, places=12)
+
+    def test_no_overlap_raises(self):
+        with self.assertRaises(ValueError) as ctx:
+            chi2_distance(self._d([0, 1], [1.0, 2.0]), self._d([5, 6], [1.0, 2.0]))
+        self.assertIn("No matching time points found", str(ctx.exception))
+
+    def test_zero_observation_is_finite_not_nan(self):
+        """sigma is floored at 1e-8, so an observed 0 matched exactly gives 0, not 0/0."""
+        d = self._d([0, 1], [0.0, 10.0])
+        self.assertEqual(chi2_distance(d, d), 0.0)
+        self.assertTrue(np.isfinite(chi2_distance(d, self._d([0, 1], [1.0, 10.0]))))
+
+    def test_expected_value_is_one_at_truth_under_injected_noise(self):
+        """With 5% relative Gaussian noise injected exactly as in GenerateData.ipynb and
+        the model equal to the noise-free truth, the reduced chi-squared is ~1 -- the
+        property that puts fitness = exp(-distance) on a common scale across QoIs."""
+        rng = np.random.default_rng(0)
+        t = np.arange(4000)
+        truth = np.linspace(500.0, 2000.0, t.size)
+        obs_noisy = truth + truth * 0.05 * rng.standard_normal(t.size)
+        self.assertAlmostEqual(chi2_distance(self._d(t, obs_noisy), self._d(t, truth)), 1.0, delta=0.1)
 
 
 if __name__ == '__main__':
