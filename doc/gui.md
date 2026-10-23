@@ -51,7 +51,7 @@ Now we'll use the GUI to create a configuration file that defines which paramete
 2. Load the .xml file from your model
 3. Select parameters to be fixed in the model exploration: `omp_threads` = 1, `enable SVG` = false, and `interval` = 240
 4. Select parameters to add to the analysis: `cell_cycle_entry` and `apoptosis_rate`
-5. Provide a structure name (`Model A`), executable path (`project`), and number of replicates (`5`)
+5. Provide a structure name (`ModelA`), executable path (`project`), and number of replicates (`5`)
 6. Save the .ini file (`uq_config.ini`)
 
 <div align="center">
@@ -87,7 +87,7 @@ Next, we'll sample the parameter space and run simulations to build a database o
 **Steps:**
 1. Define the parameter sampling strategy as `Global` and set the sampler to `Sobol`
 2. Check the range of the `apoptosis_rate` parameter.
-3. Sample the parameters with `8` samples and click Plot to visualize the parameter space
+3. Sample the parameters with `32` samples and click Plot to visualize the parameter space
 4. Set the database filename to `Simulations.db` and click the Run Simulations button
 5. Set the number of workers to run simulations in parallel using the inter-process strategy, then confirm in the warning message that you want to store the list of MCDS objects
 <div align="center">
