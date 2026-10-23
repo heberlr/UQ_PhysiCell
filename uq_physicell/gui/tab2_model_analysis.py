@@ -1632,7 +1632,7 @@ def plot_qois(main_window):
     layout.addWidget(canvas)
     # Calculate the QoIs if not already done
     if main_window.df_summary_qois.empty:
-        try: main_window.df_summary_qois,_, main_window.df_relative_mcse = calculate_qoi_statistics(main_window.db_file_name_input.text().strip(), main_window.qoi_funcs, main_window.df_output)
+        try: main_window.df_summary_qois,_, main_window.df_relative_mcse = calculate_qoi_statistics(main_window.db_file_name_input.text().strip(), main_window.qoi_funcs, n_jobs=min(4, os.cpu_count() or 1))
         except Exception as e:
             main_window.update_output_tab2(main_window, f"Error calculating QoIs: {e}")
             return
@@ -1680,7 +1680,7 @@ def run_analysis(main_window):
      # Calculate the QoIs if not already done
     if main_window.df_summary_qois.empty:
         try: 
-            main_window.df_summary_qois,_, main_window.df_relative_mcse = calculate_qoi_statistics(main_window.db_file_name_input.text().strip(), main_window.qoi_funcs, main_window.df_output )
+            main_window.df_summary_qois,_, main_window.df_relative_mcse = calculate_qoi_statistics(main_window.db_file_name_input.text().strip(), main_window.qoi_funcs, n_jobs=min(4, os.cpu_count() or 1))
         except Exception as e:
             main_window.update_output_tab2(main_window, f"Error calculating QoIs: {e}")
             return
