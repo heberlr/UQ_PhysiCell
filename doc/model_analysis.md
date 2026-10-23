@@ -14,7 +14,7 @@ Executions of simulations based on PhysiCell structures can be performed in mult
 - Serial: Single-threaded execution, suitable for small analyses.
 - Inter-process: Multi-processing on a single node using concurrent.futures.
 - Inter-node: Distributed execution across multiple nodes using MPI (requires the `mpi` extra, see {doc}`installation`).  
-Simulations can also be executed in a cluster environment. An example SLURM script demonstrating how to run simulations on a SLURM-managed cluster is provided in [slurm_script](../examples/slurm_script.sh).
+Simulations can also be executed in a cluster environment. An example SLURM script demonstrating how to run simulations on a SLURM-managed cluster is provided in [slurm_script](https://github.com/heberlr/UQ_PhysiCell/blob/main/examples/slurm_script.sh).
 ```
 
 ## Quick Example
