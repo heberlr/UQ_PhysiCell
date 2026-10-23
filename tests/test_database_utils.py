@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 """Test suite for uq_physicell.database.utils (generic sqlite helper functions)."""
 
+import inspect
 import os
 import sqlite3
 import tempfile
@@ -156,7 +157,8 @@ class TestDownloadFile:
             download_file(str(target))
             mock_retrieve.assert_called_once()
             args, _ = mock_retrieve.call_args
-            assert args[0] == "https://zenodo.org/records/21496966/files/" + str(target)
+            default_base_url = inspect.signature(download_file).parameters['base_url'].default
+            assert args[0] == default_base_url + str(target)
             assert args[1] == str(target)
 
     def test_downloads_with_custom_url(self, tmp_path):
