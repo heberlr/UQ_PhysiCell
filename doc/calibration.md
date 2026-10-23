@@ -1,6 +1,6 @@
 # Model Calibration
 
-This section covers the methods of calibration available in UQ-PhysiCell: {ref}`Bayesian Optimization <bayesian-optimization>` and {ref}`Approximate Bayesian Computation (ABC) <approximate-bayesian-computation-abc>`. Note that this package allow another forms of calibration via API, including optimization algorithms like least-squares, Nelder-Mead, genetic algorithm, MCMC, amoung others.
+This section covers the methods of calibration available in UQ-PhysiCell: {ref}`Bayesian Optimization <bayesian-optimization>` and {ref}`Approximate Bayesian Computation (ABC) <approximate-bayesian-computation-abc>`, plus {ref}`Model Selection <model-selection>` (ABC-SMC over several competing models). Note that this package allow another forms of calibration via API, including optimization algorithms like least-squares, Nelder-Mead, genetic algorithm, MCMC, amoung others.
 
 
 (bayesian-optimization)=
@@ -198,6 +198,64 @@ history = run_abc_calibration(calib_context=calib_context)
 **Safeguards between generations.** Before every generation, the run checks that each model's fitted kernel gives positive density to its own proposals, and that the previous generation's importance weights are finite. If a model's kernel is degenerate, or more than `abc_options["max_zero_weight_fraction"]` (default `0.05`) of its particles ended up with a zero or non-finite weight, the run stops with an `ABCSafeguardError` naming the model, before any simulation of the next generation runs. Continuing would silently give that model a wrong probability and posterior. Completed generations stay in the database.
 
 **Full worked example:** {doc}`examples/virus-mac-new/ex8_ABC_Calib`
+
+(model-selection)=
+## Model Selection
+
+ABC-SMC can also ask *which model* the data support, not only which parameters. Several candidate models, each with its own PhysiCell configuration (settings file, rules file, free parameters) and its own prior, are calibrated against the same observed data in a single run. pyABC then returns a **posterior probability for each model**:
+
+$$
+P(m \mid y_0) \propto P(m) \int P(y_0 \mid \theta, m)\, P(\theta \mid m)\, d\theta
+$$
+
+Where:
+- $P(m)$ is the prior probability of model $m$ (uniform over the candidates by default).
+- The integral is the marginal likelihood of the data under model $m$. It acts as a built-in Occam's razor: a richer model that spreads its prior-predictive mass over a wider range of outcomes is penalized unless its extra mechanism genuinely improves the fit.
+- In ABC the likelihood is approximated through the distance between simulated and observed data, so model probabilities are the share of accepted particles that came from each model in the final population.
+
+### Example
+
+Candidates are passed through `abc_options["models"]`, a list of dictionaries. Each requires a `name`, a `model_config` and a `prior`; `fixed_params` and `num_replicates` are optional. When `models` is given, the top-level `model_config` and `prior` arguments of `CalibrationContext` are omitted (each candidate carries its own):
+
+```python
+from uq_physicell.abc import CalibrationContext, run_abc_calibration
+from pyabc import RV, Distribution
+
+# Three hypotheses for what limits growth, defined as sections of uq_config.ini
+models = [
+    {"name": "ModelA",  # mechanical feedback: pressure decreases cycle entry
+     "model_config": {"ini_path": "uq_config.ini", "struc_name": "ModelA"},
+     "prior": Distribution(cell_cycle_entry=RV("uniform", 1111, 555),
+                           apoptosis_rate=RV("uniform", 4.25e-5, 2.13e-5))},
+    {"name": "ModelB",  # nutrient limitation: oxygen increases cycle entry
+     "model_config": {"ini_path": "uq_config.ini", "struc_name": "ModelB"},
+     "prior": Distribution(apoptosis_rate=RV("uniform", 4.25e-5, 2.13e-5),
+                           oxygen_cell_cycle_entry_sat=RV("uniform", 5.76e-4, 2.88e-4),
+                           oxygen_cell_cycle_entry_hfm=RV("uniform", 10, 20))},
+    # ... ModelC combines both mechanisms
+]
+
+abc_options = {"models": models, "max_populations": 5, "population_size": 250, "sampler": "multicore"}
+
+calib_context = CalibrationContext(
+    db_path="model_selection.db",
+    obsData="observed_data.csv",
+    obsData_columns=obs_data_columns,
+    qoi_functions=qoi_functions,
+    distance_functions=distance_functions,   # the same distances are used for every model
+    abc_options=abc_options,
+)
+history = run_abc_calibration(calib_context=calib_context)
+probs = history.get_model_probabilities()    # one row per population, one column per model
+```
+
+Results are stored in a regular ABC database. In addition to pyABC's own tables, UQ-PhysiCell writes a `CandidateModels` table with one row per candidate (name, structure, number of replicates and the PhysiCell configuration fingerprint), which maps pyABC's integer model index to the model name. It is a separate table because pyABC already owns a lowercase `models` table, and SQLite table names are case-insensitive. See {doc}`databases`.
+
+**Interpreting the result.** Posterior probabilities are relative to the candidate set: they say which of the proposed mechanisms the data favor, not that the winner is correct. In the worked example the observed data were generated from ModelA, and the final population gives ModelA about 0.75, ModelC (which contains ModelA's mechanism plus another) about 0.18 and ModelB about 0.07. Check that the result is stable across populations and consider repeating the run with other random seeds before drawing conclusions. Distance functions must treat a failed simulation the same way as in single-model ABC (return `np.inf`).
+
+**Current limitations.** Model selection is available through the Python API. The GUI does not currently support ABC calibration or model selection.
+
+**Full worked example:** {doc}`examples/template/ex11_ABC_ModelSelection`
 
 ## References
 
