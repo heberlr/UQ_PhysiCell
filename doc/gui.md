@@ -88,7 +88,7 @@ Next, we'll sample the parameter space and run simulations to build a database o
 1. Define the parameter sampling strategy as `Global` and set the sampler to `Sobol`
 2. Check the range of the `apoptosis_rate` parameter.
 3. Sample the parameters with `32` samples and click Plot to visualize the parameter space
-4. Set the database filename to `Simulations.db` and click the Run Simulations button
+4. Set the database filename to `ex9_Simulations.db` and click the Run Simulations button
 5. Set the number of workers to run simulations in parallel using the inter-process strategy, then confirm in the warning message that you want to store the list of MCDS objects
 <div align="center">
   <img src="_static/figures/UQ_GenerateDataBase_01.png" width="45%"/>
@@ -100,13 +100,13 @@ Next, we'll sample the parameter space and run simulations to build a database o
   <img src="_static/figures/UQ_GenerateDataBase_03.png" width="45%"/>
   <img src="_static/figures/UQ_GenerateDataBase_04.png" width="45%"/>
   <br>
-  <em>Left: Sample the parameters using Sobol sampling with 8 samples (step 3). Right: Plot the sampled parameters (step 3).</em>
+  <em>Left: Sample the parameters using Sobol sampling with 32 samples (step 3). Right: Plot the sampled parameters (step 3).</em>
 </div>
 <div align="center">
   <img src="_static/figures/UQ_GenerateDataBase_05.png" width="45%"/>
   <img src="_static/figures/UQ_GenerateDataBase_06.png" width="45%"/>
   <br>
-  <em>Left: Set the database filename as `Simulations.db`, click the Run Simulations button, and set the number of workers (step 4-5). Right: Confirm the storage of the MCDS objects list (step 5).</em>
+  <em>Left: Set the database filename as `ex9_Simulations.db`, click the Run Simulations button, and set the number of workers (step 4-5). Right: Confirm the storage of the MCDS objects list (step 5).</em>
 </div>
 
 ### Step 4: Define Quantities of Interest (QoIs) and Perform Sensitivity Analysis
