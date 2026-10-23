@@ -8,6 +8,7 @@ import pickle
 import pytest
 from unittest.mock import patch, call
 
+from uq_physicell import PhysiCell_Model
 from uq_physicell.model_analysis.ma_context import ModelAnalysisContext, run_simulations
 
 
@@ -29,6 +30,9 @@ class MockPhysiCellModel:
     def info(self):
         return "MockPhysiCellModel info"
 
+    # The real check only needs the parameter mappings above
+    check_parameter_names = PhysiCell_Model.check_parameter_names
+
     def build_effective_config_fingerprint(self):
         """Fake fingerprint — the real one hashes files on disk, which this mock avoids."""
         return {
@@ -45,21 +49,23 @@ def mock_run_replicate_serializable(
     ParametersXML, ParametersRules,
     qoi_functions=None, qoi_def={},
     return_binary_output=True, drop_columns=None,
-    custom_summary_function=None,
+    custom_summary_function=None, return_seed=False, random_seed=None,
 ):
-    return sample_id, replicate_id, pickle.dumps({"out1": 1.0})
+    result = (sample_id, replicate_id, pickle.dumps({"out1": 1.0}))
+    return result + (None,) if return_seed else result
 
 
 # ─── shared patch set (applied per test function) ───────────────────────────
 
 def mock_run_replicate(
-    PhysiCell_Model=None, sample_id=None, replicate_id=None,
+    PhysiCellModel=None, sample_id=None, replicate_id=None,
     ParametersXML=None, ParametersRules=None,
     qoi_functions=None, qoi_def={},
     return_binary_output=True, drop_columns=None,
-    custom_summary_function=None,
+    custom_summary_function=None, return_seed=False, random_seed=None,
 ):
-    return sample_id, replicate_id, pickle.dumps({"out1": 1.0})
+    result = (sample_id, replicate_id, pickle.dumps({"out1": 1.0}))
+    return result + (None,) if return_seed else result
 
 
 PATCHES = [

@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 import pickle
 import time
+from typing import Union
 
 from uq_physicell import PhysiCell_Model
 from uq_physicell import __version__ as uq_physicell_version
@@ -11,6 +12,8 @@ from pcdl import __version__ as pcdl_version
 
 # Import decompression from compression module
 from .compression import decompress_data, compress_data
+# Re-exported for backward compatibility: get_database_type moved to database.utils
+from .utils import get_database_type  # noqa: F401
 
 
 def _safe_pickle_loads(data):
@@ -81,7 +84,7 @@ def create_structure(db_file: str):
         - ParameterSpace: Stores parameter definitions (name, bounds, reference values)
         - QoIs: Stores quantities of interest definitions (name, function)
         - Samples: Stores parameter samples (sample ID, parameter name, value)
-        - Output: Stores simulation results (sample ID, replicate ID, serialized data)
+        - Output: Stores simulation results (sample ID, replicate ID, serialized data, random seed)
     
     Note:
         If the database file already exists, it will be removed and recreated
@@ -144,7 +147,8 @@ def create_structure(db_file: str):
             CREATE TABLE Output (
                 SampleID INTEGER,
                 ReplicateID INTEGER,
-                Data BLOB
+                Data BLOB,
+                Seed INTEGER
             )
         ''')
         conn.commit()
@@ -319,27 +323,29 @@ def insert_samples(db_file: str, dic_samples: dict):
     except sqlite3.Error as e:
         raise RuntimeError(f"Error inserting samples into the database: {e}")
 
-def insert_output(db_file: str, sample_id: int, replicate_id: int, result_data: bytes, compress: bool = True):
+def insert_output(db_file: str, sample_id: int, replicate_id: int, result_data: bytes, compress: bool = True, seed: int = None):
     """Insert simulation results into the Output table.
-    
+
     Args:
         db_file (str): Path to the SQLite database file.
         sample_id (int): Unique identifier for the parameter sample.
         replicate_id (int): Identifier for the simulation replicate.
         result_data (bytes): Serialized simulation results data.
         compress (bool): If True, compress data with zstd before storing (default True).
-    
+        seed (int, optional): Random seed PhysiCell used for this replicate. Stored as
+            NULL when None (e.g. unknown, or an older PhysiCell without random_seed.txt).
+
     Raises:
         RuntimeError: If output insertion fails due to database errors.
-    
+
     Example:
         >>> import pickle
         >>> data = pd.DataFrame({'time': [0, 1, 2], 'cells': [1, 2, 3]})
         >>> serialized_data = pickle.dumps(data)
         >>> insert_output('study.db', 0, 1, serialized_data)
-        >>> 
-        >>> # With compression
-        >>> insert_output('study.db', 0, 1, serialized_data, compress=True)
+        >>>
+        >>> # With compression and a recorded seed
+        >>> insert_output('study.db', 0, 1, serialized_data, compress=True, seed=1234567)
     """
     conn = None
     try:
@@ -355,8 +361,9 @@ def insert_output(db_file: str, sample_id: int, replicate_id: int, result_data: 
         else:
             insert_blob = result_data
         
-        cursor.execute('INSERT INTO Output (SampleID, ReplicateID, Data) VALUES (?, ?, ?)',
-                       (sample_id, int(replicate_id), sqlite3.Binary(insert_blob)))
+        cursor.execute('INSERT INTO Output (SampleID, ReplicateID, Data, Seed) VALUES (?, ?, ?, ?)',
+                       (sample_id, int(replicate_id), sqlite3.Binary(insert_blob),
+                        int(seed) if seed is not None else None))
         conn.commit()
 
     except sqlite3.Error as e:
@@ -534,8 +541,8 @@ def load_samples(db_file: str) -> dict:
     finally:
         conn.close()
 
-def load_output(db_file: str, sample_ids: list = None, replicate_ids: list = None, 
-                load_data: bool = True) -> pd.DataFrame:
+def load_output(db_file: str, sample_ids: list = None, replicate_ids: list = None,
+                load_data: bool = True, load_seed: bool = False) -> pd.DataFrame:
     """Load simulation output from the database with flexible filtering options.
     
     This function allows selective loading of simulation results, which is useful
@@ -547,13 +554,19 @@ def load_output(db_file: str, sample_ids: list = None, replicate_ids: list = Non
                                     If None, loads all samples.
         replicate_ids (list, optional): List of specific replicate IDs to load. 
                                        If None, loads all replicates.
-        load_data (bool, optional): If True, deserializes the Data column. 
-                                   If False, only loads SampleID and ReplicateID. 
-                                   Default is True.
-    
+        load_data (bool, optional): If True, deserializes the Data column.
+                                   If False, only loads SampleID and ReplicateID and
+                                   nothing is deserialized. Use get_storage_mode() to
+                                   find out what Data holds. Default is True.
+        load_seed (bool, optional): If True, append a 'Seed' column with the random
+                                   seed PhysiCell used for each replicate (NULL for
+                                   rows written before seeds were recorded). Requires
+                                   a database created with the Seed column. Default False.
+
     Returns:
         pd.DataFrame: DataFrame with columns ['SampleID', 'ReplicateID', 'Data'] if load_data=True,
-                     or ['SampleID', 'ReplicateID'] if load_data=False. 
+                     or ['SampleID', 'ReplicateID'] if load_data=False, plus a trailing
+                     'Seed' column when load_seed=True.
                      When load_data=True, the Data column contains deserialized objects.
     
     Raises:
@@ -578,8 +591,9 @@ def load_output(db_file: str, sample_ids: list = None, replicate_ids: list = Non
     
     try:
         # Build the SQL query with optional filters
-        query = 'SELECT SampleID, ReplicateID{} FROM Output'.format(
-            ', Data' if load_data else ''
+        query = 'SELECT SampleID, ReplicateID{}{} FROM Output'.format(
+            ', Data' if load_data else '',
+            ', Seed' if load_seed else ''
         )
         conditions = []
         params = []
@@ -600,30 +614,77 @@ def load_output(db_file: str, sample_ids: list = None, replicate_ids: list = Non
         cursor.execute(query, params)
         output = cursor.fetchall()
         
+        columns = ['SampleID', 'ReplicateID']
         if load_data:
-            df_output = pd.DataFrame(output, columns=['SampleID', 'ReplicateID', 'Data'])
+            columns.append('Data')
+        if load_seed:
+            columns.append('Seed')
+
+        df_output = pd.DataFrame(output, columns=columns)
+        if load_data:
             # Deserialize the Data column
             df_output['Data'] = df_output['Data'].apply(_safe_pickle_loads)
-        else:
-            df_output = pd.DataFrame(output, columns=['SampleID', 'ReplicateID'])
-            # Placeholder column for consistency, dataframe is db from summary function or list of mcds
-            df_output_test = load_output(db_file, sample_ids=[0], replicate_ids=[0])
-            # If QoIs are already in the database and 'Data' column is not present
-            if not 'Data' in df_output_test.columns:
-                pass # No action needed, 'Data' column is not expected
-            # Check if 'Data' column in df_qois_data is a series of mcds list - Case of db generated by generic summary function with NO QoI functions
-            elif type(df_output_test['Data'].iloc[0]) == list:
-                df_output['Data'] = [[] for _ in range(len(df_output))]
-            # Check if 'Data' column in df_qois_data is a DataFrame - Case of db generated by custom summary function
-            elif isinstance(df_output_test['Data'].iloc[0], pd.DataFrame):
-                df_output['Data'] = [pd.DataFrame() for _ in range(len(df_output))]
-        
+
+        if load_seed:
+            # Nullable integer so rows without a recorded seed stay <NA> rather than NaN
+            df_output['Seed'] = df_output['Seed'].astype('Int64')
+
         return df_output
     
     except sqlite3.Error as e:
         raise RuntimeError(f"Error loading output: {e}")
     finally:
         conn.close()
+
+def get_storage_mode(db_file: str) -> Union[str, None]:
+    """Identify what the ``Output.Data`` column of a model-analysis database holds.
+
+    The mode is read from one stored run (the lowest SampleID/ReplicateID), which is
+    decompressed and unpickled. All runs of a study share the same mode.
+
+    Args:
+        db_file (str): Path to the SQLite database file.
+
+    Returns:
+        str or None: One of
+
+            - ``'qoi'``: a DataFrame with a ``time`` column and one column per QoI (QoI
+              functions given in ``qois_info``, or a custom summary function returning such
+              a DataFrame). calculate_qoi_statistics reads the QoI columns directly.
+            - ``'raw_mcds'``: a list of ``pcdl.TimeStep`` objects (no QoI functions; the
+              full simulation state is stored).
+            - ``'custom'``: anything else, e.g. a custom summary function's DataFrame without
+              a ``time`` column, or a list of cell DataFrames written with ``drop_columns``.
+              calculate_qoi_statistics cannot process this mode.
+
+        None if no simulation output is stored yet.
+
+    Raises:
+        RuntimeError: If the database cannot be read or the stored run cannot be deserialized.
+
+    Example:
+        >>> get_storage_mode('study.db')
+        'raw_mcds'
+    """
+    conn = sqlite3.connect(db_file)
+    try:
+        row = conn.execute(
+            'SELECT Data FROM Output WHERE Data IS NOT NULL ORDER BY SampleID, ReplicateID LIMIT 1'
+        ).fetchone()
+    except sqlite3.Error as e:
+        raise RuntimeError(f"Error reading output: {e}")
+    finally:
+        conn.close()
+    if row is None:
+        return None
+
+    data = _safe_pickle_loads(row[0])
+    # QoI values per output time - the layout calculate_qoi_statistics can read
+    if isinstance(data, pd.DataFrame) and 'time' in data.columns:
+        return 'qoi'
+    if isinstance(data, list) and data and hasattr(data[0], 'get_cell_df'):  # pcdl.TimeStep
+        return 'raw_mcds'
+    return 'custom'
 
 def load_data_unserialized(db_file: str, sample_ids: list = None, 
                           replicate_ids: list = None) -> pd.DataFrame:
@@ -757,7 +818,59 @@ def check_db_consistency(db_file):
     return True
 
 
-def check_simulations_db(PhysiCellModel: PhysiCell_Model, sampler: str, param_dict: dict, 
+def _apply_schema_migrations(cursor) -> list:
+    """Apply additive, idempotent schema migrations to an existing model-analysis database.
+
+    Assumes the base tables already exist (i.e. this is a pre-existing database, not one
+    just created by create_structure, which already writes the current schema). Safe to
+    call repeatedly and on already-current databases. Returns the list of migrations that
+    were applied.
+
+    Migrations:
+        - Output.Seed : column added if missing (databases created before the
+          per-simulation seed-tracking feature otherwise fail every insert_output()
+          call on resume with "table Output has no column named Seed").
+    """
+    applied = []
+    out_cols = [row[1] for row in cursor.execute("PRAGMA table_info(Output)").fetchall()]
+    if out_cols and "Seed" not in out_cols:
+        cursor.execute("ALTER TABLE Output ADD COLUMN Seed INTEGER")
+        applied.append("Output.Seed added")
+    return applied
+
+
+def migrate_ma_database(db_path: str) -> list:
+    """Upgrade an existing model-analysis database file to the current schema, in place.
+
+    Runs the additive, idempotent migrations in :func:`_apply_schema_migrations` (see there
+    for the list). Safe to call on an already-current database (returns an empty list).
+    check_simulations_db calls this automatically when resuming an existing database, so
+    most callers never need to call it directly.
+
+    Args:
+        db_path (str): Path to an existing model-analysis ``.db`` file.
+
+    Returns:
+        list: Human-readable names of the migrations that were applied (empty if already current).
+
+    Raises:
+        RuntimeError: If the file does not exist or the migration fails (e.g. read-only file).
+    """
+    if not os.path.exists(db_path):
+        raise RuntimeError(f"Database file not found: {db_path}")
+    conn = sqlite3.connect(db_path, timeout=30.0)
+    try:
+        cursor = conn.cursor()
+        applied = _apply_schema_migrations(cursor)
+        conn.commit()
+        return applied
+    except sqlite3.Error as e:
+        raise RuntimeError(f"Error migrating model-analysis database '{db_path}': {e}")
+    finally:
+        conn.close()
+
+
+def check_simulations_db(PhysiCellModel: PhysiCell_Model, sampler: str, param_dict: dict,
                         dic_samples: dict, qois_dic: dict, db_file: str) -> tuple:
     """Check database existence and identify missing simulations.
     
@@ -788,6 +901,15 @@ def check_simulations_db(PhysiCellModel: PhysiCell_Model, sampler: str, param_di
     parameters_missing, samples_missing, replicates_missing = [], [], []
     if not os.path.exists(db_file):
         return False, parameters_missing, samples_missing, replicates_missing
+
+    # Resuming an existing database skips create_structure (which only runs for a
+    # brand-new file), so a database created before a schema change never picks up
+    # new columns on its own -- e.g. one without Output.Seed would otherwise fail
+    # every insert_output() call in this resumed run. Migrate it in place first.
+    try:
+        migrate_ma_database(db_file)
+    except RuntimeError as e:
+        raise RuntimeError(f"Error migrating existing database '{db_file}': {e}")
 
     try:
         # Load the database structure
@@ -864,45 +986,3 @@ def check_simulations_db(PhysiCellModel: PhysiCell_Model, sampler: str, param_di
         raise ValueError(f"Error while checking the database: {e}")
 
     return True, parameters_missing, samples_missing, replicates_missing
-
-def get_database_type(db_file: str) -> bool:
-    """Determine the type of analysis database (Model Analysis or Bayesian Optimization).
-    
-    This function examines the database structure to identify whether it contains
-    Model Analysis (MA) or Bayesian Optimization (BO) data based on table schemas.
-    
-    Args:
-        db_file (str): Path to the SQLite database file to examine.
-    
-    Returns:
-        str or None: Returns 'MA' for Model Analysis, 'BO' for Bayesian Optimization,
-                    or None if the database type cannot be determined.
-    
-    Example:
-        >>> db_type = get_database_type('analysis.db')
-        >>> if db_type == 'MA':
-        ...     print("This is a Model Analysis database")
-        >>> elif db_type == 'BO':
-        ...     print("This is a Bayesian Optimization database")
-    """
-    if not os.path.exists(db_file):
-        return None
-
-    conn = sqlite3.connect(db_file)
-    cursor = conn.cursor()
-    # Check if Metadata table exists
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='Metadata'")
-    if not cursor.fetchone():
-        return False
-    # Check if required columns exist in Metadata table
-    cursor.execute("PRAGMA table_info(Metadata)")
-    columns = [col[1] for col in cursor.fetchall()]
-    conn.close()
-    # Model analysis database should have one column as 'Sampler'
-    if 'Sampler' in columns:
-        return "MA"
-    # BO database should have one column as 'BO_Method'
-    elif 'BO_Method' in columns:
-        return "BO"
-    else:
-        return None

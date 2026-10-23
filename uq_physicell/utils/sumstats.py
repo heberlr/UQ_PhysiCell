@@ -1,12 +1,18 @@
-import pcdl
+from __future__ import annotations
+import ast
+from collections.abc import Callable
+import inspect
 import numpy as np
-import scipy
 import pandas as pd
-from shutil import rmtree
-from typing import Union
+import pcdl
 import re
-import inspect, ast
+import scipy
+from shutil import rmtree
 import textwrap
+import errno
+import time
+import warnings
+from typing import Union, Any
     
 def summ_func_FinalPopLiveDead(outputPath:str,summaryFile:Union[str,None], dic_params:dict, SampleID:int, ReplicateID:int) -> Union[pd.DataFrame,None]:
     """
@@ -95,44 +101,136 @@ def _check_functions_need_microenv(qoi_funcs:dict) -> bool:
     # If none need it,
     return False
 
-def safe_call_qoi_function(func: callable, mcds:Union[pcdl.TimeStep,None]=None, list_mcds:Union[list,None]=None ):
-    """
-    Safely call a QoI function with the appropriate dataframe based on parameter inspection.
-    
-    Args:
-        func: The QoI function to call
-        mcds: pcdl.TimeStep or None -> The mcds object for single snapshot
-        list_mcds: list of pcdl.TimeStep or None -> The mcds time series object for multiple snapshots
-    
-    Returns:
-        Result of the QoI function
-    """
-    # Require stored metadata for dispatch.
-    param_name = getattr(func, '__param_name__', None)
+def _qoi_first_parameter_name(func: Callable[..., Any]) -> str | None:
+    """Return the first positional parameter name of a QoI callable."""
+    try:
+        signature = inspect.signature(func)
+    except (TypeError, ValueError):
+        return None
 
-    # Reject non-wrapped callables (no __param_name__ attribute).
-    if param_name is None:
-        raise ValueError(
-            "QoI function is missing required '__param_name__' metadata. "
-            "Wrap callables with _create_wrapper_for_qoi_function or recreate_qoi_functions first."
-        )
-    
-    # Handle wrapped/string-defined QoI functions.
-    if param_name in ['df_cell', 'df'] and mcds is not None: # Function expects cell dataframe
-        return func(mcds.get_cell_df())
-    elif param_name in ['df_subs'] and mcds is not None: # Function expects substrate dataframe
-        return func(mcds.get_conc_df())
-    elif param_name in ['mcds'] and mcds is not None: # Function expects the mcds object
+    for parameter in signature.parameters.values():
+        if parameter.kind in {
+                inspect.Parameter.POSITIONAL_ONLY,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            }:
+            return parameter.name
+
+    return None
+
+def safe_call_qoi_function(
+        func: Callable[..., Any],
+        mcds: Any,
+        list_mcds: list[Any] | tuple[Any, ...] | None = None,
+        data_cache: dict[str, Any] | None = None,
+        input_name: str | None = None,
+    ) -> Any:
+    """
+    Safely call a QoI function with the appropriate input representation.
+
+    Args:
+        func:
+            QoI function to call.
+
+        mcds:
+            pcdl.TimeStep or None. Single simulation snapshot.
+
+        list_mcds:
+            Sequence of pcdl.TimeStep objects or None. Full time series.
+            This object is not copied into the cache.
+
+        data_cache:
+            Caller-owned dictionary valid for exactly one timestep.
+            Reusing the same dictionary across QoI calls allows derived
+            representations such as df_cell, df_conc, adata, and sdata
+            to be reused.
+            Never reuse the cache across timesteps.
+
+        input_name:
+            Optional pre-inspected first argument name.
+            Supplying this avoids repeated inspect.signature calls.
+
+    Returns:
+        Result of the QoI function.
+    """
+    if data_cache is None:
+        # Never use data_cache={} in the function signature.
+        data_cache = {}
+
+    # Prefer explicitly supplied / inspected function signature.
+    if input_name is None:
+        input_name = _qoi_first_parameter_name(func)
+
+    # Wrapped/string-defined QoIs may carry their original input convention
+    # in __param_name__. Use this when signature inspection does not give us
+    # a recognized UQ-PhysiCell input name.
+    if input_name not in {
+            'df', 'df_cell',
+            'df_subs', 'df_conc',
+            'adata',
+            'sdata',
+            'domain',
+            'mcds',
+            'mcds_ts', 'mcdsts',
+        }:
+        param_name = getattr(func, '__param_name__', None)
+        if param_name is not None:
+            input_name = param_name
+
+    if input_name in {'df', 'df_cell'}:
+        if mcds is None:
+            raise ValueError(f"QoI function expects '{input_name}', but mcds is None.")
+        if 'df_cell' not in data_cache:
+            data_cache['df_cell'] = mcds.get_cell_df()
+        return func(data_cache['df_cell'])
+
+    if input_name in {'df_subs', 'df_conc'}:
+        if mcds is None:
+            raise ValueError(f"QoI function expects '{input_name}', but mcds is None.")
+        if 'df_subs' not in data_cache:
+            data_cache['df_subs'] = mcds.get_conc_df()
+        return func(data_cache['df_subs'])
+
+    if input_name == 'adata':
+        if mcds is None:
+            raise ValueError("QoI function expects 'adata', but mcds is None.")
+        if 'adata' not in data_cache:
+            data_cache['adata'] = mcds.get_anndata()
+        return func(data_cache['adata'])
+
+    if input_name == 'sdata':
+        if mcds is None:
+            raise ValueError("QoI function expects 'sdata', but mcds is None.")
+        if 'sdata' not in data_cache:
+            data_cache['sdata'] = mcds.get_spatialdata()
+        return func(data_cache['sdata'])
+
+    if input_name == 'domain':
+        if mcds is None:
+            raise ValueError("QoI function expects 'domain', but mcds is None.")
+        if 'domain' not in data_cache:
+            data_cache['domain'] = mcds.get_muspan()
+        return func(data_cache['domain'])
+
+    if input_name == 'mcds':
+        if mcds is None:
+            raise ValueError("QoI function expects 'mcds', but mcds is None.")
         return func(mcds)
-    elif param_name in ['mcds_ts'] and list_mcds is not None: # Function expects the mcds time series object
-        if mcds == list_mcds[-1]: # Ensure we only compute once per time series (last mcds passed)
+
+    if input_name in {'mcds_ts', 'mcdsts'}:
+        if list_mcds is None:
+            raise ValueError(f"QoI function expects '{input_name}', but list_mcds is None.")
+        if mcds is None:
+            raise ValueError(f"QoI function expects '{input_name}', but mcds is None.")
+        # Compute time-series QoIs only once, on the last snapshot.
+        if mcds is list_mcds[-1]:
             return func(list_mcds)
-        else:
-            return None # Skip computation for other snapshots
+        return None
 
     raise ValueError(
-        f"Could not call QoI function with param_name='{param_name}', "
-        f"mcds provided={mcds is not None}, list_mcds provided={list_mcds is not None}."
+        f"Could not dispatch QoI function. "
+        f"Detected input_name={input_name!r}, "
+        f"mcds provided={mcds is not None}, "
+        f"list_mcds provided={list_mcds is not None}."
     )
 
 def _create_wrapper_for_qoi_function(func: callable, param_name: str, qoi_name: str) -> callable:
@@ -285,7 +383,32 @@ def recreate_qoi_functions(qoi_functions:dict, qoi_def:dict={}) -> dict:
         except Exception as e:
             raise ValueError(f"Error recreating QoI function '{qoi_name}': {e}")
     return recreated_qoi_funcs
-    
+
+def _safe_rmtree(path: str, retries: int = 5, delay: float = 0.5) -> None:
+    """Remove a replicate output folder, tolerating transient ENOTEMPTY errors.
+
+    On network filesystems (e.g. NFS), deleting a file that is still open
+    elsewhere (a delayed writeback, a lagging metadata cache, ...) gets
+    silently renamed to a hidden ``.nfsXXXXX`` sentinel instead of actually
+    removed, which makes the directory appear non-empty to ``rmtree`` right
+    after a simulation finishes. Retry briefly before giving up, and never let
+    cleanup of one replicate's folder kill the whole run.
+    """
+    last_exc = None
+    for attempt in range(retries):
+        try:
+            rmtree(path)
+            return
+        except OSError as e:
+            last_exc = e
+            if e.errno != errno.ENOTEMPTY:
+                break
+            time.sleep(delay)
+    # Best-effort cleanup: drop what we can and move on rather than aborting
+    # the calling worker process over a leftover output folder.
+    rmtree(path, ignore_errors=True)
+    warnings.warn(f"Could not fully remove output folder '{path}' after {retries} retries: {last_exc}")
+
 def summary_function(outputPath:str, summaryFile:Union[str, None], dic_params:dict, SampleID:int, ReplicateID:int, qoi_functions:dict, RemoveFolder:bool=True, drop_columns:Union[list, None]=None,) -> Union[pd.DataFrame, None]:
     """
     Generic summary function for creating custom QoIs (Quantities of Interest) based on df_cell elements.
@@ -352,7 +475,7 @@ def summary_function(outputPath:str, summaryFile:Union[str, None], dic_params:di
         raise RuntimeError(f"An error occurred while processing QoIs: {e}")
 
     # Optional: Remove replicate output folder
-    if (RemoveFolder): rmtree(outputPath)
+    if (RemoveFolder): _safe_rmtree(outputPath)
 
     # Save to file or return DataFrame
     if summaryFile:
@@ -432,9 +555,11 @@ def qoi_func_relational_ph( df: pd.DataFrame, landmark_type: str, witness_type: 
     """
     Relational Persistent Homology using Dowker/Witness idea.
     A→B (A as vertices, B as witnesses) describes how B are arranged around A geometry.
+    This is a relational PH, which is different from the standard PH of a point cloud. 
+    This is useful for analyzing the spatial relationship between two different cell types in a 2D/3D biological context.
 
     Args:
-        df : DataFrame with columns ['position_x','position_y','cell_type']
+        df : DataFrame with columns ['position_x','position_y', 'position_z', 'radius', 'cell_type']
         landmark_type : cell type to use as landmarks (A)
         witness_type : cell type to use as witnesses (B)
         max_dim : PH dimension (0 or 1)
@@ -446,100 +571,117 @@ def qoi_func_relational_ph( df: pd.DataFrame, landmark_type: str, witness_type: 
     """
     from scipy.spatial.distance import cdist
     from scipy.spatial import Delaunay
+    from itertools import combinations
     import gudhi, muspan
     import matplotlib.pyplot as plt
 
     # Extract A = Landmarks, B = Witnesses
-    A_points = df[df["cell_type"] == landmark_type][["position_x","position_y"]].to_numpy()
-    B_points = df[df["cell_type"] == witness_type][["position_x","position_y"]].to_numpy()
-    if len(A_points) == 0 or len(B_points) == 0:
+    A_data = df[df["cell_type"] == landmark_type]
+    B_data = df[df["cell_type"] == witness_type]
+ 
+    A_points_full = A_data[["position_x", "position_y", "position_z"]].to_numpy()
+    B_points_full = B_data[["position_x", "position_y", "position_z"]].to_numpy()
+ 
+    radius_A = A_data["radius"].to_numpy()
+    radius_B = B_data["radius"].to_numpy()
+ 
+    if len(A_points_full) == 0 or len(B_points_full) == 0:
         print("Warning: Both landmark_type and witness_type must be present.")
-        # Return empty Series without pre-defined index - will be filled with NaN by the caller
         return pd.Series(dtype=float), None
-    # Pairwise distances B×A
+ 
+    # ===== AUTO-DETECT DIMENSIONALITY =====
+    # Check if z-coordinates are effectively zero (2D case)
+    z_threshold = 1e-10  # Tolerance for "zero"
+    A_z_nonzero = np.any(np.abs(A_points_full[:, 2]) > z_threshold)
+    B_z_nonzero = np.any(np.abs(B_points_full[:, 2]) > z_threshold)
+    if A_z_nonzero or B_z_nonzero:
+        # Data is 3D
+        print("✓ Detected 3D data (z-coordinates vary)")
+        dim = 3
+        A_points = A_points_full  # Use all 3 coordinates
+        B_points = B_points_full
+    else:
+        # Data is 2D (all z-coordinates are zero)
+        print("✓ Detected 2D data (z-coordinates all zero, using x,y only)")
+        dim = 2
+        A_points = A_points_full[:, :2]  # Use only x,y
+        B_points = B_points_full[:, :2]
+ 
+    # Compute pairwise distances
     D = cdist(B_points, A_points)
-
-    # Build candidate simplex list from landmarks
-    if len(A_points) < 3:
-        print("Warning: At least 3 landmark points are required for relational PH.")
-        # Return empty Series - will be filled with NaN by the caller
+    # Subtract radii from distances (boundary-to-boundary distance)
+    D -= (radius_A[np.newaxis, :] + radius_B[:, np.newaxis])
+    D[D < 0] = 0  # Clamp negative distances (overlapping cells)
+ 
+    # Check minimum points required for Delaunay
+    min_points_required = dim + 1  # 3 for 2D, 4 for 3D
+    if len(A_points) < min_points_required:
+        print(f"Warning: Delaunay in {dim}D requires at least {min_points_required} landmark points.")
+        print(f"         Got {len(A_points)} landmarks.")
         return pd.Series(dtype=float), None
-    # Use Delaunay to match Python repo behavior
+ 
+    # ===== BUILD DELAUNAY TRIANGULATION =====
     tri = Delaunay(A_points)
-    # vertices = all points
-    vertices = list(range(len(A_points)))
-    # edges from Delaunay
-    edges = set()
-    faces = set()
-    for simplex in tri.simplices:
-        simplex = list(simplex)
-        # all edges
-        for i in range(3):
-            for j in range(i+1, 3):
-                edges.add(tuple(sorted([simplex[i], simplex[j]])))
-        # triangle
-        faces.add(tuple(sorted(simplex)))
-    edges = list(edges)
-    faces = list(faces)
-
-    # Compute filtration values
+ 
+    # ===== EXTRACT ALL SIMPLICES BY DIMENSION =====
+    simplices_by_dim = {k: set() for k in range(min(max_dim + 1, dim))}
+    for top_simplex in tri.simplices:
+        top_simplex = list(top_simplex)
+        # Generate all k-faces from this top simplex
+        for k in range(min(max_dim + 1, dim)):
+            for face in combinations(top_simplex, k + 1):  # k+1 vertices for k-simplex
+                simplices_by_dim[k].add(tuple(sorted(face)))
+ 
+    # Convert to lists
+    simplices_lists = {k: list(s) for k, s in simplices_by_dim.items()}
+ 
+    # ===== COMPUTE FILTRATION VALUES =====
     def dowker_distance(simplex):
         """Distance-based Dowker: min_w max_a d(a,w)."""
         return np.min(np.max(D[:, simplex], axis=1))
-    
+ 
     def dowker_count(simplex):
         """Count-based Dowker: number of witnesses covering all simplex vertices."""
         return -np.sum(np.all(D[:, simplex] <= np.max(D[:, simplex], axis=0), axis=1))
-    
-    # Compute filtration values based on the distance
+ 
     fil_func = dowker_distance if mode == "distance" else dowker_count
-    f_vertex = np.array([fil_func([i]) for i in vertices])
-    f_edge   = np.array([fil_func(list(e)) for e in edges])
-    if max_dim >= 2:
-        f_face   = np.array([fil_func(list(f)) for f in faces])
-
-    # Build GUDHI SimplexTree
+ 
+    # ===== BUILD GUDHI SIMPLEX TREE =====
     st = gudhi.SimplexTree()
-    # vertices
-    for i, fv in enumerate(f_vertex):
-        st.insert([i], filtration=float(fv))
-    # edges
-    for (e, fv) in zip(edges, f_edge):
-        st.insert(list(e), filtration=float(fv))
-    # faces
-    if max_dim >= 2:
-        for (f, fv) in zip(faces, f_face):
-            st.insert(list(f), filtration=float(fv))
+    for k in range(min(max_dim + 1, dim)):
+        if len(simplices_lists[k]) == 0:
+            continue
+        simplex_list = simplices_lists[k]
+        f_vals = np.array([fil_func(list(s)) for s in simplex_list])
+        for simplex, fv in zip(simplex_list, f_vals):
+            st.insert(list(simplex), filtration=float(fv))
+ 
     st.initialize_filtration()
-
-    # Compute persistence
+ 
+    # ===== COMPUTE PERSISTENCE =====
     diag = st.persistence()
-
-    # Convert GUDHI persistence output to muspan-style dict {'dgms': [array_dim0, array_dim1, ...]}
+ 
+    # Convert to muspan format
     dgms = []
-    for d in range(max_dim + 1):
-        intervals = [pair for dim, pair in diag if dim == d]
+    for d in range(min(max_dim + 1, dim)):
+        intervals = [pair for dim_d, pair in diag if dim_d == d]
         if len(intervals) == 0:
             dgms.append(np.zeros((0, 2)))
         else:
             dgms.append(np.array(intervals))
     feature_persistence = {'dgms': dgms}
-
-    # Vectorize diagram using muspan's statistics. Some degenerate diagrams can
-    # produce empty finite arrays in muspan/numpy percentile calls.
+ 
+    # ===== VECTORIZE PERSISTENCE DIAGRAM =====
     try:
         vec, names = muspan.topology.vectorise_persistence(feature_persistence, method="statistics")
         vec = pd.Series(vec, index=names)
     except (IndexError, ValueError) as e:
-        print(
-            f"Warning: Could not vectorize relational PH for "
-            f"{landmark_type}->{witness_type}: {e}"
-        )
-        # Return empty Series - will be filled with NaN by the caller
+        print(f"Warning: Could not vectorize relational PH for {landmark_type}->{witness_type}: {e}")
         vec = pd.Series(dtype=float)
-
-    # Plot
+ 
+    # ===== PLOT =====
     if ax is not None:
+        print(f"✓ Computed {dim}D relational PH: {len(vec)} features extracted")
         axes = gudhi.plot_persistence_diagram(diag, axes=ax)
-
+    
     return vec, diag

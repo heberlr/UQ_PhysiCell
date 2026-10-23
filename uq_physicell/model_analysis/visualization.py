@@ -41,7 +41,7 @@ def convert_df_to_df_over_time(df_summary, selected_qoi) -> pd.DataFrame:
     })
     return plot_data
 
-def _get_mcse_legend_handles() -> list[Patch]:
+def get_mcse_legend_handles() -> list[Patch]:
     """Build the legend handles for the standard relative-MCSE reliability bands.
 
     Used internally by plot_qoi_over_time (when plot_mcse_range=True) and can be reused
@@ -73,7 +73,7 @@ def plot_qoi_over_time(df_plot, selected_qoi, ax, plot_mcse_range=False, show_le
         selected_qoi (str): Name of the QoI to plot.
         ax (matplotlib.axes.Axes): Axis to draw on.
         plot_mcse_range (bool, optional): If True, overlay the standard relative-MCSE
-            reliability bands (see _get_mcse_legend_handles) as colored horizontal spans.
+            reliability bands (see get_mcse_legend_handles) as colored horizontal spans.
             Intended for use with a relative-MCSE DataFrame as df_plot. Defaults to False.
         show_legend (bool, optional): If False, suppress the per-axes sample legend and
             MCSE legend instead of drawing them — use this when combining several subplots'
@@ -126,7 +126,7 @@ def plot_qoi_over_time(df_plot, selected_qoi, ax, plot_mcse_range=False, show_le
             sample_legend.remove()
 
     if plot_mcse_range:
-        mcse_handles = _get_mcse_legend_handles()
+        mcse_handles = get_mcse_legend_handles()
         if show_legend:
             # Place MCSE legend below the plot, then call tight_layout to adjust figure
             mcse_legend = ax.legend(
@@ -141,7 +141,8 @@ def plot_qoi_over_time(df_plot, selected_qoi, ax, plot_mcse_range=False, show_le
             ax.add_artist(mcse_legend)
 
 
-def plot_global_sa_results(param_names, sa_method, qoi_time_values, sa_results, selected_qoi, selected_sm, ax) -> None:
+
+def plot_global_sa_results(param_names, sa_method, qoi_time_values, sa_results, selected_qoi, selected_sm, ax, selected_ci=None) -> None:
     """Plot global sensitivity indices (e.g. Sobol S1/ST) over time for one QoI, on a given axis.
 
     Draws one line (or, for a single time point, one bar) per parameter, showing how
@@ -159,6 +160,7 @@ def plot_global_sa_results(param_names, sa_method, qoi_time_values, sa_results, 
         selected_sm (str): Sensitivity measure to plot (e.g. 'S1', 'ST'), a key of
             sa_results[selected_qoi][time_label].
         ax (matplotlib.axes.Axes): Axis to draw on.
+        selected_ci (str): Confidence interval to plot (e.g. 'S1_conf', 'ST_conf'), a key of sa_results[selected_qoi][time_label][selected_sm].
 
     Returns:
         None. The plot is drawn in place on ax.
@@ -166,6 +168,10 @@ def plot_global_sa_results(param_names, sa_method, qoi_time_values, sa_results, 
     plot_data = pd.DataFrame([
         {
             "Time": qoi_time_values[time_label],
+            # None (not the Sensitivity Index itself) when no CI was requested --
+            # SALib's *_conf is a half-width margin in S1's own units, not a
+            # substitute value, so mixing them here was never a valid quantity.
+            "Confidence Interval": None if selected_ci is None else sa_results[selected_qoi][time_label][selected_ci][param_id],
             "Sensitivity Index": sa_results[selected_qoi][time_label][selected_sm][param_id],
             "Parameter": param
         }
@@ -173,11 +179,33 @@ def plot_global_sa_results(param_names, sa_method, qoi_time_values, sa_results, 
         for param_id, param in enumerate(param_names)
     ])
     custom_palette = sns.color_palette("tab20", len(plot_data["Parameter"].unique()))
-    # If just one time point, use barplot, else use lineplot
+    color_by_param = dict(zip(param_names, custom_palette))
+    # If just one time point, use barplot, else use lineplot. seaborn's own
+    # errorbar= only ever aggregates *repeated* observations within an (x, hue)
+    # group -- with a single precomputed point per (Time, Parameter) here, it
+    # never even calls a custom callable (verified: passing one fires zero
+    # times), so the CI has to be drawn manually from the "Confidence Interval"
+    # column instead, right after each seaborn call, only when selected_ci was
+    # requested: whisker-style error bars with clearly visible caps on the bar
+    # plot, a shaded confidence band ("shadow") around each line otherwise.
     if len(sa_results[selected_qoi].keys()) == 1:
-        sns.barplot(data=plot_data, x="Time", y="Sensitivity Index", hue="Parameter", ax=ax, palette=custom_palette, hue_order=param_names)
+        sns.barplot(data=plot_data, x="Time", y="Sensitivity Index", hue="Parameter", ax=ax, palette=custom_palette, hue_order=param_names, errorbar=None)
+        if selected_ci is not None:
+            # Bars are dodged per hue, so align each error bar with its bar's
+            # actual (patch) x-position rather than the shared "Time" value.
+            for patch, param in zip(ax.patches, param_names):
+                x_center = patch.get_x() + patch.get_width() / 2
+                row = plot_data.loc[plot_data["Parameter"] == param].iloc[0]
+                ax.errorbar(x_center, row["Sensitivity Index"], yerr=row["Confidence Interval"],
+                            fmt='none', ecolor='black', elinewidth=1.5, capsize=5, capthick=1.5, zorder=3)
     else:
-        sns.lineplot(data=plot_data, x="Time", y="Sensitivity Index", hue="Parameter", ax=ax, palette=custom_palette, hue_order=param_names)                
+        sns.lineplot(data=plot_data, x="Time", y="Sensitivity Index", hue="Parameter", ax=ax, palette=custom_palette, hue_order=param_names, errorbar=None)
+        if selected_ci is not None:
+            for param in param_names:
+                sub = plot_data[plot_data["Parameter"] == param]
+                ax.fill_between(sub["Time"], sub["Sensitivity Index"] - sub["Confidence Interval"],
+                                 sub["Sensitivity Index"] + sub["Confidence Interval"],
+                                 color=color_by_param[param], alpha=0.2, linewidth=0, zorder=1)
     ax.set_xlabel("Time (min)")
     ax.set_ylabel(f"Sensitivity Measure ({selected_sm})")
     ax.set_title(f"Global SA - {sa_method}", fontsize=8)
@@ -185,6 +213,53 @@ def plot_global_sa_results(param_names, sa_method, qoi_time_values, sa_results, 
     handles, labels = ax.get_legend_handles_labels()
     if handles and labels:
         ax.legend(bbox_to_anchor=(1.05, 1), loc="upper left", title_fontsize=8, fontsize=8)
+
+def plot_sobol_convergence(N_values: list, convergence: dict, qoi_names: list, param_names: list, axes, xlim: tuple = None, ylim: tuple = None) -> None:
+    """Plot Sobol total-order index (ST) vs. sample size N, one panel per QoI.
+
+    Draws one line per parameter with a shaded confidence-interval ribbon (from
+    SALib's ST_conf) on a log2 x-axis, so equal spacing between successive
+    doublings of N makes a flattening (converged) trend visually obvious.
+    Intended to be called with the output of get_sobol_convergence.
+
+    Args:
+        N_values (list): Sobol base sample sizes, in the same order used to build convergence.
+        convergence (dict): Nested results as returned by get_sobol_convergence,
+            structured as {qoi_name: {param_name: {'ST': [...], 'ST_conf': [...]}}}.
+        qoi_names (list): QoIs to plot, one subplot each, in the given order.
+        param_names (list): Parameter names, in a fixed order for consistent coloring.
+        axes: Sequence of matplotlib axes, one per qoi_names entry.
+        xlim (tuple, optional): The x-axis limits for the plot.
+        ylim (tuple, optional): The y-axis limits for the plot.
+
+    Returns:
+        None. The plots are drawn in place on axes.
+    """
+    colors = sns.color_palette("tab20", len(param_names))
+    for ax, qoi in zip(axes, qoi_names):
+        for pid, param in enumerate(param_names):
+            st = np.array(convergence[qoi][param]['ST'])
+            conf = np.array(convergence[qoi][param]['ST_conf'])
+            ax.plot(N_values, st, marker='o', color=colors[pid % len(colors)], label=param)
+            ax.fill_between(N_values, st - conf, st + conf, color=colors[pid % len(colors)], alpha=0.2, linewidth=0)
+        if st.size == 0 or np.all(np.isnan(st)):  # Check if all values are NaN or empty for this qoi and parameter combination
+            ax.remove()  # Remove the empty subplot if no data for this qoi and parameter combination
+            continue  # Skip if no data for this qoi and parameter combination
+        else:
+            # Plot a horizontal green band from 0 to 1 to indicate the valid range of Sobol indices
+            ax.axhspan(0, 1, alpha=0.2, color='gray', zorder=0)
+            ax.set_xscale('log', base=2)
+            ax.set_xticks(N_values)
+            ax.set_xticklabels(N_values)
+            ax.set_xlabel('N (Sobol base sample size)')
+            ax.set_ylabel('Total-order Sobol index (ST)')
+            ax.set_title(qoi)
+            if xlim:
+                ax.set_xlim(xlim)
+            if ylim:
+                ax.set_ylim(ylim)
+    if len(axes) > 0:
+        axes[0].legend(loc='best', fontsize=8)
 
 def plot_local_sa_results(sa_method, qoi_time_values, sa_results, selected_qoi, ax) -> None:
     """Plot local (OAT) sensitivity indices over time for one QoI, on a given axis.

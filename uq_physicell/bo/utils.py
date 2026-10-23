@@ -34,7 +34,8 @@ def normalize_params_df(df_params, df_search_space) -> pd.DataFrame:
 
 def extract_best_parameters(df_gp_models: pd.DataFrame, df_samples: pd.DataFrame) -> tuple:
     """
-    Extract the best parameters from the database file based on the maximum hypervolume.
+    Extract the best parameters from the database file based on the maximum score
+    (hypervolume for multi-objective runs, best fitness for single-objective runs).
     Parameters:
     - df_gp_models: DataFrame containing the Gaussian Process models.
     - df_samples: DataFrame containing the samples.
@@ -42,9 +43,10 @@ def extract_best_parameters(df_gp_models: pd.DataFrame, df_samples: pd.DataFrame
     - Dictionary with parameter names as keys and their best values as values.
     - The sample ID corresponding to the best parameters.
     """
-    # Find the maximum hypervolume and its corresponding iteration ID (if multiple, take the first)
-    max_hypervolume = df_gp_models['Hypervolume'].max()
-    best_iteration = df_gp_models[df_gp_models['Hypervolume'] == max_hypervolume]['IterationID'].min()
+    # Find the maximum score and its corresponding iteration ID (if multiple, take the first)
+    score_col = 'Score' if 'Score' in df_gp_models.columns else 'Hypervolume'  # legacy databases
+    max_score = df_gp_models[score_col].max()
+    best_iteration = df_gp_models[df_gp_models[score_col] == max_score]['IterationID'].min()
     best_sample_id = df_samples[df_samples['IterationID'] == best_iteration]['SampleID'].values[0] # Assuming one sample per iteration
 
     # Get the parameters for the best iteration
@@ -54,7 +56,8 @@ def extract_best_parameters(df_gp_models: pd.DataFrame, df_samples: pd.DataFrame
 
 def extract_best_parameters_db(db_file:str) -> tuple:
     """
-    Extract the best parameters from the database file based on the maximum hypervolume.
+    Extract the best parameters from the database file based on the maximum score
+    (hypervolume for multi-objective runs, best fitness for single-objective runs).
     Parameters:
     - db_file: Path to the database file.
     Returns:

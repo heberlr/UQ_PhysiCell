@@ -22,7 +22,7 @@ from ..model_analysis.sensitivity_analysis import run_global_sa, run_local_sa, s
 from ..model_analysis.ma_context import ModelAnalysisContext, run_simulations
 from ..model_analysis.utils import calculate_qoi_statistics
 from ..model_analysis.visualization import plot_qoi_over_time, plot_global_sa_results, plot_local_sa_results
-from ..database.ma_db import load_structure
+from ..database.ma_db import load_structure, load_qois, get_storage_mode
 
 
 class QtTextEditLogHandler(logging.Handler):
@@ -141,7 +141,9 @@ def on_run_simulations_clicked(main_window):
         SA_sampler = main_window.sampler_combo.currentText() if sampling_type else None
         SA_samples = main_window.local_SA_parameters.get("samples") if sampling_type == "Local" else main_window.global_SA_parameters.get("samples")
         db_file_name = main_window.db_file_name_input.text().strip()
-        qoi_str = ', '.join(main_window.qoi_funcs.keys()) if main_window.qoi_funcs else None
+        # ModelAnalysisContext expects the actual {name: func} dict (or None to mean
+        # "no QoIs, store the raw mcds list") -- not a display string of the names.
+        qois_info = main_window.qoi_funcs if main_window.qoi_funcs else None
         model_config = {"ini_path": main_window.ini_file_path, "struc_name": main_window.struc_name_input.text().strip()}
         # --- Validate inputs (all in main thread) ---
         if not sampling_type:
@@ -165,7 +167,7 @@ def on_run_simulations_clicked(main_window):
                 return
             else:
                 main_window.update_output_tab2(main_window, "QoI(s) not defined: All data will be stored as mcds list.")
-                qoi_str = None
+                qois_info = None
         # --- Start simulation in background thread ---
         main_window.simulation_cancelled = False
         main_window.should_load_db = False  # Initialize flag for database loading
@@ -218,8 +220,8 @@ def on_run_simulations_clicked(main_window):
                 if sampling_type == "Local":
                     # Create the context and store it in the main window for cancellation access
                     main_window.simulation_context = ModelAnalysisContext(
-                        db_file_name, model_config, SA_sampler, 
-                        main_window.local_SA_parameters, qoi_str, 
+                        db_file_name, model_config, SA_sampler,
+                        main_window.local_SA_parameters, qois_info,
                         num_workers=int(num_workers), logger=main_window.logger_tab2
                     )
                     main_window.simulation_context.dic_samples = SA_samples
@@ -229,8 +231,8 @@ def on_run_simulations_clicked(main_window):
                 elif sampling_type == "Global":
                     # Create the context and store it in the main window for cancellation access
                     main_window.simulation_context = ModelAnalysisContext(
-                        db_file_name, model_config, SA_sampler, 
-                        main_window.global_SA_parameters, qoi_str, 
+                        db_file_name, model_config, SA_sampler,
+                        main_window.global_SA_parameters, qois_info,
                         num_workers=int(num_workers), logger=main_window.logger_tab2
                     )
                     main_window.simulation_context.dic_samples = SA_samples
@@ -621,10 +623,10 @@ def open_qoi_definition_window(main_window):
     # Predefined QoIs dictionary based on the database structure
     predefined_qoi_funcs = {}
     custom_qoi_option = True
-    if not main_window.df_output.empty and 'Data' in main_window.df_output.columns:
-        if isinstance(main_window.df_output['Data'].iloc[0], pd.DataFrame):
-            predefined_qoi_funcs = {qoi_name: None for qoi_name in main_window.df_output['Data'].iloc[0].columns if qoi_name not in ['time'] }
-            custom_qoi_option = False
+    # QoIs precomputed at simulation time: offer the stored QoI names, no custom QoIs
+    if not main_window.df_output.empty and get_storage_mode(main_window.ma_file_path) == 'qoi':
+        predefined_qoi_funcs = {qoi_name: None for qoi_name in load_qois(main_window.ma_file_path)['QOI_Name'] if qoi_name is not None}
+        custom_qoi_option = not predefined_qoi_funcs
     if not predefined_qoi_funcs:
         predefined_qoi_funcs = {
             'total_cells': "lambda df: len(df)",
@@ -1124,8 +1126,14 @@ def update_global_inputs(main_window):
             # Store bounds in global_SA_parameters
             main_window.global_SA_parameters[selected_param]["lower_bound"] = lower_bound
             main_window.global_SA_parameters[selected_param]["upper_bound"] = upper_bound
-        except ValueError:
-            main_window.update_output_tab2(main_window, "Error: Invalid reference value or range percentage.")
+        except (TypeError, ValueError):
+            # ref_value/perturbation are unavailable (e.g. LHS/Sobol parameter spaces loaded
+            # from a database) — keep the bounds already stored (lower_bound/upper_bound come
+            # straight from the database) and just show them as-is.
+            if "lower_bound" in param_data and "upper_bound" in param_data:
+                main_window.global_bounds.setText(f"{param_data['lower_bound']:.3e}, {param_data['upper_bound']:.3e}")
+            else:
+                main_window.update_output_tab2(main_window, "Error: Invalid reference value or range percentage.")
 
         # Update global_SA_parameters when editing is finished
         main_window.global_ref_value_input.editingFinished.connect(lambda: main_window.update_global_SA_reference(main_window))
@@ -1200,7 +1208,7 @@ def sample_parameters(main_window):
         try:
             # Request number of samples from the user to run the global sampler
             if sampler not in ['Fractional Factorial', 'Finite Difference']:
-                N, ok = QInputDialog.getInt(main_window, "Number of Samples", "Enter the desired number of samples:", value=8, min=1)
+                N, ok = QInputDialog.getInt(main_window, "Number of Samples", "Enter the desired number of samples:", value=32, min=1)
             else:
                 N = None  # For Fractional Factorial and Finite Difference, N is not required
             main_window.global_SA_parameters["samples"] = run_global_sampler(main_window.global_SA_parameters, sampler, N=N)
@@ -1524,9 +1532,11 @@ def run_simulations_function(main_window):
                 return
             else:
                 main_window.update_output_tab2(main_window, "QoI(s) not defined: All data will be stored as mcds list.")
-                qoi_str = None
+                qois_info = None
         else:
-            qoi_str = ', '.join(main_window.qoi_funcs.keys())
+            # ModelAnalysisContext expects the actual {name: func} dict, not a
+            # display string of the names.
+            qois_info = main_window.qoi_funcs
     except Exception as e:
         main_window.update_output_tab2(main_window, f"Error setting up simulations: {e}")
         print(f"Error setting up simulations: {e}")
@@ -1566,14 +1576,14 @@ def run_simulations_function(main_window):
         if main_window.sampling_type_dropdown.currentText() == "Local":
             sampler = main_window.sampler_combo.currentText()
             # Model Analysis context
-            context = ModelAnalysisContext(db_file_name, model_config, sampler, main_window.local_SA_parameters, qoi_str, num_workers=int(num_workers), logger=main_window.logger_tab2)
+            context = ModelAnalysisContext(db_file_name, model_config, sampler, main_window.local_SA_parameters, qois_info, num_workers=int(num_workers), logger=main_window.logger_tab2)
             context.dic_samples = SA_samples
             context.cancelled = lambda: getattr(main_window, 'simulation_cancelled', False)
             run_simulations(context)
         elif main_window.sampling_type_dropdown.currentText() == "Global":
             sampler = main_window.sampler_combo.currentText()
             # Model Analysis context
-            context = ModelAnalysisContext(db_file_name, model_config, sampler, main_window.global_SA_parameters, qoi_str, num_workers=int(num_workers), logger=main_window.logger_tab2)
+            context = ModelAnalysisContext(db_file_name, model_config, sampler, main_window.global_SA_parameters, qois_info, num_workers=int(num_workers), logger=main_window.logger_tab2)
             context.dic_samples = SA_samples
             context.cancelled = lambda: getattr(main_window, 'simulation_cancelled', False)
             run_simulations(context)
@@ -1622,7 +1632,7 @@ def plot_qois(main_window):
     layout.addWidget(canvas)
     # Calculate the QoIs if not already done
     if main_window.df_summary_qois.empty:
-        try: main_window.df_summary_qois,_, main_window.df_relative_mcse = calculate_qoi_statistics(main_window.db_file_name_input.text().strip(), main_window.qoi_funcs, main_window.df_output)
+        try: main_window.df_summary_qois,_, main_window.df_relative_mcse = calculate_qoi_statistics(main_window.db_file_name_input.text().strip(), main_window.qoi_funcs, n_jobs=min(4, os.cpu_count() or 1))
         except Exception as e:
             main_window.update_output_tab2(main_window, f"Error calculating QoIs: {e}")
             return
@@ -1670,7 +1680,7 @@ def run_analysis(main_window):
      # Calculate the QoIs if not already done
     if main_window.df_summary_qois.empty:
         try: 
-            main_window.df_summary_qois,_, main_window.df_relative_mcse = calculate_qoi_statistics(main_window.db_file_name_input.text().strip(), main_window.qoi_funcs, main_window.df_output )
+            main_window.df_summary_qois,_, main_window.df_relative_mcse = calculate_qoi_statistics(main_window.db_file_name_input.text().strip(), main_window.qoi_funcs, n_jobs=min(4, os.cpu_count() or 1))
         except Exception as e:
             main_window.update_output_tab2(main_window, f"Error calculating QoIs: {e}")
             return
@@ -1756,7 +1766,10 @@ def plot_sa_results(main_window):
             if main_window.sampling_type_dropdown.currentText() == "Global":
                 SA_method = main_window.SA_method_combo.currentText()
                 param_names = [key for key in main_window.global_SA_parameters.keys() if key != "samples"]
-                plot_global_sa_results(param_names, SA_method, main_window.qoi_time_values, main_window.sa_results, selected_qoi, selected_sm, ax)
+                # Check if the selected sensitivity measure has a corresponding confidence interval in the results
+                selected_ci = selected_sm+"_conf" 
+                if selected_ci not in sensitivity_measurements: selected_ci = None
+                plot_global_sa_results(param_names, SA_method, main_window.qoi_time_values, main_window.sa_results, selected_qoi, selected_sm, ax, selected_ci=selected_ci)
             elif main_window.sampling_type_dropdown.currentText() == "Local":
                 SA_method = main_window.SA_method_combo.currentText()
                 plot_local_sa_results(SA_method, main_window.qoi_time_values, main_window.sa_results, selected_qoi, ax)

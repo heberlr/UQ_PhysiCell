@@ -17,4 +17,5 @@ examples/virus-mac-new/ex7_Calib_BO
 examples/virus-mac-new/ex8_ABC_Calib
 examples/template/ex9_Calib_BO
 examples/epi_caf_invasion/ex10_CoCulture
+examples/template/ex11_ABC_ModelSelection
 ```

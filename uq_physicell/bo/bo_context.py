@@ -1,5 +1,6 @@
 import os
 import sys
+import json
 import logging
 import configparser # read config *.ini file
 import concurrent.futures
@@ -188,13 +189,27 @@ class CalibrationContext:
         self.num_restarts_act_func = bo_options.get("num_restarts_act_func", 20)  # Number of restarts for acquisition function optimization
         self.raw_samples_act_func = bo_options.get("raw_samples_act_func", 512)  # Number of raw samples for acquisition function
         self.use_exponential_fitness = bo_options.get("use_exponential_fitness", True)
-        
+        self.use_correlated_gp = bo_options.get("use_correlated_gp", False)
+
+        # PhysiCell effective-config fingerprint (ini section + XML + rules file hashes).
+        # Stored in the database and re-checked on resume to prevent mixing simulations
+        # produced under a changed model configuration.
+        self.config_fingerprint = self._build_config_fingerprint()
+
         # Initialize metadata for database
         self.dic_metadata = {
             "BO_Method": "Multi-objective optimization with qNEHVI" if len(self.qoi_functions.keys()) > 1 else "Single-objective optimization",
             "ObsData_Path": self.obsData_path,
             "Ini_File_Path": self.model_config["ini_path"],
             "StructureName": self.model_config["struc_name"],
+            # Resolved BO configuration (post-defaults), stored as JSON for post-processing / reproducibility.
+            # Only JSON-serializable values are kept; user-supplied callables are recorded by name.
+            "BO_Options": json.dumps(self._build_bo_options_record(), default=str),
+            "Ini_Hash": self.config_fingerprint.get("ini_file_hash"),
+            "XML_Hash": self.config_fingerprint.get("xml_file_hash"),
+            "Rules_Hash": self.config_fingerprint.get("rules_file_hash"),
+            "Structure_Config_Hash": self.config_fingerprint.get("structure_config_hash"),
+            "Effective_Run_Hash": self.config_fingerprint.get("effective_run_hash"),
         }
         
         # Define distance functions (default use SumSquaredDifferences) and weights
@@ -220,7 +235,54 @@ class CalibrationContext:
         # Cancellation flag for cooperative cancellation support
         self.cancel_requested = False
 
-    def default_run_single_replicate(self, sample_id: int, replicate_id: int, params: dict) -> dict:
+    def _build_config_fingerprint(self) -> dict:
+        """
+        Build the PhysiCell effective-config fingerprint (hashes of the .ini structure
+        section, the XML reference file and the rules file) for this model_config.
+
+        Best-effort: returns ``{}`` (so every hash resolves to None) and logs a warning if
+        the model cannot be instantiated (e.g. when a context is built only to inspect it).
+        """
+        try:
+            pc_model = PhysiCell_Model(self.model_config["ini_path"], self.model_config["struc_name"])
+            return pc_model.build_effective_config_fingerprint()
+        except Exception as e:
+            self.logger.warning(f"⚠️  Could not build PhysiCell config fingerprint: {e}")
+            return {}
+
+    def _build_bo_options_record(self) -> dict:
+        """
+        Collect the resolved BO configuration (after defaults are applied) into a
+        JSON-serializable dict for storage in the Metadata.BO_Options column.
+
+        User-supplied callables (summary_function and the custom_* hooks) are not
+        serializable, so they are recorded by their ``__name__`` (or ``repr``).
+        """
+        def _callable_name(func):
+            if func is None:
+                return None
+            return getattr(func, "__name__", None) or repr(func)
+
+        return {
+            "num_initial_samples": self.num_initial_samples,
+            "num_iterations": self.batch_size_bo,
+            "batch_size_per_iteration": self.batch_size_per_iteration,
+            "samples_per_batch_act_func": self.samples_per_batch_act_func,
+            "num_restarts_act_func": self.num_restarts_act_func,
+            "raw_samples_act_func": self.raw_samples_act_func,
+            "use_exponential_fitness": self.use_exponential_fitness,
+            "use_correlated_gp": self.use_correlated_gp,
+            "ref_point": self.ref_point.tolist(),
+            "num_replicates": self.num_replicates,
+            "max_workers": self.max_workers,
+            "fixed_params": self.fixed_params,
+            "db_path_initial_samples": self.db_path_initial_samples,
+            "summary_function": _callable_name(self.summary_function),
+            "custom_run_single_replicate_func": _callable_name(self.custom_run_single_replicate_func),
+            "custom_aggregation_func": _callable_name(self.custom_aggregation_func),
+        }
+
+    def default_run_single_replicate(self, sample_id: int, replicate_id: int, params: dict, random_seed: int = None) -> tuple:
         """
         Run a single replicate of the PhysiCell model.
         This function is responsible for executing the model with the given parameters and returning the results.
@@ -228,13 +290,15 @@ class CalibrationContext:
             sample_id (int): Unique identifier for the sample being processed.
             replicate_id (int): Unique identifier for the replicate being processed.
             params (dict): Dictionary of parameters to be used in the model run.
+            random_seed (int, optional): Seed forced for this replicate (written to the XML).
+                Distinct per replicate so parallel replicates of the same sample cannot collide.
         Returns:
-            dict: dictionary of model outputs.
+            tuple: (dict of model outputs, random seed PhysiCell used for this replicate or None).
         """
         PC_model = PhysiCell_Model(self.model_config["ini_path"], self.model_config["struc_name"])
         dic_params_xml = {par_name: par_value for par_name, par_value in params.items() if par_name in PC_model.XML_parameters_variable.values()}
         dic_params_rules = {par_name: par_value for par_name, par_value in params.items() if par_name in PC_model.parameters_rules_variable.values()}
-        _, _, result_data = run_replicate_serializable(
+        _, _, result_data, seed = run_replicate_serializable(
             PhysiCellModel_conf=self.model_config,
             sample_id=sample_id,
             replicate_id=replicate_id,
@@ -245,10 +309,12 @@ class CalibrationContext:
             return_binary_output=False,
             #drop_columns,
             custom_summary_function=self.summary_function,
+            return_seed=True,
+            random_seed=random_seed,
         )
         dic_result_data = result_data.to_dict(orient='list')
         dic_result_data_np = {key: np.array(list_values) for key, list_values in dic_result_data.items()}
-        return dic_result_data_np
+        return dic_result_data_np, (seed if seed is not None else random_seed)
 
     def default_aggregation_func(self, replicate_results:list, sample_id:int) -> tuple:
         """
@@ -263,7 +329,8 @@ class CalibrationContext:
         agg_noise = {}
         for key in replicate_results[0].keys():
             agg_results[key] = np.mean([r[key] for r in replicate_results], axis=0)
-            agg_noise[key] = np.std([r[key] for r in replicate_results], axis=0)
+            # Standard error of the mean
+            agg_noise[key] = np.std([r[key] for r in replicate_results], axis=0) / np.sqrt(len(replicate_results))  
 
         # Convert the results in a dataframe with all replicates
         dic_results = {}
@@ -310,7 +377,8 @@ class CalibrationContext:
         for qoi in self.distance_functions.keys():
             qoi_values = [rep_obj[qoi] for rep_obj in objectives_per_replicate]
             objectives[qoi] = np.mean(qoi_values)
-            obj_noise[qoi] = np.std(qoi_values)
+            # Standard error of the mean
+            obj_noise[qoi] = np.std(qoi_values) / np.sqrt(len(qoi_values))  
 
         return objectives, obj_noise, dic_results
 
@@ -323,22 +391,31 @@ class CalibrationContext:
            Returns:
             tuple: objectives (dict) containing the computed objectives for the given parameters,
                    obj_noise (dict) containing the standard deviation of objectives across replicates,
-                   dic_results (dict) containing the results from all replicates.
+                   dic_results (dict) containing the results from all replicates,
+                   seeds (list) the PhysiCell random seed of each replicate (None per entry when unavailable;
+                   all None when a custom run_single_replicate function is used).
         """
         self.logger.debug(f"Sample {sample_index} with params: {params}")
         # Check if using default run_single_replicate function
         if not self.custom_run_single_replicate_func:
             # Include fixed_params into params
             params.update(self.fixed_params)
+            # Draw a distinct seed per replicate in the parent process (serially, before
+            # dispatching) so parallel replicates of this sample cannot get the same seed.
+            replicate_seeds = np.random.default_rng().choice(2**32, size=self.num_replicates, replace=False).tolist()
             with concurrent.futures.ProcessPoolExecutor(max_workers=self.workers_inner) as executor:
-                replicate_results = list(executor.map(
+                replicate_outputs = list(executor.map(
                     self.default_run_single_replicate,
                     [sample_index] * self.num_replicates,
                     range(self.num_replicates),
-                    [params] * self.num_replicates
+                    [params] * self.num_replicates,
+                    replicate_seeds
                 ))
+            # default_run_single_replicate returns (result_dict, seed)
+            replicate_results = [out[0] for out in replicate_outputs]
+            seeds = [out[1] for out in replicate_outputs]
         else: # Use the custom run_single_replicate function provided in bo_options
-            # Note that this function signature MUST be:  
+            # Note that this function signature MUST be:
             # sample_index:int, replicate_id:int, params:dict, fixed_params:dict, model_config:dict
             with concurrent.futures.ProcessPoolExecutor(max_workers=self.workers_inner) as executor:
                 replicate_results = list(executor.map(
@@ -349,15 +426,16 @@ class CalibrationContext:
                     [self.fixed_params] * self.num_replicates,
                     [self.model_config] * self.num_replicates
                 ))
-        
+            seeds = [None] * self.num_replicates
+
         if not self.custom_aggregation_func: # Default: Aggregate replicate results (mean and standard deviation)
             objectives, obj_noise, dic_results = self.default_aggregation_func(replicate_results, sample_index)
         else: # Custom aggregation function (without scale factor - weights handle scaling)
             objectives, obj_noise, dic_results = self.custom_aggregation_func(replicate_results, sample_index, self.distance_functions, self.dic_obsData)
 
-        return objectives, obj_noise, dic_results
+        return objectives, obj_noise, dic_results, seeds
 
-    def save_results_to_db(self, sample_index:int, objectives:dict, noise_std:dict, dic_results:dict):
+    def save_results_to_db(self, sample_index:int, objectives:dict, noise_std:dict, dic_results:dict, seeds:list=None):
         """
         Save results to database.
         Args:
@@ -365,12 +443,15 @@ class CalibrationContext:
             objectives (dict): Dictionary containing the objective values.
             noise_std (dict): Dictionary containing the noise standard deviations.
             dic_results (dict): Dictionary containing the results to save.
+            seeds (list, optional): PhysiCell random seed for each replicate, ordered by replicate id.
+                Stored as a JSON list; NULL when None.
         """
         try:
             binary_objectives = pickle.dumps(objectives)  # Convert dict to binary format
             binary_noise_std = pickle.dumps(noise_std)  # Convert dict to binary format
             binary_df = pickle.dumps(dic_results)  # Convert dict to binary format
-            insert_output(self.db_path, sample_index, binary_objectives, binary_noise_std, binary_df)
+            json_seeds = json.dumps(seeds) if seeds is not None else None
+            insert_output(self.db_path, sample_index, binary_objectives, binary_noise_std, binary_df, seeds=json_seeds)
             self.logger.debug(f"Successfully saved results for sample {sample_index} to database.")
         except Exception as e:
             self.logger.error(f"Error saving results for sample {sample_index} to database: {e}")
@@ -485,8 +566,8 @@ class CalibrationContext:
             list_output_tuples = list(outer_executor.map(self.evaluate_params, train_x_dic_params, sample_ids))
 
         # Save results to database sequentially to avoid concurrency issues
-        for i, (objectives, obj_noise, dic_results) in enumerate(list_output_tuples):
-            self.save_results_to_db(sample_ids[i], objectives, obj_noise, dic_results)
+        for i, (objectives, obj_noise, dic_results, seeds) in enumerate(list_output_tuples):
+            self.save_results_to_db(sample_ids[i], objectives, obj_noise, dic_results, seeds=seeds)
 
         # TENSOR CREATION EXPLANATION:
         # list_output_tuples contains tuples like (objectives_dict, noise_dict, dic_results) for each sample
@@ -516,10 +597,10 @@ class CalibrationContext:
         # Reconstruct training tensors from loaded data
         train_x, train_obj, train_obj_std = self._reconstruct_training_data(df_samples, df_output)
         
-        # Get the latest iteration and hypervolume (don't load the model - we'll recreate it)
+        # Get the latest iteration and score/hypervolume (don't load the model - we'll recreate it)
         if not df_gp_models.empty:
             latest_iteration = df_gp_models['IterationID'].max()
-            latest_hypervolume = df_gp_models[df_gp_models['IterationID'] == latest_iteration]['Hypervolume'].iloc[0]
+            latest_hypervolume = df_gp_models[df_gp_models['IterationID'] == latest_iteration]['Score'].iloc[0]
         else:
             latest_iteration = -1
             latest_hypervolume = 0.0
@@ -544,7 +625,34 @@ class CalibrationContext:
         current_qois = set(self.qoi_functions.keys())
         if loaded_qois != current_qois:
             raise ValueError(f"QoI mismatch. Loaded: {loaded_qois}, Current: {current_qois}")
-            
+
+        # Restart safety: the PhysiCell model configuration must not have changed since the
+        # database was created, otherwise the resumed run would mix incompatible simulations.
+        if 'Effective_Run_Hash' in df_metadata.columns:
+            stored_hash = df_metadata['Effective_Run_Hash'].iloc[0]
+            current_hash = self.config_fingerprint.get("effective_run_hash")
+            if stored_hash and current_hash and stored_hash != current_hash:
+                raise ValueError(
+                    "PhysiCell effective run configuration hash mismatch - the model config "
+                    "(.ini structure section, XML or rules file) changed since this database was created. "
+                    f"Stored: {stored_hash}, current: {current_hash}."
+                )
+
+        # Warn on BO options that change how fitness / GP models are computed across a resume
+        if 'BO_Options' in df_metadata.columns and df_metadata['BO_Options'].iloc[0]:
+            try:
+                stored_options = json.loads(df_metadata['BO_Options'].iloc[0])
+            except (json.JSONDecodeError, TypeError):
+                stored_options = {}
+            current_options = self._build_bo_options_record()
+            for key in ('use_exponential_fitness', 'use_correlated_gp', 'ref_point'):
+                if key in stored_options and stored_options[key] != current_options[key]:
+                    self.logger.warning(
+                        f"⚠️  BO option '{key}' differs from the stored database value "
+                        f"(stored: {stored_options[key]}, current: {current_options[key]}). "
+                        f"Resumed samples may not be comparable to the existing ones."
+                    )
+
         self.logger.debug("Loaded data validation passed")
 
     def _reconstruct_training_data(self, df_samples, df_output) -> tuple:
@@ -813,9 +921,176 @@ class CalibrationContext:
             coverage_score = coverage_analysis["coverage"]
             
             result["convergence_confidence"] = (stability_score + quality_score + coverage_score) / 3.0
-            
+
         return result
-    
+
+    def analyze_convergence_single_objective(self, best_f_list: list, train_obj: torch_Tensor,
+                                             train_obj_std: torch_Tensor, train_x: torch_Tensor,
+                                             iteration: int) -> dict:
+        """
+        Single-objective analogue of :meth:`analyze_convergence`.
+
+        Replaces the hypervolume / Pareto-front criteria with best-fitness plateau detection,
+        keeping the same noise analysis, parameter-space coverage and acquisition-diversity checks.
+
+        Args:
+            best_f_list (list): History of the best (max) fitness value, one entry per iteration.
+            train_obj (torch_Tensor): Fitness values, shape (n_samples, 1).
+            train_obj_std (torch_Tensor): Replicate-noise std of the fitness, same shape as train_obj.
+            train_x (torch_Tensor): Normalized parameter values.
+            iteration (int): Current iteration.
+
+        Returns:
+            dict: Convergence analysis results with recommendations (same schema as analyze_convergence).
+        """
+        result = {
+            "converged": False,
+            "stagnant": False,
+            "needs_restart": False,
+            "status": "in_progress",
+            "reason": "",
+            "convergence_confidence": 0.0,
+            "suggestion": "",
+            "noise_limited": False,
+        }
+
+        if len(best_f_list) < 10:
+            result["reason"] = "Insufficient data for convergence analysis"
+            result["status"] = "insufficient_data"
+            return result
+
+        # NOISE ANALYSIS: signal-to-noise ratio of the single objective
+        obj_mean = float(train_obj.mean().item())
+        obj_noise = float(train_obj_std.mean().item())
+        snr = obj_mean / (obj_noise + 1e-10)
+        relative_noise = obj_noise / (abs(obj_mean) + 1e-10)
+        result["snr_avg"] = snr
+        result["snr_min"] = snr
+        result["relative_noise_avg"] = relative_noise
+        result["relative_noise_max"] = relative_noise
+
+        # Noise-adjusted stability threshold (mirrors the multi-objective thresholds)
+        if relative_noise > 0.15:
+            noise_level = "high"
+            result["noise_limited"] = True
+            stability_threshold = 0.02
+            self.logger.warning(f"⚠️  High noise detected (rel. {relative_noise:.1%}) - using relaxed convergence criteria")
+        elif relative_noise > 0.08:
+            noise_level = "moderate"
+            result["noise_limited"] = True
+            stability_threshold = 0.01
+        else:
+            noise_level = "low"
+            stability_threshold = 0.005
+
+        # 1. Best-fitness trend (improvements over a 5-iteration lag; >= 0 by monotonicity of the running max)
+        bestf_improvements = [best_f_list[i] - best_f_list[i - 5] for i in range(5, len(best_f_list))]
+        recent_improvements = bestf_improvements[-5:] if len(bestf_improvements) >= 5 else bestf_improvements
+
+        # 2. Best-fitness stability (coefficient of variation over the recent window)
+        if len(best_f_list) >= 15:
+            recent = best_f_list[-15:]
+            mean_recent = np.mean(recent)
+            bestf_stability = float(np.std(recent) / mean_recent) if mean_recent > 0 else float('inf')
+        else:
+            bestf_stability = float('inf')
+        result["bestf_stability"] = bestf_stability
+        result["best_fitness"] = float(best_f_list[-1])
+
+        # 3. Parameter-space coverage and acquisition diversity
+        coverage_analysis = self._analyze_parameter_coverage(train_x)
+        result.update(coverage_analysis)
+        acq_diversity = self._estimate_acquisition_diversity(train_x)
+        result["acquisition_diversity"] = acq_diversity
+
+        coverage_threshold_good = 0.6
+        coverage_threshold_poor = 0.2
+        acq_diversity_threshold = 0.1
+
+        is_bestf_stable = (bestf_stability < stability_threshold and
+                           len(recent_improvements) >= 3 and
+                           max(recent_improvements) < stability_threshold * 0.2)
+
+        stagnation_window = 10 if noise_level == "low" else 15
+        stagnation_threshold = 1e-10 if noise_level == "low" else stability_threshold * 0.1
+        is_stagnant = (len(best_f_list) >= stagnation_window and
+                       abs(best_f_list[-1] - best_f_list[-stagnation_window]) < stagnation_threshold)
+
+        # DECISION TREE (noise-aware):
+
+        # CASE 1: TRUE CONVERGENCE - plateaued best fitness + good coverage + low noise
+        if (is_bestf_stable and
+                coverage_analysis["coverage"] >= coverage_threshold_good and
+                noise_level == "low"):
+            result["converged"] = True
+            result["status"] = "converged"
+            result["reason"] = "Best fitness plateaued with good parameter-space coverage and low noise"
+            result["convergence_confidence"] = min(0.95,
+                0.4 + 0.3 * coverage_analysis["coverage"] +
+                0.3 * (1 - min(bestf_stability / stability_threshold, 1.0)))
+
+        # CASE 2: NOISE-LIMITED CONVERGENCE - plateaued as much as the noise allows
+        elif (is_bestf_stable and
+              coverage_analysis["coverage"] >= coverage_threshold_good and
+              result["noise_limited"]):
+            result["converged"] = True
+            result["status"] = "converged_noise_limited"
+            result["reason"] = (f"Converged within noise constraints (rel. noise: {relative_noise:.1%}); "
+                                f"further improvement requires more replicates to reduce noise.")
+            result["convergence_confidence"] = min(0.75,
+                0.5 * coverage_analysis["coverage"] + 0.2 * min(snr / 10.0, 1.0) + 0.05)
+            result["suggestion"] = (f"Consider increasing replicates from {self.num_replicates} to "
+                                    f"~{int(self.num_replicates * (relative_noise / 0.05) ** 2)} to reduce noise below 5%")
+
+        # CASE 3: LIKELY CONVERGED - stagnant with good coverage
+        elif (is_stagnant and
+              coverage_analysis["coverage"] >= coverage_threshold_good):
+            result["converged"] = True
+            result["stagnant"] = True
+            result["status"] = "converged_stagnant"
+            result["reason"] = "Likely converged: best fitness stagnant with good parameter-space exploration"
+            result["convergence_confidence"] = min(0.85,
+                0.5 * coverage_analysis["coverage"] +
+                0.35 * (1 - min(bestf_stability / stability_threshold, 1.0)))
+            result["suggestion"] = "Consider stopping optimization - likely found optimal region"
+
+        # CASE 4: STUCK IN SUBOPTIMAL REGION - stagnant with poor coverage or low acquisition diversity
+        elif (is_stagnant and
+              (coverage_analysis["coverage"] < coverage_threshold_poor or
+               acq_diversity < acq_diversity_threshold)):
+            result["stagnant"] = True
+            result["needs_restart"] = True
+            result["status"] = "stuck_suboptimal"
+            result["reason"] = "Stuck in suboptimal region: poor exploration despite stagnation"
+            result["exploration_quality"] = f"Coverage: {coverage_analysis['coverage']:.1%}, AcqDiv: {acq_diversity:.3f}"
+            if coverage_analysis["coverage"] < coverage_threshold_poor:
+                result["suggestion"] = "Poor parameter space coverage - restart with more initial samples or adjust distance function weights"
+            else:
+                result["suggestion"] = "Low acquisition diversity - restart with enhanced exploration settings"
+
+        # CASE 5: EARLY STAGNATION WARNING
+        elif is_stagnant and iteration >= 15:
+            result["stagnant"] = True
+            result["status"] = "stagnant_warning"
+            result["reason"] = "Stagnation detected but exploration quality unclear - monitor closely"
+            result["suggestion"] = "Monitor next few iterations; consider restart if no improvement"
+
+        # CASE 6: NORMAL PROGRESS
+        else:
+            result["status"] = "in_progress"
+            if len(best_f_list) >= 3 and (best_f_list[-1] - best_f_list[-3]) < 1e-8:
+                result["reason"] = "Slow but steady progress"
+            else:
+                result["reason"] = "Normal optimization progress"
+
+        # Overall confidence for non-converged cases
+        if not result["converged"]:
+            stability_score = max(0.0, 1 - bestf_stability / 0.01) if bestf_stability != float('inf') else 0.0
+            coverage_score = float(coverage_analysis["coverage"])
+            result["convergence_confidence"] = (stability_score + coverage_score) / 2.0
+
+        return result
+
     def _analyze_pareto_front(self, fitness_values):
         """
         Analyze the quality of the Pareto front using BoTorch's optimized implementations.
@@ -1000,6 +1275,25 @@ class CalibrationContext:
         return min(diversity, 1.0)  # Cap at 1.0
 
 
+def _convergence_status_to_json(convergence_result: Optional[dict]) -> Optional[str]:
+    """Serialize an ``analyze_convergence*`` result dict to JSON for ``GP_Models.ConvergenceStatus``.
+
+    Coerces the numpy scalars / arrays produced by the coverage and diversity helpers to plain
+    Python types so the result round-trips cleanly through ``json``.
+    """
+    if not convergence_result:
+        return None
+
+    def _to_jsonable(obj):
+        if isinstance(obj, np.generic):
+            return obj.item()
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return str(obj)
+
+    return json.dumps(convergence_result, default=_to_jsonable)
+
+
 def single_objective_bayesian_optimization(calib_context, train_x, train_obj, train_obj_std, start_iteration):
     """Single-objective Bayesian optimization loop."""
     logger = calib_context.logger
@@ -1011,7 +1305,6 @@ def single_objective_bayesian_optimization(calib_context, train_x, train_obj, tr
     search_space = calib_context.search_space
     db_path = calib_context.db_path
     qoi_name = calib_context.qoi_details['QOI_Name'][0]
-    hvs_list = []
     best_fitness_list = [torch.max(train_obj).item()]
     for iteration in range(start_iteration, batch_size_bo + 1):
         logger.info(f"{'='*60}")
@@ -1034,7 +1327,7 @@ def single_objective_bayesian_optimization(calib_context, train_x, train_obj, tr
         
         # Acquisition function: qLogExpectedImprovement
         sampler = SobolQMCNormalSampler(sample_shape=torch.Size([samples_per_batch]))
-        acq_func = qLogExpectedImprovement(model=model, best_f=train_yvar.max().item(), sampler=sampler)
+        acq_func = qLogExpectedImprovement(model=model, best_f=train_y.max().item(), sampler=sampler)
         num_params = len(search_space)
         bounds = torch.stack([torch.zeros(num_params), torch.ones(num_params)]).to(torch.float64)
         candidates, acq_values = optimize_acqf(
@@ -1058,8 +1351,8 @@ def single_objective_bayesian_optimization(calib_context, train_x, train_obj, tr
         # Run simulations
         with concurrent.futures.ProcessPoolExecutor(max_workers=calib_context.workers_out) as executor:
             new_results = list(executor.map(calib_context.evaluate_params, next_params_list, next_sample_ids))
-        for i, (objectives, obj_noise, dic_results) in enumerate(new_results):
-            calib_context.save_results_to_db(next_sample_ids[i], objectives, obj_noise, dic_results)
+        for i, (objectives, obj_noise, dic_results, seeds) in enumerate(new_results):
+            calib_context.save_results_to_db(next_sample_ids[i], objectives, obj_noise, dic_results, seeds=seeds)
         new_obj = torch.tensor([list(result[0].values()) for result in new_results], dtype=torch.float64)
         new_obj_std = torch.tensor([list(result[1].values()) for result in new_results], dtype=torch.float64)
         train_x = torch.cat([train_x, candidates])
@@ -1068,9 +1361,38 @@ def single_objective_bayesian_optimization(calib_context, train_x, train_obj, tr
         best_fitness = torch.max(train_obj).item()
         best_fitness_list.append(best_fitness)
 
+        # Check convergence before persisting, so the status is stored with this iteration
+        convergence_result = None
+        if len(best_fitness_list) >= 10:
+            logger.info("🔍 Analyzing convergence...")
+            convergence_result = calib_context.analyze_convergence_single_objective(
+                best_fitness_list, train_obj, train_obj_std, train_x, iteration
+            )
+            logger.info(f"\t📋 Convergence Status: {convergence_result['status']}")
+            logger.info(f"\t💡 Reason: {convergence_result['reason']}")
+            logger.info(f"\t🎯 Confidence: {convergence_result['convergence_confidence']:.2%}")
+            if "relative_noise_max" in convergence_result:
+                logger.info(f"\t📊 Noise level: rel={convergence_result['relative_noise_max']:.1%}, "
+                            f"SNR={convergence_result['snr_min']:.1f}")
+            if convergence_result["suggestion"]:
+                logger.info(f"\t💡 Suggestion: {convergence_result['suggestion']}")
+
+        # Persist the GP model + convergence status for this iteration
+        # (the Hypervolume column stores the best fitness value for single-objective runs)
+        insert_gp_models(db_path, iteration, model, best_fitness,
+                         convergence_status=_convergence_status_to_json(convergence_result))
+
         # Log iteration summary
         logger.info(f"✅ Completed iteration {iteration}/{batch_size_bo} - Total samples: {len(train_x)}")
         logger.info(f"🎯 Best fitness value for {qoi_name}: {best_fitness:.6f}")
+
+        # Act on the convergence verdict
+        if convergence_result is not None:
+            if convergence_result["converged"] and convergence_result["convergence_confidence"] > 0.8:
+                logger.info("\t🎉 Convergence detected with high confidence - stopping optimization")
+                break
+            elif convergence_result["needs_restart"]:
+                logger.warning("\t⚠️  Suboptimal stagnation detected - consider restarting with different settings")
 
     # Final log
     logger.info("✅ Single-objective Bayesian optimization completed successfully!")
@@ -1099,7 +1421,7 @@ def multi_objective_bayesian_optimization(calib_context, train_x, train_obj, tra
             break
         
         logger.info("🔧 Fitting Gaussian Process models...")
-        model = _fit_gp_models(train_x, train_obj, train_obj_std, calib_context)
+        model = _fit_gp_models(train_x, train_obj, train_obj_std, calib_context.use_correlated_gp, logger)
         
         logger.info("🎯 Optimizing acquisition function...")
         next_x = _optimize_acquisition_function(model, train_x, calib_context)
@@ -1118,9 +1440,9 @@ def multi_objective_bayesian_optimization(calib_context, train_x, train_obj, tra
         # Run simulations
         with concurrent.futures.ProcessPoolExecutor(max_workers=calib_context.workers_out) as executor:
             new_results = list(executor.map(calib_context.evaluate_params, next_params_list, next_sample_ids))
-        for i, (objectives, obj_noise, dic_results) in enumerate(new_results):
+        for i, (objectives, obj_noise, dic_results, seeds) in enumerate(new_results):
             logger.info(f"\t Results for Sample ID {next_sample_ids[i]}: Objectives = {objectives}, Noise Std = {obj_noise}")
-            calib_context.save_results_to_db(next_sample_ids[i], objectives, obj_noise, dic_results)
+            calib_context.save_results_to_db(next_sample_ids[i], objectives, obj_noise, dic_results, seeds=seeds)
         new_obj = torch.tensor([list(result[0].values()) for result in new_results], dtype=torch.float64)
         new_obj_std = torch.tensor([list(result[1].values()) for result in new_results], dtype=torch.float64)
         train_x = torch.cat([train_x, next_x])
@@ -1128,31 +1450,37 @@ def multi_objective_bayesian_optimization(calib_context, train_x, train_obj, tra
         train_obj_std = torch.cat([train_obj_std, new_obj_std])
         # Get the hypervolume from the acquisition function's cached data
         try:
-            cached_hv = calib_context._cached_pareto_data.get('hypervolume', None)
-            current_hv = cached_hv
+            current_hv = calib_context._cached_pareto_data.get('hypervolume', None)
             logger.debug("🚀 Using cached hypervolume from acquisition function")
         except Exception:
             current_hv = None
             logger.warning("Could not retrieve hypervolume from acquisition function")
         hvs_list.append(current_hv)
-        insert_gp_models(db_path, iteration, model, current_hv)
-        logger.info(f"📊 Iteration {iteration} Sample(s) {next_sample_ids} : Hypervolume = {current_hv}")
 
-        # Check Convergence
+        # Check convergence before persisting, so the status is stored with this iteration.
+        # (analyze_convergence consumes calib_context._cached_pareto_data; current_hv is already extracted.)
+        convergence_result = None
         if len(hvs_list) >= 10:
             logger.info("🔍 Analyzing convergence...")
             convergence_result = calib_context.analyze_convergence(hvs_list, train_obj, train_obj_std, train_x, iteration)
             logger.info(f"\t📋 Convergence Status: {convergence_result['status']}")
             logger.info(f"\t💡 Reason: {convergence_result['reason']}")
             logger.info(f"\t🎯 Confidence: {convergence_result['convergence_confidence']:.2%}")
-            
+
             # Log noise metrics if available
             if "relative_noise_max" in convergence_result:
                 logger.info(f"\t📊 Noise level: max={convergence_result['relative_noise_max']:.1%}, "
                           f"avg={convergence_result['relative_noise_avg']:.1%}, SNR={convergence_result['snr_min']:.1f}")
-            
+
             if convergence_result["suggestion"]:
                 logger.info(f"\t💡 Suggestion: {convergence_result['suggestion']}")
+
+        insert_gp_models(db_path, iteration, model, current_hv,
+                         convergence_status=_convergence_status_to_json(convergence_result))
+        logger.info(f"📊 Iteration {iteration} Sample(s) {next_sample_ids} : Hypervolume = {current_hv}")
+
+        # Act on the convergence verdict
+        if convergence_result is not None:
             if convergence_result["converged"] and convergence_result["convergence_confidence"] > 0.8:
                 logger.info("\t🎉 Convergence detected with high confidence - stopping optimization")
                 break
@@ -1182,11 +1510,19 @@ def run_bayesian_optimization(calib_context: CalibrationContext, additional_iter
         additional_iterations (Optional[int]): Additional iterations for resume functionality
     """
     logger = calib_context.logger
+    if not calib_context.custom_run_single_replicate_func:
+        # Every searched or fixed parameter must reach PhysiCell, or it would be silently dropped
+        PhysiCell_Model(calib_context.model_config["ini_path"], calib_context.model_config["struc_name"]).check_parameter_names(
+            list(calib_context.search_space) + list(calib_context.fixed_params),
+            context="Search-space/fixed parameters",
+        )
     try:
         resume_from_db = os.path.exists(calib_context.db_path)
         single_qoi = len(calib_context.qoi_details['QOI_Name']) == 1
         if resume_from_db:
             logger.info(f"🔄 Resuming optimization from existing database: {calib_context.db_path}")
+            # Bring the schema of an older database up to date (adds nullable columns only)
+            create_structure(calib_context.db_path)
             if additional_iterations is not None:
                 calib_context.update_bo_iterations(additional_iterations)
             train_x, train_obj, train_obj_std, latest_iteration, latest_hypervolume = calib_context.load_existing_data()
@@ -1245,7 +1581,8 @@ def run_bayesian_optimization(calib_context: CalibrationContext, additional_iter
         raise
 
 
-def _fit_gp_models(train_x: torch_Tensor, train_obj: torch_Tensor, train_obj_std: torch_Tensor, calib_context: CalibrationContext):
+
+def _fit_gp_models(train_x: torch_Tensor, train_obj: torch_Tensor, train_obj_std: torch_Tensor, use_correlated_gp: bool, logger):
     """
     Fit Gaussian Process models for multi-objective optimization.
     
@@ -1257,18 +1594,17 @@ def _fit_gp_models(train_x: torch_Tensor, train_obj: torch_Tensor, train_obj_std
         train_x (torch_Tensor): Training inputs (normalized parameters) - should be in [0, 1]^d
         train_obj (torch_Tensor): Training objectives (fitness values)
         train_obj_std (torch_Tensor): Noise standard deviations
-        calib_context (CalibrationContext): Calibration context
+        use_correlated_gp (bool): Whether to use MultiTaskGP for correlated objectives (default: False)
+        logger: Logger for debug/info messages
         
     Returns:
         Union[ModelListGP, MultiTaskGP]: Fitted GP model(s)
     """
-    # Check if user wants correlated GP modeling
-    use_correlated_gp = calib_context.bo_options.get("use_correlated_gp", False)
     n_objectives = train_obj.shape[1]
     
     if use_correlated_gp and n_objectives > 1:
         # Use MultiTaskGP to model QoI correlations
-        calib_context.logger.info(f"🔗 Using multivariate GP with correlation modeling for {n_objectives} objectives")
+        logger.info(f"🔗 Using multivariate GP with correlation modeling for {n_objectives} objectives")
         
         # Prepare data for MultiTaskGP
         # MultiTaskGP expects: X shape (n_samples, n_features), Y shape (n_samples * n_tasks, 1)
@@ -1310,16 +1646,16 @@ def _fit_gp_models(train_x: torch_Tensor, train_obj: torch_Tensor, train_obj_std
         mll = ExactMarginalLogLikelihood(model.likelihood, model)
         fit_gpytorch_mll(mll)
         
-        calib_context.logger.info(f"✅ Fitted multivariate GP with {n_objectives} correlated objectives")
+        logger.info(f"✅ Fitted multivariate GP with {n_objectives} correlated objectives")
         
         return model
     
     else:
         # Use independent GPs (original approach)
         if use_correlated_gp and n_objectives == 1:
-            calib_context.logger.debug("Single objective detected, using SingleTaskGP (correlation modeling not applicable)")
+            logger.debug("Single objective detected, using SingleTaskGP (correlation modeling not applicable)")
         else:
-            calib_context.logger.debug(f"Using independent GPs for {n_objectives} objectives (correlation modeling disabled)")
+            logger.debug(f"Using independent GPs for {n_objectives} objectives (correlation modeling disabled)")
         
         models = []
         
@@ -1340,7 +1676,7 @@ def _fit_gp_models(train_x: torch_Tensor, train_obj: torch_Tensor, train_obj_std
             )
             
             models.append(model)
-            calib_context.logger.debug(f"Created independent GP for objective {i}")
+            logger.debug(f"Created independent GP for objective {i}")
         
         # Combine into ModelListGP
         model_list = ModelListGP(*models)
@@ -1349,7 +1685,7 @@ def _fit_gp_models(train_x: torch_Tensor, train_obj: torch_Tensor, train_obj_std
         mll = SumMarginalLogLikelihood(model_list.likelihood, model_list)
         fit_gpytorch_mll(mll)
         
-        calib_context.logger.debug(f"Fitted {len(models)} independent GP models successfully")
+        logger.debug(f"Fitted {len(models)} independent GP models successfully")
         
         return model_list
 

@@ -15,7 +15,7 @@ The configuration supports the following (examples):
 - rulesfile_ref: path to a CSV file with rule definitions (optional)
 - parameters_rules: mapping of rule parameters to names used for sampling
 
-See an example INI file at [examples/virus-mac-new/uq_pc_struc.ini](examples/virus-mac-new/uq_pc_struc.ini).
+See an example INI file at [examples/virus-mac-new/uq_pc_struc.ini](https://github.com/heberlr/UQ_PhysiCell/blob/main/examples/virus-mac-new/uq_pc_struc.ini).
 
 UQ-PhysiCell uses Python's ElementTree API to reference XML paths. You can fix some parameters for an experiment (for example, disable SVG output or set the output interval) while allowing others to vary, including parameters defined in rules files.
 ```ini

@@ -19,6 +19,27 @@ import datetime
 import argparse
 import hashlib
 import json
+import difflib
+
+# Keys a model section of the .ini file may contain (configparser lowercases keys)
+_MODEL_SECTION_KEYS = (
+    'executable', 'configfile_ref', 'numreplicates', 'physicell_path', 'model_path',
+    'timeout_per_simulation', 'projname', 'configfile_name', 'configfile_folder',
+    'outputs_folder', 'outputs_folder_name', 'timeout_writexml', 'generate_summary_file',
+    'rulesfile_ref', 'rulesfile_name', 'omp_num_threads', 'parameters', 'parameters_rules',
+)
+
+
+def _suggest_key(key: str) -> Union[str, None]:
+    """Closest valid .ini key: same words in another order first (rules_parameters ->
+    parameters_rules), then the closest spelling."""
+    words = sorted(key.split('_'))
+    for valid in _MODEL_SECTION_KEYS:
+        if sorted(valid.split('_')) == words:
+            return valid
+    matches = difflib.get_close_matches(key, _MODEL_SECTION_KEYS, n=1, cutoff=0.6)
+    return matches[0] if matches else None
+
 
 class PhysiCell_Model:
     """ A class to manage PhysiCell model configurations and executions.
@@ -40,6 +61,9 @@ class PhysiCell_Model:
         self._load_rules_reference()
         # Dictionary to track all active processes
         self.active_processes = {}
+        # Random seed used by the most recent RunModel call (read from PhysiCell's
+        # <output_folder>/random_seed.txt after the run). None if unavailable.
+        self._last_random_seed = None
         
     def _load_config(self, configFilePath: str, keyModel: str) -> None:
         configFile = configparser.ConfigParser()
@@ -48,7 +72,20 @@ class PhysiCell_Model:
             print(f"\t\t>> Reading config file: {configFilePath} ...")
         with open(configFilePath) as fd:
             configFile.read_file(fd)
-        
+        if keyModel not in configFile:
+            raise ValueError(f"Error! Model section [{keyModel}] not found in {configFilePath}.")
+
+        # An unknown key is otherwise silently ignored (e.g. a misspelled parameters_rules
+        # would run every simulation with the rules file's default values)
+        unknown_keys = [key for key in configFile[keyModel] if key not in _MODEL_SECTION_KEYS and key not in configFile.defaults()]
+        if unknown_keys:
+            hints = []
+            for key in unknown_keys:
+                suggestion = _suggest_key(key)
+                hints.append(f"'{key}'" + (f" (did you mean '{suggestion}'?)" if suggestion else ""))
+            raise ValueError(f"Error! Unknown key(s) in section [{keyModel}] of {configFilePath}: {', '.join(hints)}. "
+                             f"Valid keys: {', '.join(_MODEL_SECTION_KEYS)}.")
+
         # Mandatory variables
         self.XML_RefPath = configFile[keyModel]['configFile_ref']
         if not os.path.exists(self.XML_RefPath): raise ValueError(f"Error! XML file {self.XML_RefPath} not found!")
@@ -97,6 +134,10 @@ class PhysiCell_Model:
             self.parameters_rules = ast.literal_eval(self.parameters_rules)
         self.parameters_rules_variable = {k: v[1] for k, v in self.parameters_rules.items() if isinstance(v, list)}
         self.parameters_rules_fixed = {k: v for k, v in self.parameters_rules.items() if not isinstance(v, list)}
+        if self.RULES_RefPath and not self.parameters_rules:
+            raise ValueError(f"Error! Section [{keyModel}] sets rulesFile_ref = {self.RULES_RefPath} but no parameters_rules, "
+                             f"so that rules file would not be used (the XML's own ruleset file would be). "
+                             f"Add parameters_rules, or remove rulesFile_ref and point the XML to the rules file.")
 
     def _load_xml_reference(self) -> None:
         tree = ET.parse(self.XML_RefPath)
@@ -116,6 +157,49 @@ class PhysiCell_Model:
         if self.RULES_name.endswith('.csv') and self.RULES_Format != 'csv':
             # Rewrite the extension of rules file to match the format defined in the reference XML file
             self.RULES_name = self.RULES_name[:-4] + f'.{self.RULES_Format}'
+        self._check_xml_rules_file()
+
+    def _check_xml_rules_file(self) -> None:
+        """Make sure an enabled ruleset the XML points to exists.
+
+        Only applies when no rules file is generated per run (no parameters_rules): the
+        XML's own reference is then passed to PhysiCell unchanged. PhysiCell resolves a
+        relative folder from its working directory (the executable's folder) and runs
+        *without rules* if the file is missing, so a wrong path would silently change the model.
+        """
+        ruleset = self.xml_ref_root.find('.//cell_rules/rulesets/ruleset')
+        if ruleset is None or str(ruleset.get('enabled', 'false')).lower() != 'true' or self.parameters_rules:
+            return
+        folder, filename = ruleset.findtext('folder', default=''), ruleset.findtext('filename', default='')
+        rules_path = os.path.join(folder, filename)
+        if not os.path.isabs(rules_path):
+            rules_path = os.path.join(os.path.dirname(os.path.abspath(self.PC_executable)), rules_path)
+        if not os.path.isfile(rules_path):
+            raise ValueError(f"Error! {self.XML_RefPath} enables the rules file {os.path.join(folder, filename)}, "
+                             f"which does not exist at {os.path.normpath(rules_path)} (relative paths are resolved "
+                             f"from the PhysiCell executable's folder). PhysiCell would run without any rules. "
+                             f"Fix the XML ruleset, or set rulesFile_ref and parameters_rules in section [{self.keyModel}].")
+
+    def check_parameter_names(self, names, context: str = "parameters") -> None:
+        """Raise if any name is not a variable parameter of this model.
+
+        A parameter that maps to neither a variable XML parameter (``parameters``) nor a
+        variable rules parameter (``parameters_rules``) would be sampled and then silently
+        dropped, so the simulations would never depend on it.
+
+        Args:
+            names: Parameter names to check (e.g. a prior's or search space's parameters).
+            context (str): What the names are, for the error message.
+
+        Raises:
+            ValueError: If some names are not variable parameters of this model.
+        """
+        known = set(self.XML_parameters_variable.values()) | set(self.parameters_rules_variable.values())
+        unmapped = [name for name in names if name not in known]
+        if unmapped:
+            raise ValueError(f"Error! {context} {unmapped} of model [{self.keyModel}] are not variable parameters in "
+                             f"{self.configFilePath}: they would never reach PhysiCell. Variable parameters of this "
+                             f"model: {sorted(known)} (from 'parameters' and 'parameters_rules').")
 
     def _load_rules_reference(self) -> None:
         if self.verbose:
@@ -173,10 +257,10 @@ class PhysiCell_Model:
     def _copy(self):
         return copy.deepcopy(self)
 
-    def RunModel(self, SampleID: int, ReplicateID: int, Parameters: Union[np.ndarray, dict] = dict(), ParametersRules: Union[np.ndarray, dict] = dict(), RemoveConfigFile: bool = True, SummaryFunction: Union[None, str] = None) -> Union[None, pd.DataFrame]:
-        """ 
+    def RunModel(self, SampleID: int, ReplicateID: int, Parameters: Union[np.ndarray, dict] = dict(), ParametersRules: Union[np.ndarray, dict] = dict(), RemoveConfigFile: bool = True, SummaryFunction: Union[None, str] = None, random_seed: Union[int, None] = None) -> Union[None, pd.DataFrame]:
+        """
         Run a single simulation with specified parameters.
-        
+
         Args:
             SampleID (int): Identifier for the parameter sample
             ReplicateID (int): Identifier for the simulation replicate
@@ -184,8 +268,12 @@ class PhysiCell_Model:
             ParametersRules (np.ndarray or dict, optional): Parameter values for RULES configuration
             RemoveConfigFile (bool, optional): If True, removes the generated XML and RULES files after simulation
             SummaryFunction (function, optional): Function to summarize simulation output
+            random_seed (int, optional): If given, this exact seed is written to the XML
+                (``<random_seed>``); otherwise the reference XML's own behaviour is kept
+                (``system_clock`` for ``options/random_seed``, a random int for
+                ``user_parameters/random_seed``).
         """
-        return _run_model(self, SampleID, ReplicateID, Parameters, ParametersRules, RemoveConfigFile, SummaryFunction)
+        return _run_model(self, SampleID, ReplicateID, Parameters, ParametersRules, RemoveConfigFile, SummaryFunction, random_seed)
     def run_simulation_subprocess(self, XMLFile, sample_id=None, replicate_id=None):
         """
         Start the simulation as a subprocess and return the process handle.
@@ -198,8 +286,18 @@ class PhysiCell_Model:
         Returns:
             subprocess.Popen: Process handle for the running simulation
         """
-        callingModel = [self.PC_executable, XMLFile]
-        process = subprocess.Popen(callingModel, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+        # PhysiCell resolves any relative path left inside the XML (e.g. a
+        # CSV-based initial_conditions/cell_positions/folder at its template
+        # default, like "./config") relative to its own process cwd -- and
+        # that default only exists alongside the executable itself, since
+        # that's where `make load PROJ=...` copies a project's config/
+        # folder. Run from there; pass absolute paths so the executable and
+        # XML file are still found regardless, and so anything else already
+        # made absolute when written into the XML (output/rules folders --
+        # see _setup_model_input) doesn't need the caller's own cwd either.
+        pc_executable_abs = os.path.abspath(self.PC_executable)
+        callingModel = [pc_executable_abs, os.path.abspath(XMLFile)]
+        process = subprocess.Popen(callingModel, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, cwd=os.path.dirname(pc_executable_abs))
         
         # Register the process if sample_id and replicate_id are provided
         if sample_id is not None and replicate_id is not None:
@@ -406,7 +504,21 @@ def _load_ini_section_as_dict(config_file_path: str, section: str) -> dict:
     # Keep the active structure only; unrelated sections should not affect compatibility.
     return {key: parser[section][key] for key in parser[section]}
 
-def _setup_model_input(model: PhysiCell_Model, SampleID: int, ReplicateID: int, parameters_input: Union[np.ndarray, dict], parameters_rules_input: Union[np.ndarray, dict]) -> None:
+def _read_random_seed(output_folder: str) -> Union[int, None]:
+    """Read the resolved random seed from PhysiCell's random_seed.txt.
+
+    PhysiCell (>= 1.14) writes the seed actually used by the RNG to
+    <output_folder>/random_seed.txt, even when the config requested "system_clock".
+    Returns the integer seed, or None if the file is missing or unreadable
+    (e.g. older PhysiCell, or the output folder was already cleaned up).
+    """
+    try:
+        with open(os.path.join(output_folder, "random_seed.txt")) as fd:
+            return int(fd.read().strip())
+    except (OSError, ValueError):
+        return None
+
+def _setup_model_input(model: PhysiCell_Model, SampleID: int, ReplicateID: int, parameters_input: Union[np.ndarray, dict], parameters_rules_input: Union[np.ndarray, dict], random_seed: Union[int, None] = None) -> None:
     try:
         if model.verbose:
             print(f"\t\t\t>>> Checking parameters input ...")
@@ -419,7 +531,9 @@ def _setup_model_input(model: PhysiCell_Model, SampleID: int, ReplicateID: int, 
     if model.parameters_rules:
         if model.verbose:
             print(f"\t\t\t>>> Setting up rules input ...")
-        dic_xml_parameters['.//cell_rules/rulesets/ruleset/folder'] = model.input_folder
+        # Absolute, since run_simulation_subprocess now launches PhysiCell with its
+        # cwd set to the executable's own directory, not the caller's.
+        dic_xml_parameters['.//cell_rules/rulesets/ruleset/folder'] = os.path.abspath(model.input_folder) + os.sep
         dic_xml_parameters['.//cell_rules/rulesets/ruleset/filename'] = model._get_rules_fileName(SampleID, ReplicateID)
         RuleFile_out = model.input_folder + model._get_rules_fileName(SampleID, ReplicateID)
         dic_rules_temp = {}
@@ -456,7 +570,8 @@ def _setup_model_input(model: PhysiCell_Model, SampleID: int, ReplicateID: int, 
 
     if model.verbose:
         print(f"\t\t\t>>> Setting up XML input...")
-    dic_xml_parameters['.//save/folder'] = model._get_output_path(SampleID, ReplicateID)
+    # Absolute, for the same reason as the rules folder above.
+    dic_xml_parameters['.//save/folder'] = os.path.abspath(model._get_output_path(SampleID, ReplicateID)) + os.sep
     dic_xml_parameters['./parallel/omp_num_threads'] = model.omp_num_threads
     
     # If not defined in .ini file, set initial condition folder to the folder of the reference XML file
@@ -465,13 +580,14 @@ def _setup_model_input(model: PhysiCell_Model, SampleID: int, ReplicateID: int, 
     
     try:
         _get_xml_element_value(model.xml_ref_root, './/options/random_seed')
-        dic_xml_parameters['.//options/random_seed'] = "system_clock"
+        seed_xpath, seed_default = './/options/random_seed', "system_clock"
     except ValueError:
         try:
             _get_xml_element_value(model.xml_ref_root, './/user_parameters/random_seed')
-            dic_xml_parameters['.//user_parameters/random_seed'] = random.randint(0, 4294967295)
+            seed_xpath, seed_default = './/user_parameters/random_seed', random.randint(0, 4294967295)
         except ValueError as e:
             raise ValueError(f"Error in setting random seed. {e}")
+    dic_xml_parameters[seed_xpath] = int(random_seed) if random_seed is not None else seed_default
     for idx, param_key, param_name in zip(range(len(model.XML_parameters_variable)), model.XML_parameters_variable.keys(), model.XML_parameters_variable.values()):
         if isinstance(parameters_input, dict):
             dic_xml_parameters[param_key] = parameters_input[param_name]
@@ -486,14 +602,15 @@ def _setup_model_input(model: PhysiCell_Model, SampleID: int, ReplicateID: int, 
     except ValueError as e:
         raise ValueError(f"Error in generating XML file! {e}")
 
-def _run_model(model: PhysiCell_Model, SampleID: int, ReplicateID: int, Parameters: Union[np.ndarray, dict] = dict(), ParametersRules: Union[np.ndarray, dict] = dict(), RemoveConfigFile: bool = True, SummaryFunction: Union[None, str] = None) -> Union[None, pd.DataFrame]:
+def _run_model(model: PhysiCell_Model, SampleID: int, ReplicateID: int, Parameters: Union[np.ndarray, dict] = dict(), ParametersRules: Union[np.ndarray, dict] = dict(), RemoveConfigFile: bool = True, SummaryFunction: Union[None, str] = None, random_seed: Union[int, None] = None) -> Union[None, pd.DataFrame]:
     if model.verbose:
         print(f"\t> Running - Sample:{SampleID}, Replicate: {ReplicateID}, Parameters XML: {Parameters}, Parameters rules: {ParametersRules}...")
+    model._last_random_seed = None
     try:
         try:
             if model.verbose:
                 print(f"\t\t>> Setting up model input ...")
-            _setup_model_input(model, SampleID, ReplicateID, Parameters, parameters_rules_input=ParametersRules)
+            _setup_model_input(model, SampleID, ReplicateID, Parameters, parameters_rules_input=ParametersRules, random_seed=random_seed)
         except ValueError as e:
             raise ValueError(f"Error in setup_model_input! (Sample: {SampleID} and Replicate: {ReplicateID}).\n{e}")
 
@@ -517,6 +634,10 @@ def _run_model(model: PhysiCell_Model, SampleID: int, ReplicateID: int, Paramete
             {stdout[-1000:]}""")
         elif model.verbose:
             print("\t\t>> Simulation completed successfully!")
+
+        # Capture the random seed PhysiCell used, before a SummaryFunction can
+        # remove the output folder. None if random_seed.txt is unavailable.
+        model._last_random_seed = _read_random_seed(model._get_output_path(SampleID, ReplicateID))
 
         if RemoveConfigFile:
             if model.verbose:

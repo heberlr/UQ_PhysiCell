@@ -1,20 +1,20 @@
 <PhysiCell_settings version="devel-version">
 
     <domain>
-        <x_min>-250</x_min>
-        <x_max>250</x_max>
-        <y_min>-250</y_min>
-        <y_max>250</y_max>
-        <z_min>-10</z_min>
-        <z_max>10</z_max>
-        <dx>20</dx>
-        <dy>20</dy>
-        <dz>20</dz>
+        <x_min>-250.0</x_min>
+        <x_max>250.0</x_max>
+        <y_min>-250.0</y_min>
+        <y_max>250.0</y_max>
+        <z_min>-10.0</z_min>
+        <z_max>10.0</z_max>
+        <dx>20.0</dx>
+        <dy>20.0</dy>
+        <dz>20.0</dz>
         <use_2D>true</use_2D>
     </domain>
 
     <overall>
-        <max_time units="min">2880.0</max_time>
+        <max_time units="min">360</max_time>
         <time_units>min</time_units>
         <space_units>micron</space_units>
         <dt_diffusion units="min">0.01</dt_diffusion>
@@ -29,11 +29,11 @@
     <save>
         <folder>output</folder>
         <full_data>
-            <interval units="min">60</interval>
+            <interval units="min">30</interval>
             <enable>true</enable>
         </full_data>
         <SVG>
-            <interval units="min">60</interval>
+            <interval units="min">30</interval>
             <enable>true</enable>
             <plot_substrate enabled="false" limits="true">
                 <substrate>virus</substrate>
@@ -51,7 +51,7 @@
         <legacy_random_points_on_sphere_in_divide>false</legacy_random_points_on_sphere_in_divide>
         <virtual_wall_at_domain_edge>true</virtual_wall_at_domain_edge>
         <disable_automated_spring_adhesions>false</disable_automated_spring_adhesions>
-        <random_seed>0</random_seed>
+        <random_seed>system_clock</random_seed>
     </options>
 
     <microenvironment_setup>
@@ -106,6 +106,11 @@
                     <phase_transition_rates units="1/min">
                         <rate start_index="0" end_index="0" fixed_duration="false">0</rate>
                     </phase_transition_rates>
+                    <standard_asymmetric_division enabled="False">
+                        <asymmetric_division_probability name="epithelial" units="dimensionless">1.0</asymmetric_division_probability>
+                        <asymmetric_division_probability name="epithelial_infected" units="dimensionless">0</asymmetric_division_probability>
+                        <asymmetric_division_probability name="macrophage" units="dimensionless">0</asymmetric_division_probability>
+                    </standard_asymmetric_division>
                 </cycle>
                 <death>
                     <model code="100" name="apoptosis">
@@ -260,6 +265,11 @@
                     <phase_transition_rates units="1/min">
                         <rate start_index="0" end_index="0" fixed_duration="false">0.00072</rate>
                     </phase_transition_rates>
+                    <standard_asymmetric_division enabled="False">
+                        <asymmetric_division_probability name="epithelial" units="dimensionless">0</asymmetric_division_probability>
+                        <asymmetric_division_probability name="epithelial_infected" units="dimensionless">1.0</asymmetric_division_probability>
+                        <asymmetric_division_probability name="macrophage" units="dimensionless">0</asymmetric_division_probability>
+                    </standard_asymmetric_division>
                 </cycle>
                 <death>
                     <model code="100" name="apoptosis">
@@ -403,6 +413,11 @@
                     <phase_transition_rates units="1/min">
                         <rate start_index="0" end_index="0" fixed_duration="false">0</rate>
                     </phase_transition_rates>
+                    <standard_asymmetric_division enabled="False">
+                        <asymmetric_division_probability name="epithelial" units="dimensionless">0</asymmetric_division_probability>
+                        <asymmetric_division_probability name="epithelial_infected" units="dimensionless">0</asymmetric_division_probability>
+                        <asymmetric_division_probability name="macrophage" units="dimensionless">1.0</asymmetric_division_probability>
+                    </standard_asymmetric_division>
                 </cycle>
                 <death>
                     <model code="100" name="apoptosis">
@@ -467,7 +482,7 @@
                 <motility>
                     <speed units="micron/min">1.0</speed>
                     <persistence_time units="min">5.0</persistence_time>
-                    <migration_bias units="dimensionless">0.15</migration_bias>
+                    <migration_bias units="dimensionless">0.75</migration_bias>
                     <options>
                         <enabled>true</enabled>
                         <use_2D>true</use_2D>
@@ -506,7 +521,7 @@
                     <other_dead_phagocytosis_rate units="1/min">0.0</other_dead_phagocytosis_rate>
                     <live_phagocytosis_rates>
                         <phagocytosis_rate name="epithelial" units="1/min">0.0</phagocytosis_rate>
-                        <phagocytosis_rate name="epithelial_infected" units="1/min">1.0</phagocytosis_rate>
+                        <phagocytosis_rate name="epithelial_infected" units="1/min">0.25</phagocytosis_rate>
                         <phagocytosis_rate name="macrophage" units="1/min">0.0</phagocytosis_rate>
                     </live_phagocytosis_rates>
                     <attack_rates>

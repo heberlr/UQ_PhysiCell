@@ -7,8 +7,8 @@ from . import ma_db
 from . import bo_db
 
 # Import utility functions that don't have naming conflicts
-from .ma_db import get_database_type
 from .utils import (
+    get_database_type,
     add_db_entry,
     remove_db_entry,
     remove_db_table,

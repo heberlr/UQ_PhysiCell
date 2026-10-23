@@ -49,9 +49,10 @@ def mock_run_replicate(
     ParametersXML, ParametersRules,
     qoi_functions=None, qoi_def={},
     return_binary_output=True, drop_columns=None,
-    custom_summary_function=None,
+    custom_summary_function=None, return_seed=False, random_seed=None,
 ):
-    return sample_id, replicate_id, pickle.dumps({"out1": 1.0})
+    result = (sample_id, replicate_id, pickle.dumps({"out1": 1.0}))
+    return result + (None,) if return_seed else result
 
 
 # ─── fixtures ────────────────────────────────────────────────────────────────

@@ -46,7 +46,9 @@ class ModelAnalysisContext:
         params_info (dict): Dictionary containing parameter definitions with keys
             for each parameter name and values containing 'ref_value', 'lower_bound',
             'upper_bound', and 'perturbation' information.
-        qois_info (dict): Dictionary containing Quantities of Interest definitions.
+        qois_info (dict or None): Dictionary containing Quantities of Interest definitions.
+            None means no QoI processing -- the raw mcds list is stored per simulation
+            instead of computed QoIs (see run_simulations' summary_function).
         qoi_def (dict): first-class object, that can be used in qoi_functions
             lambda string, mapped to their name.
         parallel_method (str, optional): Parallelization method. Options are:
@@ -63,11 +65,11 @@ class ModelAnalysisContext:
     """
     def __init__(
             self, 
-            db_path:str, 
-            model_config:dict, 
-            sampler:str, 
-            params_info:dict, 
-            qois_info:dict, 
+            db_path:str,
+            model_config:dict,
+            sampler:str,
+            params_info:dict,
+            qois_info:dict=None,
             qoi_def:dict={},
             parallel_method:str='inter-process', 
             num_workers:int=1, 
@@ -80,26 +82,34 @@ class ModelAnalysisContext:
         if isinstance(model_config, (tuple, list)):
             model_config = {'ini_path': model_config[0], 'struc_name': model_config[1]}
 
-        # Check free variables before converting to strings — Python's eval() is lazy
-        # and only detects missing names at call time, not at lambda-creation time.
-        # co_freevars reveals closure references that will fail in worker processes.
-        for qoi_name, func in qois_info.items():
-            if callable(func) and hasattr(func, '__code__'):
-                unresolved = set(func.__code__.co_freevars) - set(qoi_def.keys())
-                if unresolved:
-                    raise ValueError(
-                        f"QoI '{qoi_name}': lambda closes over {sorted(unresolved)} which "
-                        f"cannot be serialized for multiprocessing. Pass via "
-                        f"qoi_def={{name: object}} in ModelAnalysisContext."
-                    )
+        # qois_info=None means "no QoI processing at all" -- run_simulations'
+        # summary_function (and insert_qois) already treat that as a request to
+        # store the raw mcds list instead of computed QoIs, so preserve it as-is
+        # rather than coercing to {} (which would instead mean "compute zero
+        # QoIs per snapshot", producing empty per-snapshot rows downstream).
+        if qois_info is None:
+            self.qois_dict = None
+        else:
+            # Check free variables before converting to strings — Python's eval() is lazy
+            # and only detects missing names at call time, not at lambda-creation time.
+            # co_freevars reveals closure references that will fail in worker processes.
+            for qoi_name, func in qois_info.items():
+                if callable(func) and hasattr(func, '__code__'):
+                    unresolved = set(func.__code__.co_freevars) - set(qoi_def.keys())
+                    if unresolved:
+                        raise ValueError(
+                            f"QoI '{qoi_name}': lambda closes over {sorted(unresolved)} which "
+                            f"cannot be serialized for multiprocessing. Pass via "
+                            f"qoi_def={{name: object}} in ModelAnalysisContext."
+                        )
 
-        # QoI functions are stored as source strings so they can be pickled across processes.
-        # A value of None is a valid placeholder (e.g. when a custom summary_function computes
-        # the QoIs directly) and is passed through as-is.
-        self.qois_dict = {
-            key: value if value is None or isinstance(value, str) else _convert_qoi_function_to_string(value, key)
-            for key, value in qois_info.items()
-        }
+            # QoI functions are stored as source strings so they can be pickled across processes.
+            # A value of None is a valid placeholder (e.g. when a custom summary_function computes
+            # the QoIs directly) and is passed through as-is.
+            self.qois_dict = {
+                key: value if value is None or isinstance(value, str) else _convert_qoi_function_to_string(value, key)
+                for key, value in qois_info.items()
+            }
         self.qoi_def = qoi_def
 
         # Secondary check: verify string-form QoIs can be eval'd in the restricted namespace
@@ -317,6 +327,8 @@ def run_simulations(context: ModelAnalysisContext):
     # Initialize the PhysiCell model - in all ranks to avoid issues with MPI
     try:
         PhysiCellModel = PhysiCell_Model(context.dic_metadata['IniFilePath'], context.dic_metadata['StrucName'])
+        # Every sampled parameter must reach PhysiCell, or it would be silently dropped
+        PhysiCellModel.check_parameter_names(list(context.params_dict), context="Sampled parameters")
         # Store the model in the context for cancellation support
         context.model = PhysiCellModel
         config_fingerprint = PhysiCellModel.build_effective_config_fingerprint()
@@ -401,7 +413,14 @@ def run_simulations(context: ModelAnalysisContext):
     else:
         # Three lists with size NumSimulations from check_existing_sa
         if rank == 0: context.logger.info(f"Generating {len(All_Samples)} simulations")
-    
+
+    # Distinct random seed per simulation, drawn once in the parent (rank 0 for MPI).
+    # Prevents parallel replicates of the same sample from resolving to the same
+    # system-clock seed inside PhysiCell.
+    All_Seeds = np.random.default_rng().choice(2**32, size=len(All_Samples), replace=False).tolist() if rank == 0 else None
+    if use_mpi:
+        All_Seeds = comm.bcast(All_Seeds, root=0)
+
     ###################################
     # Running using concurrent.futures
     ###################################
@@ -432,6 +451,8 @@ def run_simulations(context: ModelAnalysisContext):
                     return_binary_output=True,
                     #drop_columns,
                     custom_summary_function=context.summary_function,
+                    return_seed=True,
+                    random_seed=All_Seeds[ind_sim],
                 ))
              
             # Use as_completed with a short timeout to avoid blocking when cancelled
@@ -451,10 +472,10 @@ def run_simulations(context: ModelAnalysisContext):
                             continue
                         
                         try:
-                            sample_id, replicate_id, result_data = future_done.result(timeout=0.5)
+                            sample_id, replicate_id, result_data, seed = future_done.result(timeout=0.5)
                             context.logger.info(f"Writing to the database for Sample: {sample_id}, Replicate: {replicate_id}, Result size: {sys.getsizeof(result_data)/1024:.2f} KB")
                             try:
-                                insert_output(context.db_path, sample_id, replicate_id, result_data)
+                                insert_output(context.db_path, sample_id, replicate_id, result_data, seed=seed)
                                 # Drop the reference now that the result is durably written — Future.result()
                                 # caches its return value forever, so leaving it in context.futures keeps the
                                 # full (uncompressed) result blob resident for the entire context's lifetime.
@@ -505,10 +526,11 @@ def run_simulations(context: ModelAnalysisContext):
             try:
                 if context.summary_function:
                     result_data_nonserialized = PhysiCellModel.RunModel(
-                        All_Samples[ind_sim], All_Replicates[ind_sim], ParametersXML, ParametersRules, RemoveConfigFile=True, SummaryFunction=context.summary_function)
+                        All_Samples[ind_sim], All_Replicates[ind_sim], ParametersXML, ParametersRules, RemoveConfigFile=True, SummaryFunction=context.summary_function, random_seed=All_Seeds[ind_sim])
                     result_data = pickle.dumps(result_data_nonserialized)
+                    seed = PhysiCellModel._last_random_seed
                 else:
-                    _, _, result_data = run_replicate(
+                    _, _, result_data, seed = run_replicate(
                         PhysiCellModel=PhysiCellModel,
                         sample_id=All_Samples[ind_sim],
                         replicate_id=All_Replicates[ind_sim],
@@ -519,8 +541,10 @@ def run_simulations(context: ModelAnalysisContext):
                         #return_binary_output,
                         #drop_columns,
                         #custom_summary_function,
+                        return_seed=True,
+                        random_seed=All_Seeds[ind_sim],
                     )
- 
+
             except Exception as e:
                 context.logger.error(
                     f"Rank {rank}: Error running simulation for Sample: {All_Samples[ind_sim]}, Replicate: {All_Replicates[ind_sim]}: {e}"
@@ -530,7 +554,7 @@ def run_simulations(context: ModelAnalysisContext):
             # Write to database with retry logic
             context.logger.info(f"Rank {rank} writing to database for Sample: {All_Samples[ind_sim]}, Replicate: {All_Replicates[ind_sim]}")
             try:
-                insert_output(context.db_path, All_Samples[ind_sim], All_Replicates[ind_sim], result_data)
+                insert_output(context.db_path, All_Samples[ind_sim], All_Replicates[ind_sim], result_data, seed=seed)
                 context.logger.info(f"Rank {rank} successfully wrote results for Sample: {All_Samples[ind_sim]}, Replicate: {All_Replicates[ind_sim]}")
             except Exception as e:
                 context.logger.error(f"Rank {rank} failed to write results for Sample: {All_Samples[ind_sim]}, Replicate: {All_Replicates[ind_sim]}: {e}")
@@ -553,11 +577,12 @@ def run_simulations(context: ModelAnalysisContext):
             ParametersRules = {key: All_Parameters[ind_sim][key] for key in params_rules} if params_rules else np.array([])
             if context.summary_function:
                 result_data_nonserialized = PhysiCellModel.RunModel(
-                    All_Samples[ind_sim], All_Replicates[ind_sim], ParametersXML, ParametersRules, RemoveConfigFile=True, SummaryFunction=context.summary_function)
+                    All_Samples[ind_sim], All_Replicates[ind_sim], ParametersXML, ParametersRules, RemoveConfigFile=True, SummaryFunction=context.summary_function, random_seed=All_Seeds[ind_sim])
                 result_data = pickle.dumps(result_data_nonserialized)
+                seed = PhysiCellModel._last_random_seed
             else:
-                _, _, result_data = run_replicate(
-                    PhysiCell_Model=PhysiCellModel,
+                _, _, result_data, seed = run_replicate(
+                    PhysiCellModel=PhysiCellModel,
                     sample_id=All_Samples[ind_sim],
                     replicate_id=All_Replicates[ind_sim],
                     ParametersXML=ParametersXML,
@@ -567,12 +592,14 @@ def run_simulations(context: ModelAnalysisContext):
                     #return_binary_output,
                     #drop_columns,
                     #custom_summary_function,
+                    return_seed=True,
+                    random_seed=All_Seeds[ind_sim],
                 )
 
             # Write to the database directly (no locks or MPI synchronization needed)
             context.logger.info(f"Rank {rank} writing to the database for Sample: {All_Samples[ind_sim]}, Replicate: {All_Replicates[ind_sim]}")
             try:
-                insert_output(context.db_path, All_Samples[ind_sim], All_Replicates[ind_sim], pickle.dumps(result_data))
+                insert_output(context.db_path, All_Samples[ind_sim], All_Replicates[ind_sim], pickle.dumps(result_data), seed=seed)
                 context.logger.info(f"Rank {rank} finished writing to the database for Sample: {All_Samples[ind_sim]}, Replicate: {All_Replicates[ind_sim]}")
             except Exception as e:
                 context.logger.error(f"Error inserting output into the database: {e}")

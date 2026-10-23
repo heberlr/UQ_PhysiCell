@@ -14,7 +14,7 @@ Executions of simulations based on PhysiCell structures can be performed in mult
 - Serial: Single-threaded execution, suitable for small analyses.
 - Inter-process: Multi-processing on a single node using concurrent.futures.
 - Inter-node: Distributed execution across multiple nodes using MPI (requires the `mpi` extra, see {doc}`installation`).  
-Simulations can also be executed in a cluster environment. An example SLURM script demonstrating how to run simulations on a SLURM-managed cluster is provided in [slurm_script](../examples/slurm_script.sh).
+Simulations can also be executed in a cluster environment. An example SLURM script demonstrating how to run simulations on a SLURM-managed cluster is provided in [slurm_script](https://github.com/heberlr/UQ_PhysiCell/blob/main/examples/slurm_script.sh).
 ```
 
 ## Quick Example
@@ -68,7 +68,7 @@ Whether `context.run()` stores the full simulation state or precomputed QoI valu
 - **`qois_info={}`** (empty), as in the example above — the full `list[pcdl.TimeStep]` (MCDS) objects are stored, preserving the complete simulation state. This is the safer default: `calculate_qoi_statistics` computes QoIs from this raw data afterward, so you can change your mind about what to measure — or add a QoI you hadn't thought of — without rerunning any simulations.
 - **`qois_info` populated** with your QoI functions — each one runs at simulation time, only the resulting values are stored, and the raw PhysiCell output folder is deleted afterward. Smallest storage footprint, but you commit to those QoIs up front. Switch to this mode once your QoIs are settled and you need to scale to many runs (e.g. a sensitivity analysis with hundreds of samples), where the storage savings matter.
 
-`calculate_qoi_statistics` works transparently with either mode — it detects what is stored and computes the requested QoIs either way, always returning the same long-format `(SampleID, time)` DataFrame. See {doc}`examples/ex2_storage_modes` for a full side-by-side comparison, including database size.
+`calculate_qoi_statistics` works transparently with either mode — it detects what is stored and computes the requested QoIs either way, always returning the same long-format `(SampleID, time)` DataFrame. See {doc}`examples/ex2_storage_modes` for a full side-by-side comparison, including database size. For what is stored in the database and how to read it directly, see {doc}`databases`.
 
 **Full worked examples:**
 - {doc}`examples/ex1_context_setup` — inspecting a `ModelAnalysisContext` and using the `'User-defined'` sampler

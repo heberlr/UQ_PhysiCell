@@ -98,11 +98,14 @@ def migrate_to_zstd(input_db: str, output_db: str, verbose: bool = True) -> dict
     
     Returns:
         dict: Compression statistics with keys:
-            - original_data_size_mb: Total uncompressed data size
-            - compressed_data_size_mb: Total compressed data size
+            - original_data_size_mb: Total uncompressed data size (successful rows only)
+            - compressed_data_size_mb: Total compressed data size (successful rows only)
             - num_samples: Number of samples processed
-            - num_replicates: Number of replicates processed
+            - num_replicates: Number of replicates successfully migrated
             - compression_ratio_pct: Compression percentage achieved
+            - num_failed: Number of Output rows that failed to migrate (missing from
+              output_db) -- check this; a nonzero value means output_db is incomplete
+            - failed_rows: list of (sample_id, replicate_id, error) for failed rows
     
     Raises:
         FileNotFoundError: If input database does not exist
@@ -127,6 +130,8 @@ def migrate_to_zstd(input_db: str, output_db: str, verbose: bool = True) -> dict
         'num_samples': 0,
         'num_replicates': 0,
         'compression_ratio_pct': 0,
+        'num_failed': 0,
+        'failed_rows': [],
     }
     
     try:
@@ -196,7 +201,8 @@ def migrate_to_zstd(input_db: str, output_db: str, verbose: bool = True) -> dict
         total_original_size = 0
         total_compressed_size = 0
         processed_count = 0
-        
+        failed_rows = []  # (sample_id, replicate_id, error) for rows that didn't make it into output_db
+
         # Load output metadata (without deserializing to keep as raw bytes)
         df_output = ma_db.load_output(input_db, load_data=False)
         
@@ -209,36 +215,55 @@ def migrate_to_zstd(input_db: str, output_db: str, verbose: bool = True) -> dict
             conn = sqlite3.connect(input_db)
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            cursor.execute(
-                "SELECT Data FROM Output WHERE SampleID=? AND ReplicateID=?",
-                (sample_id, replicate_id)
-            )
-            data_row = cursor.fetchone()
+            try:
+                cursor.execute(
+                    "SELECT Data, Seed FROM Output WHERE SampleID=? AND ReplicateID=?",
+                    (sample_id, replicate_id)
+                )
+                data_row = cursor.fetchone()
+                seed = data_row['Seed'] if data_row is not None else None
+            except sqlite3.OperationalError:
+                # Input database predates the Seed column
+                cursor.execute(
+                    "SELECT Data FROM Output WHERE SampleID=? AND ReplicateID=?",
+                    (sample_id, replicate_id)
+                )
+                data_row = cursor.fetchone()
+                seed = None
             conn.close()
-            
+
             if data_row is None:
                 logger.warning(f"No data found for SampleID={sample_id}, ReplicateID={replicate_id}")
                 continue
-            
+
             data_blob = bytes(data_row['Data']) if isinstance(data_row['Data'], memoryview) else data_row['Data']
             blob_size = len(data_blob)
-            total_original_size += blob_size
-            processed_count += 1
-            
+
             try:
                 # Decompress if needed, then insert with compression
                 decompressed = decompress_data(data_blob)
-                
+
                 # Insert with compress=True to apply zstd compression
-                ma_db.insert_output(output_db, sample_id, replicate_id, decompressed, compress=True)
-                
+                ma_db.insert_output(output_db, sample_id, replicate_id, decompressed, compress=True, seed=seed)
+
                 # Calculate compressed size from what was just inserted
                 compressed_blob = compress_data(decompressed)
+                # Only counted on success: a row that fails below must not silently
+                # inflate the "processed" count while never landing in output_db.
+                total_original_size += blob_size
                 total_compressed_size += len(compressed_blob)
-                
+                processed_count += 1
+
             except Exception as e:
-                ValueError(f"Failed to process SampleID={sample_id}, ReplicateID={replicate_id}: {e}")
-            
+                # Previously this constructed a ValueError and dropped it -- neither
+                # raised nor logged -- so migration stats looked clean while the row
+                # silently never made it into output_db. Record and log it instead;
+                # one bad row shouldn't abort the whole migration, but losing data
+                # must not be invisible.
+                logger.error(f"Failed to migrate SampleID={sample_id}, ReplicateID={replicate_id}: {e}")
+                failed_rows.append((sample_id, replicate_id, str(e)))
+                continue
+
             if verbose and (processed_count % 100 == 0):
                 print(f"   Processed {processed_count} rows: "
                            f"{total_original_size/1e6:.1f} MB → "
@@ -251,9 +276,11 @@ def migrate_to_zstd(input_db: str, output_db: str, verbose: bool = True) -> dict
         stats['compressed_data_size_mb'] = total_compressed_size / 1e6
         stats['num_samples'] = len(dic_samples)
         stats['num_replicates'] = processed_count
+        stats['num_failed'] = len(failed_rows)
+        stats['failed_rows'] = failed_rows
         if total_original_size > 0:
             stats['compression_ratio_pct'] = 100 * (1 - total_compressed_size / total_original_size)
-        
+
         # Log statistics
         print(f"\n{'='*70}")
         print("COMPRESSION STATISTICS")
@@ -264,11 +291,15 @@ def migrate_to_zstd(input_db: str, output_db: str, verbose: bool = True) -> dict
         print(f"Number of samples:            {stats['num_samples']:>10}")
         print(f"Number of replicates:         {stats['num_replicates']:>10}")
         print(f"{'='*70}")
-        
+
         codec = "zstd" if HAS_ZSTD else "zlib"
         print(f"✓ Compression codec: {codec}")
-        print("✓ Migration complete!")
-        
+        if failed_rows:
+            print(f"⚠ WARNING: {len(failed_rows)} row(s) FAILED to migrate and are MISSING from "
+                  f"'{output_db}'. See stats['failed_rows'] / the error log above for details.")
+        else:
+            print("✓ Migration complete!")
+
         return stats
         
     except Exception as e:
