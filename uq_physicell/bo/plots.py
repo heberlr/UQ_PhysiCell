@@ -152,7 +152,7 @@ def plot_parameter_vs_fitness(df_samples:pd.DataFrame, df_output:pd.DataFrame, p
         plt.tight_layout()
         return fig, ax
 
-def plot_pareto_front(df_output:pd.DataFrame, qoi_name1:str, qoi_name2:str, samples_id=None, axis=None, plot_std=False):
+def plot_pareto_front(df_output:pd.DataFrame, qoi_name1:str, qoi_name2:str, samples_id=None, axis=None, plot_std=True, show_reference_point=False):
     """
     Plot the Pareto front of the fitness values.
 
@@ -162,6 +162,10 @@ def plot_pareto_front(df_output:pd.DataFrame, qoi_name1:str, qoi_name2:str, samp
         qoi_name2: Name of the QoI to plot in y axis
         samples_id: List of sample IDs to highlight (optional).
         axis: Matplotlib axis to plot on (optional).
+        plot_std: Draw error bars from the noise standard deviation (optional, default True).
+        show_reference_point: Draw the ideal point (1, 1) of noise-free observed data
+            (optional, default False). Set to False for noisy observations, where this point is
+            not attainable.
 
     Returns:
         Matplotlib figure and axis if axis is None, otherwise draw in the given axis.
@@ -205,10 +209,11 @@ def plot_pareto_front(df_output:pd.DataFrame, qoi_name1:str, qoi_name2:str, samp
                 zorder=1
             )
 
-    # Plot the Reference Point ( the fitness of the Observed Data is (1,1) after normalization)
-    ax.axvline(x=1, color='red', linestyle='--', alpha=0.3)
-    ax.axhline(y=1, color='red', linestyle='--', alpha=0.3)
-    ax.scatter(1, 1, color='red', marker='*', s=200, label='Obs. Data', zorder=3)
+    # Plot the Reference Point (the fitness of noise-free observed data is (1,1) after normalization)
+    if show_reference_point:
+        ax.axvline(x=1, color='red', linestyle='--', alpha=0.3)
+        ax.axhline(y=1, color='red', linestyle='--', alpha=0.3)
+        ax.scatter(1, 1, color='red', marker='*', s=200, label='Obs. Data', zorder=3)
 
     # Combine all legend handles and labels
     handles, labels = ax.get_legend_handles_labels()
@@ -312,8 +317,8 @@ def plot_qoi_param(df_ObsData:pd.DataFrame, df_output:pd.DataFrame, samples_id:l
     if plot_residuals:
         ax.set_ylabel(f"Residual of {y_var}")
     else:
-        ax.set_xlabel(x_var)
-    ax.set_ylabel(y_var)
+        ax.set_ylabel(y_var)
+    ax.set_xlabel(x_var)
     ax.legend()
     
     if axis is None:
