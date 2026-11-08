@@ -53,7 +53,7 @@ def get_mcse_legend_handles() -> list[Patch]:
         its color and label.
     """
     return [
-        Patch(facecolor='green', alpha=0.3, label='Excelent (<1%)'),
+        Patch(facecolor='green', alpha=0.3, label='Excellent (<1%)'),
         Patch(facecolor='blue', alpha=0.3, label='Acceptable ([1%,5%])'),
         Patch(facecolor='yellow', alpha=0.3, label='Cautionary ([5%,10%])'),
         Patch(facecolor='red', alpha=0.3, label='Unreliable (>10%)')
